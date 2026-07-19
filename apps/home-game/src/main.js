@@ -1,6 +1,16 @@
 
 // src/main.js
-const GAME_BUILD = 153;
+import { onAuthStateChanged } from "firebase/auth";
+import {
+  addDoc, collection, doc, getDocs, limit, onSnapshot, orderBy, query, serverTimestamp, setDoc, where,
+} from "firebase/firestore";
+import {
+  onChildAdded, onDisconnect, onValue, push, ref, remove, set,
+} from "firebase/database";
+import { auth, db, firebaseReady, rtdb } from "./firebase.js";
+import { FIRESTORE, HOST_ROLE, roleFor, rtdbPaths } from "./game/schema.js";
+
+const GAME_BUILD = 154;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -317,9 +327,10 @@ const state = {
 
 net: {
   enabled: false,
-  ws: null,
-  playerId: null,   // assigned by server, e.g. "p1"
-  isHost: false,    // optional later
+  uid: null,        // Firebase Auth uid, once signed in
+  worldId: null,
+  playerId: null,   // "p1" (host/Scott) or "p2" (partner/Cristina), derived from role
+  isHost: false,
   lastSnapshotAt: 0,
   suppressWorldOps: false
 },
@@ -569,18 +580,16 @@ function flushBufferedLogs() {
   state.net._bufferedLogs = state.net._bufferedLogs || [];
   state.net._pendingLogTexts = state.net._pendingLogTexts || [];
 
-  const ws = state.net.ws;
-  const canSend = !!(state.net.enabled && ws && ws.readyState === 1);
-  if (!canSend) return;
+  if (!netCanSend()) return;
 
-  // Send oldest -> newest so server history is chronological
+  // Send oldest -> newest so history is chronological
   while (state.net._bufferedLogs.length) {
     const line = state.net._bufferedLogs.shift();
 
     // mark as "already shown locally" so echo doesn't duplicate
     state.net._pendingLogTexts.push(line);
 
-    ws.send(JSON.stringify({ type: "input", payload: { type: "log", text: line } }));
+    sendNetInput({ type: "log", text: line });
   }
 }
 
@@ -614,11 +623,7 @@ function seedServerWithLocalLogIfNeeded(serverIncomingCount) {
     return;
   }
 
-  const ws = state.net.ws;
-  if (!ws || ws.readyState !== 1) {
-    // console.log("[NET][LOG] seed skipped: ws not open");
-    return;
-  }
+  if (!netCanSend()) return;
 
   state.net._pendingLogTexts = state.net._pendingLogTexts || [];
 
@@ -633,7 +638,7 @@ function seedServerWithLocalLogIfNeeded(serverIncomingCount) {
     // mark as already shown locally so echo doesn't duplicate
     state.net._pendingLogTexts.push(line);
 
-    ws.send(JSON.stringify({ type: "input", payload: { type: "log", text: line } }));
+    sendNetInput({ type: "log", text: line });
   }
 
   // console.log("[NET][LOG] seeded server log from host local history:", state.actionLog.length);
@@ -647,10 +652,9 @@ function logAction(text) {
   state.net = state.net || {};
   state.net._pendingLogTexts = state.net._pendingLogTexts || [];
 
-  const ws = state.net.ws;
-  const canSend = !!(state.net.enabled && ws && ws.readyState === 1);
+  const canSend = netCanSend();
 
-  // ONLINE: show locally immediately + send ONCE to server
+  // ONLINE: show locally immediately + send ONCE to Firestore
   if (canSend && !state.net.suppressLogs) {
     state.actionLog.unshift(line);
     if (state.actionLog.length > 200) state.actionLog.pop();
@@ -658,7 +662,7 @@ function logAction(text) {
     state.net._pendingLogTexts.push(line);
     // console.log("[NET][LOG] send log ->", line);
 
-    ws.send(JSON.stringify({ type: "input", payload: { type: "log", text: line } }));
+    sendNetInput({ type: "log", text: line });
 
     // ✅ FORCE UI UPDATE
     if (typeof renderActivityLogDOM === "function") renderActivityLogDOM();
@@ -670,10 +674,10 @@ function logAction(text) {
   state.actionLog.unshift(line);
   if (state.actionLog.length > 200) state.actionLog.pop();
 
-  // If we're "online-enabled" but the socket isn't ready yet,
-  // buffer it so it gets sent once WS connects (keeps both clients in sync).
+  // If we're "online-enabled" but not connected yet (auth still resolving),
+  // buffer it so it gets sent once connectOnline() finishes (keeps both clients in sync).
   state.net._bufferedLogs = state.net._bufferedLogs || [];
-  if (state.net.enabled && (!ws || ws.readyState !== 1) && !state.net.suppressLogs) {
+  if (state.net.enabled && !canSend && !state.net.suppressLogs) {
     state.net._bufferedLogs.push(line);
     if (state.net._bufferedLogs.length > 500) state.net._bufferedLogs.shift();
   }
@@ -822,6 +826,10 @@ function saveCurrentWorldSoon() {
     const payload = worldToPayload(state.world, id, state.world.seed);
     saveWorldPayload(id, payload);
 	saveInventoriesForWorld(id);
+
+    // Keep the shared Firestore copy in sync a few hundred ms behind the
+    // local save — only the host publishes (see publishWorld()'s comment).
+    if (typeof publishWorld === "function") publishWorld();
   }, 350);
 }
 
@@ -928,548 +936,344 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-// Stop reconnect attempts when leaving the page
-window.addEventListener("beforeunload", () => {
-  if (state.net) state.net._noReconnect = true;
-  if (state.net?._reconnectTimer) clearTimeout(state.net._reconnectTimer);
-});
+// Presence cleanup is handled by RTDB onDisconnect() (see connectOnline),
+// which fires even on a hard crash/network drop, not just a clean unload.
 
-// -------------------------------------------------------------------------- CO-OP Helpers ----
-function connectOnline(url) {
-  // Ensure net state exists
+// -------------------------------------------------------------------------- CO-OP Helpers (Firebase) ----
+// Replaces the old WebSocket protocol (hello/welcome/snapshot/world_set/
+// world_op/move/log/chat/time_sync/interaction_*/trade_*) — see
+// src/game/schema.js for the path/shape contract each piece below maps to.
+// There's no more "room" or server-assigned playerId: role is derived from
+// whoever is signed in (shared Firebase Auth session with apps/couples-app).
+
+let _worldUnsub = null, _logUnsub = null, _chatUnsub = null;
+let _playersUnsub = null, _opsUnsub = null, _timeUnsub = null, _interactionUnsub = null, _presenceUnsub = null;
+let _posWriteTimer = null;
+let _appliedWorldVersion = null;
+
+function netCanSend() {
+  return !!(state.net?.enabled && state.net?.uid && state.net?.worldId && firebaseReady);
+}
+
+function connectOnline() {
   state.net = state.net || {};
 
-  // Cancel any pending reconnect timer (we're connecting now)
-  if (state.net._reconnectTimer) {
-    clearTimeout(state.net._reconnectTimer);
-    state.net._reconnectTimer = null;
+  if (!firebaseReady) {
+    console.warn("[NET] Firebase not configured; playing offline.");
+    return;
   }
 
-  // Prevent stacking sockets if connectOnline gets called multiple times
-  if (state.net.ws) {
-    state.net._noReconnect = true; // suppress close-triggered reconnect from old socket
-    try { state.net.ws.close(); } catch (_) {}
-    state.net._noReconnect = false;
-  }
-
-  state.net.enabled = true;
-
-  // --- Log sync state ---
+  // --- Log sync state (unchanged from before) ---
   state.net.suppressLogs = false;
-  state.net.lastLogSeq = state.net.lastLogSeq || 0;
-  state.net._lastServerLogCount = state.net._lastServerLogCount || 0;
-
-  // Buffers (in case logAction happens before ws is open)
   state.net._bufferedLogs = state.net._bufferedLogs || [];
   state.net._pendingLogTexts = state.net._pendingLogTexts || [];
 
-  const ws = new WebSocket(url);
-state.net.ws = ws;
+  onAuthStateChanged(auth, (user) => {
+    // Tear down any listeners from a previous user before (re)subscribing.
+    for (const unsub of [_worldUnsub, _logUnsub, _chatUnsub, _playersUnsub, _opsUnsub, _timeUnsub, _interactionUnsub, _presenceUnsub]) {
+      if (typeof unsub === "function") unsub();
+    }
+    _worldUnsub = _logUnsub = _chatUnsub = _playersUnsub = _opsUnsub = _timeUnsub = _interactionUnsub = null;
 
-const params = new URLSearchParams(location.search);
-const room = params.get("room") || "scott-cristina"; // default room
-const want = params.get("want") || (loadSavedProfile?.() || null);
-
-ws.onopen = () => {
-  // console.log("[NET] connected:", url);
-
-  // ✅ Send HELLO only after socket is actually open
-  sendNet({ type: "hello", room, want });
-
-  // Flush any log lines created before ws was ready
-  if (typeof flushBufferedLogs === "function") flushBufferedLogs();
-
-  updateOnlineIndicator();
-};
-
-  ws.onmessage = (ev) => {
-    let msg = null;
-
-    // Parse
-    try {
-      msg = JSON.parse(ev.data);
-    } catch (e) {
-      console.warn("[NET][RECV] non-JSON message:", ev.data);
+    if (!user) {
+      state.net.enabled = false;
+      state.net.uid = null;
+      updateOnlineIndicator();
       return;
     }
 
-    // if (msg.type !== "snapshot" && msg.type !== "time_sync") {
-    //   console.warn("[NET][RECV]", msg.type, msg);
-    // }
+    const role = roleFor(user);
+    state.net.uid = user.uid;
+    state.net.playerId = role === HOST_ROLE ? "p1" : role === PARTNER_ROLE ? "p2" : null;
+    state.net.isHost = role === HOST_ROLE;
+    state.activePlayer = state.net.playerId === "p2" ? 1 : 0;
+    state.net.enabled = true;
 
-    // Optional debug logging (quiet in normal play)
-const NET_DEBUG = false;
-
-if (NET_DEBUG) {
-  try {
-    if (msg.type === "snapshot") {
-      // console.log("[NET][RECV] snapshot", {
-      //   hasState: !!msg.state,
-      //   players: Array.isArray(msg.state?.players) ? msg.state.players.length : 0,
-      //   ops: Array.isArray(msg.ops) ? msg.ops.length : 0,
-      //   logs: Array.isArray(msg.logs) ? msg.logs.length : 0
-      // });
-    } else if (msg.type === "log_init") {
-      // console.log("[NET][RECV] log_init", {
-      //   seq: msg.seq,
-      //   entries: Array.isArray(msg.entries) ? msg.entries.length : 0
-      // });
-    } else if (msg.type === "log_entry") {
-      // console.log("[NET][RECV] log_entry", msg.entry);
-    }
-    // No default catch-all spam
-  } catch (traceErr) {
-    console.error("[NET][RECV] trace failed:", traceErr);
-  }
-}
-
-    // REAL HANDLER (crash-proof)
-    try {
-      // ------------------------
-      // WELCOME
-      // ------------------------
-      if (msg.type === "welcome") {
-        state.net.playerId = msg.playerId;
-        state.net.isHost = (msg.playerId === "p1");
-        state.activePlayer = (msg.playerId === "p2") ? 1 : 0;
-
-        // console.log("[NET] welcome:", {
-        //   playerId: state.net.playerId,
-        //   isHost: state.net.isHost,
-        //   activePlayer: state.activePlayer
-        // });
-
-        // If log_init arrived before welcome, we can seed now (host only, server empty only)
-        const serverCount = state.net._lastServerLogCount || 0;
-        // console.log("[NET][LOG] welcome -> host?", state.net.isHost, "serverCount?", serverCount, "localCount?", (state.actionLog ? state.actionLog.length : 0));
-        if (typeof seedServerWithLocalLogIfNeeded === "function") {
-          seedServerWithLocalLogIfNeeded(serverCount);
-        }
-
-// Host must publish the world once, otherwise server ignores world_op forever.
-if (state.net.isHost && !state.net._sentWorldSet) {
-  try {
     if (typeof ensureAtLeastOneWorld === "function") ensureAtLeastOneWorld();
-
     let wid = (typeof getActiveWorldId === "function") ? getActiveWorldId() : null;
     if (!wid) wid = 1;
+    state.net.worldId = wid;
 
-    // Prefer saved payload (includes seed/id)
-    let payload = (typeof loadWorldPayload === "function") ? loadWorldPayload(wid) : null;
-
-    // Fallback: build payload from current in-memory world
-    if (!payload && typeof worldToPayload === "function") {
-      const seed = (typeof makeSeed === "function") ? makeSeed() : ((Math.random() * 2147483647) | 0);
-      payload = worldToPayload(state.world, wid, seed);
-    }
-
-    if (payload && typeof sendNet === "function") {
-      // console.log("[NET] host sending world_set:", wid);
-      state.net._sentWorldSet = true;
-      sendNet({ type: "world_set", worldId: wid, world: payload });
-    } else {
-      console.warn("[NET] host could not send world_set (no payload)");
-    }
-  } catch (e) {
-    console.error("[NET] host world_set failed:", e);
-  }
-}
-// ✅ IMPORTANT: host must ALSO request the server world.
-// If Render already had a world, server will ignore world_set (first-writer-wins),
-// and without this request host will stay on its local world forever.
-if (state.net.isHost && typeof sendNet === "function") {
-  // console.log("[NET] host requesting server world (sync/override check)");
-  sendNet({ type: "world_request" });
-}
-
-        // Non-host requests current world
-        if (!state.net.isHost && typeof sendNet === "function") {
-          // console.log("[NET] non-host requesting server world");
-          sendNet({ type: "world_request" });
+    // ---- World: Firestore doc is authoritative; localStorage is the offline cache ----
+    _appliedWorldVersion = null;
+    const worldRef = doc(db, FIRESTORE.worlds, String(wid));
+    _worldUnsub = onSnapshot(worldRef, async (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.version === _appliedWorldVersion) return; // our own write echoing back
+        _appliedWorldVersion = data.version;
+        try {
+          const payload = JSON.parse(data.worldJson);
+          if (typeof setActiveWorldId === "function") setActiveWorldId(wid);
+          if (typeof saveWorldPayload === "function") saveWorldPayload(wid, payload);
+          if (typeof payloadToWorld === "function") {
+            state.world = payloadToWorld(payload);
+            enableOverworldObjectsProxy();
+          }
+          if (Array.isArray(state.players)) for (const pl of state.players) pl.path = [];
+          if (typeof revealAroundPlayers === "function") revealAroundPlayers();
+        } catch (e) {
+          console.error("[NET] failed to apply world snapshot:", e);
         }
-
-        return;
+      } else if (state.net.isHost) {
+        // Nothing published yet — host seeds it from local state.
+        publishWorld();
       }
+    });
 
-      // ------------------------
-      // LOG INIT (full sync)
-      // ------------------------
-      if (msg.type === "log_init") {
-        state.net.lastLogSeq = (msg.seq | 0);
-        state.net._lastServerLogCount = Array.isArray(msg.entries) ? msg.entries.length : 0;
-
-        // Convert server entries -> lines newest-first (to match your UI list style)
-        const incoming = Array.isArray(msg.entries)
-          ? msg.entries
-              .map(e => (e && typeof e === "object") ? e.text : e)
-              .filter(Boolean)
-              .map(String)
-              .reverse()
-          : [];
-
-        // Merge instead of clobber (keeps any buffered local lines)
+    // ---- Activity log: last 200, ordered newest-first, live-append after ----
+    (async () => {
+      try {
+        const q = query(collection(db, FIRESTORE.log), where("worldId", "==", String(wid)), orderBy("at", "desc"), limit(200));
+        const initial = await getDocs(q);
+        const incoming = initial.docs.map((d) => d.data()?.text).filter(Boolean).map(String);
         if (!Array.isArray(state.actionLog) || state.actionLog.length === 0) {
           state.actionLog = incoming;
         } else {
           const have = new Set(state.actionLog);
-          for (let i = incoming.length - 1; i >= 0; i--) {
-            const line = incoming[i];
-            if (!have.has(line)) {
-              state.actionLog.push(line);
-              have.add(line);
-            }
-          }
+          for (const line of incoming) if (!have.has(line)) state.actionLog.push(line);
         }
-
-        state.logScroll = 0;
-
-        // Try seeding after we know server count (host-only, empty-only)
-        if (typeof seedServerWithLocalLogIfNeeded === "function") {
-          seedServerWithLocalLogIfNeeded(state.net._lastServerLogCount);
-        }
-
         if (typeof flushBufferedLogs === "function") flushBufferedLogs();
         if (typeof renderActivityLogDOM === "function") renderActivityLogDOM();
+        if (state.net.isHost && typeof seedServerWithLocalLogIfNeeded === "function") {
+          seedServerWithLocalLogIfNeeded(initial.docs.length);
+        }
 
-        // console.log("[NET][LOG] log_init applied. localCount =", (state.actionLog ? state.actionLog.length : 0));
-        return;
-      }
-
-      // ------------------------
-      // LOG ENTRY (real-time)
-      // ------------------------
-      if (msg.type === "log_entry") {
-        if (typeof applyNetLogEntry === "function") {
-          applyNetLogEntry(msg.entry);
-        } else {
-          // fallback: append text if your helper isn't present
-          const t = (msg.entry && typeof msg.entry === "object") ? msg.entry.text : msg.entry;
-          if (t) {
-            state.actionLog = state.actionLog || [];
-            state.actionLog.unshift(String(t));
-            if (state.actionLog.length > 200) state.actionLog.length = 200;
+        let first = true;
+        _logUnsub = onSnapshot(q, (snap) => {
+          if (first) { first = false; return; } // already merged above
+          for (const change of snap.docChanges()) {
+            if (change.type === "added") applyNetLogEntry({ text: change.doc.data()?.text });
           }
-        }
-
-        if (typeof renderActivityLogDOM === "function") renderActivityLogDOM();
-        return;
+        });
+      } catch (e) {
+        console.error("[NET] log subscribe failed:", e);
       }
+    })();
 
-      // ------------------------
-      // WORLD PUSH (full)
-      // ------------------------
-      if (msg.type === "world" || msg.type === "world_set") {
-        if (typeof msg.worldId === "number" && msg.world) {
-          if (typeof setActiveWorldId === "function") setActiveWorldId(msg.worldId);
-          if (typeof saveWorldPayload === "function") saveWorldPayload(msg.worldId, msg.world);
-
-          if (typeof payloadToWorld === "function") {
-            state.world = payloadToWorld(msg.world);
-			// ✅ CO-OP: world push replaced arrays, so re-proxy overworld objects
-enableOverworldObjectsProxy();
-
-          } else {
-            console.warn("[NET] payloadToWorld missing; cannot apply world");
-          }
-
-          // safety: clear paths so nobody keeps walking into old terrain
-          if (Array.isArray(state.players)) {
-            for (const pl of state.players) pl.path = [];
-          }
-
-          if (typeof revealAroundPlayers === "function") revealAroundPlayers();
-
-          // console.log("[NET] world applied:", msg.worldId);
-        } else {
-          console.warn("[NET] world message invalid shape:", msg);
+    // ---- Chat: live listener only (no history replay needed on join) ----
+    {
+      const chatQ = query(collection(db, FIRESTORE.chat), where("worldId", "==", String(wid)), orderBy("at", "desc"), limit(50));
+      let firstChat = true;
+      _chatUnsub = onSnapshot(chatQ, (snap) => {
+        if (firstChat) { firstChat = false; return; } // don't replay chat history as new bubbles
+        for (const change of snap.docChanges()) {
+          if (change.type !== "added") continue;
+          const data = change.doc.data();
+          if (data.by === state.net.uid) continue; // our own message, already shown optimistically
+          // Only ever one other person — whoever it is, they're "not me".
+          const fromIndex = (state.activePlayer | 0) === 0 ? 1 : 0;
+          applyChatMessage(fromIndex, data.text, {});
         }
-        return;
-      }
-
-      // ------------------------
-      // SNAPSHOT (players + reliability piggyback)
-      // ------------------------
-      if (msg.type === "snapshot") {
-        // players/state
-        if (msg.state && Array.isArray(msg.state.players) && typeof applyServerSnapshot === "function") {
-          applyServerSnapshot(msg.state);
-        }
-
-        // world ops
-        if (Array.isArray(msg.ops) && msg.ops.length && typeof applyWorldOp === "function") {
-          for (const op of msg.ops) applyWorldOp(op);
-        }
-
-        // logs piggyback (reliability)
-        if (Array.isArray(msg.logs) && msg.logs.length) {
-          if (typeof applyNetLogEntry === "function") {
-            for (const e of msg.logs) applyNetLogEntry(e);
-          } else {
-            // fallback
-            state.actionLog = state.actionLog || [];
-            for (const e of msg.logs) {
-              const t = (e && typeof e === "object") ? e.text : e;
-              if (t) state.actionLog.unshift(String(t));
-            }
-            if (state.actionLog.length > 200) state.actionLog.length = 200;
-          }
-          if (typeof renderActivityLogDOM === "function") renderActivityLogDOM();
-        }
-
-        // connected slots (which player indices are in the room)
-        if (Array.isArray(msg.connectedSlots)) {
-          state.net.connectedSlots = msg.connectedSlots;
-          updateOnlineIndicator();
-        }
-
-        return;
-      }
-
-      // ------------------------
-      // WORLD OP (real-time)
-      // ------------------------
-      if (msg.type === "world_op") {
-        if (typeof applyWorldOp === "function") applyWorldOp(msg.op);
-        return;
-      }
-
-      // ------------------------
-      // CHAT (real-time)
-      // ------------------------
-      if (msg.type === "chat") {
-        const pid = msg.playerId;
-        const fromIndex = (pid === "p2") ? 1 : 0;
-
-        const text = String(msg.text ?? "").trim();
-        if (!text) return;
-
-        // Dedupe: swallow the echo of our own message id
-        const id = String(msg.id ?? "");
-        state.net._pendingChatIds = state.net._pendingChatIds || [];
-        if (id) {
-          const k = state.net._pendingChatIds.indexOf(id);
-          if (k !== -1) {
-            state.net._pendingChatIds.splice(k, 1);
-            return;
-          }
-        }
-
-        // console.warn("[CHAT] received from", pid, "->", text);
-        applyChatMessage(fromIndex, text, { t: msg.t });
-        return;
-      }
-
-      // ------------------------
-      // INTERACTION REQUEST (other player sends us a request)
-      // ------------------------
-      if (msg.type === "interaction_request") {
-        // Ignore our own echo (we already set it locally when we sent it)
-        if (msg.fromIndex === (state.activePlayer | 0)) return;
-        if (!state.interactionRequest) {
-          state.interactionRequest = { type: msg.reqType, fromIndex: msg.fromIndex, toIndex: msg.toIndex, createdAt: Date.now() };
-        }
-        return;
-      }
-
-      // ------------------------
-      // INTERACTION RESPOND (accept/decline arrived at requester's tab)
-      // ------------------------
-      if (msg.type === "interaction_respond") {
-        // Ignore our own echo (we're the responder — already handled locally)
-        if (msg.toIndex === (state.activePlayer | 0)) return;
-        if (msg.accepted && msg.reqType === "Trade") {
-          openTradeUI(msg.fromIndex, msg.toIndex);
-        }
-        state.interactionRequest = null;
-        return;
-      }
-
-      // ------------------------
-      // TRADE INVENTORY SYNC (other player shares their inventory on trade open)
-      // ------------------------
-      if (msg.type === "trade_inv") {
-        // Ignore own echo
-        if (msg.playerIdx === (state.activePlayer | 0)) return;
-        if (typeof msg.playerIdx === "number" && Array.isArray(msg.inv)) {
-          state.inventories[msg.playerIdx] = msg.inv;
-        }
-        return;
-      }
-
-      // ------------------------
-      // TRADE STATE SYNC (offer / confirm changes)
-      // ------------------------
-      if (msg.type === "trade_state") {
-        if (msg.senderIdx === (state.activePlayer | 0)) return; // own echo
-        if (!state.trade?.open) return;
-        const ts = state.trade;
-        if (msg.senderIdx === ts.p0idx) {
-          ts.p0offer = Array.isArray(msg.offer) ? msg.offer : [];
-          ts.confirm0 = !!msg.confirmMe;
-        } else if (msg.senderIdx === ts.p1idx) {
-          ts.p1offer = Array.isArray(msg.offer) ? msg.offer : [];
-          ts.confirm1 = !!msg.confirmMe;
-        }
-        // Sync their inventory so we show accurate items on their side
-        if (typeof msg.senderIdx === "number" && Array.isArray(msg.inv)) {
-          state.inventories[msg.senderIdx] = msg.inv;
-        }
-        // Both confirmed on their ends — execute here too
-        if (ts.confirm0 && ts.confirm1) executeTrade();
-        return;
-      }
-
-      // ------------------------
-      // TRADE CANCEL
-      // ------------------------
-      if (msg.type === "trade_cancel") {
-        if (state.trade?.open) {
-          state.trade._netCancel = true; // prevent re-broadcasting cancel
-          closeTradeUI(true);
-        }
-        return;
-      }
-
-      // ------------------------
-      // TIME SYNC (host -> non-host)
-      // ------------------------
-      if (msg.type === "time_sync") {
-        if (!state.net?.isHost && state.time) {
-          const t = state.time;
-          const wasDay = t.isDay;
-          if (typeof msg.phaseT === "number") t.phaseT = msg.phaseT;
-          if (typeof msg.day   === "number") t.day   = msg.day;
-          if (typeof msg.t     === "number") t.t     = msg.t;
-          t.isDay = t.phaseT < DAYLIGHT_SECONDS;
-          if (t.isDay !== wasDay) playSound(t.isDay ? "day" : "night");
-        }
-        return;
-      }
-
-      // ------------------------
-      // SERVER DEBUG
-      // ------------------------
-      if (msg.type === "world_applied") {
-        // console.log("[NET] world applied:", msg.rev);
-        return;
-      }
-
-      // console.log("[NET] unhandled message type:", msg.type);
-    } catch (err) {
-      console.error("[NET] onmessage handler crashed:", err, "raw:", ev.data);
+      });
     }
 
-  };
+    // ---- Realtime Database: players, world ops, time, interaction, presence ----
+    _playersUnsub = onValue(ref(rtdb, rtdbPaths.players(wid)), (snap) => {
+      applyPlayersSnapshot(snap.val());
+    });
 
-ws.onclose = (ev) => {
-  // console.log("[NET] disconnected", {
-  //   code: ev?.code,
-  //   reason: ev?.reason,
-  //   wasClean: ev?.wasClean
-  // });
-  state.net.enabled = false;
-  state.net.ws = null;
-  state.net.playerId = null;
-  state.net.isHost = false;
-  state.net.connectedSlots = [];
-  updateOnlineIndicator();
+    _opsUnsub = onChildAdded(ref(rtdb, rtdbPaths.worldOps(wid)), (snap) => {
+      const data = snap.val();
+      if (!data || data.by === state.net.uid) return; // don't re-apply our own op
+      applyWorldOp(data.op);
+      remove(snap.ref); // consumed — keep the list from growing unbounded
+    });
 
-  // Auto-reconnect unless page is unloading
-  if (!state.net._noReconnect) {
-    console.warn("[NET] disconnected — reconnecting in 3s...");
-    state.net._reconnectTimer = setTimeout(() => {
-      if (state.net._noReconnect) return;
-      console.warn("[NET] reconnecting to", url);
-      // Reset host's world-set flag so it re-publishes after handshake
-      state.net._sentWorldSet = false;
-      connectOnline(url);
-    }, 3000);
-  }
-};
+    _timeUnsub = onValue(ref(rtdb, rtdbPaths.time(wid)), (snap) => {
+      const data = snap.val();
+      if (!data || state.net.isHost || !state.time) return;
+      const t = state.time;
+      const wasDay = t.isDay;
+      if (typeof data.phaseT === "number") t.phaseT = data.phaseT;
+      if (typeof data.day === "number") t.day = data.day;
+      if (typeof data.t === "number") t.t = data.t;
+      t.isDay = t.phaseT < DAYLIGHT_SECONDS;
+      if (t.isDay !== wasDay) playSound(t.isDay ? "day" : "night");
+    });
+
+    _interactionUnsub = onValue(ref(rtdb, rtdbPaths.interaction(wid)), (snap) => {
+      const msg = snap.val();
+      if (!msg || msg.by === state.net.uid) return; // ignore our own writes
+      applyInteractionMessage(msg);
+    });
+
+    const presenceRef = ref(rtdb, rtdbPaths.presence(wid, user.uid));
+    set(presenceRef, { online: true, name: user.displayName || user.email || "" });
+    onDisconnect(presenceRef).remove();
+    _presenceUnsub = onValue(ref(rtdb, `game/${wid}/presence`), (snap) => {
+      const val = snap.val() || {};
+      state.net.presenceUids = Object.keys(val);
+      updateOnlineIndicator();
+    });
+    onDisconnect(ref(rtdb, rtdbPaths.player(wid, user.uid))).remove();
+
+    updateOnlineIndicator();
+  });
 }
 
-function sendNetInput(payload) {
-  const ws = state.net.ws;
-  if (!state.net.enabled || !ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify({ type: "input", payload }));
-}
-
-function sendNet(obj) {
-  const ws = state.net.ws;
-  if (!state.net.enabled || !ws || ws.readyState !== 1) return;
-  ws.send(JSON.stringify(obj));
-  
-  if (!state.net.enabled || !ws || ws.readyState !== 1) {
-  console.warn("[NET] sendNet dropped (ws not open)", obj);
-  return;
-}
-}
-
-function applyServerSnapshot(s) {
-  // Step 1 minimal: players only.
-  if (!s || !Array.isArray(s.players)) return;
-
+function applyPlayersSnapshot(val) {
+  if (!val) return;
+  const localIdx = state.activePlayer | 0;
   let anyMoved = false;
 
-  const localIdx = state.activePlayer | 0;
-  const inInstance = (state.mode !== "overworld"); // interior/dungeon on THIS client
+  for (const [uid, sp] of Object.entries(val)) {
+    if (!sp || typeof sp.x !== "number" || typeof sp.y !== "number") continue;
+    const idx = uid === state.net.uid ? localIdx : (localIdx === 0 ? 1 : 0);
 
-  for (let i = 0; i < state.players.length && i < s.players.length; i++) {
-    // ✅ If THIS client is inside an interior/dungeon, do NOT let server snap our local player.
-    // (Otherwise you rubber-band back to the door every snapshot.)
-    if (inInstance && i === localIdx) continue;
+    if (idx === localIdx) {
+      // This is our own write echoing back — just release the input throttle.
+      const pm = state.net._pendingMove;
+      if (pm && sp.x === pm.expectedX && sp.y === pm.expectedY) state.net._pendingMove = null;
+      continue;
+    }
 
-    const sp = s.players[i];
-    const lp = state.players[i];
-
-    // ensure per-player stamina exists (relative to the player, not global)
+    const lp = state.players[idx];
+    if (!lp) continue;
     if (lp.stamina === undefined || lp.stamina === null) lp.stamina = STAMINA_MAX;
 
     const oldX = lp.x, oldY = lp.y;
-    let newX = sp.x, newY = sp.y;
-
-    // ✅ devtp teleport guard: if we just teleported, hold our position until the
-    // server catches up to the teleport target. Prevents snapshots from snapping us back.
-    const dtp = state.net._devtpTarget;
-    if (dtp && i === dtp.playerIdx) {
-      newX = dtp.x;
-      newY = dtp.y;
-      // Once server confirms the teleport position, release the lock
-      if (sp.x === dtp.x && sp.y === dtp.y) {
-        state.net._devtpTarget = null;
-      }
-    }
-
-    if (oldX !== newX || oldY !== newY) {
+    if (oldX !== sp.x || oldY !== sp.y) {
       anyMoved = true;
-
-      // Treat each snapshot position change as movement cost.
-      // (Your server currently moves 1 tile per input, so this is consistent.)
-      const tilesMoved = Math.abs(newX - oldX) + Math.abs(newY - oldY);
+      const tilesMoved = Math.abs(sp.x - oldX) + Math.abs(sp.y - oldY);
       if (tilesMoved > 0) {
         lp.resting = false;
         lp.stamina = Math.max(0, lp.stamina - (STAMINA_COST_PER_TILE * tilesMoved));
       }
     }
+    lp.x = sp.x; lp.y = sp.y; lp.fx = sp.x; lp.fy = sp.y; lp.path = [];
+  }
 
-    lp.x = newX; lp.y = newY;
-    lp.fx = newX; lp.fy = newY;
-    lp.path = []; // server owns movement for now
+  if (anyMoved && state.mode === "overworld" && typeof revealAroundPlayers === "function") revealAroundPlayers();
+}
 
-    // Clear pending-move guard if the server confirmed the expected position
-    if (i === localIdx) {
-      const pm = state.net._pendingMove;
-      if (pm && sp.x === pm.expectedX && sp.y === pm.expectedY) {
-        state.net._pendingMove = null;
-      }
+function writePlayerPositionThrottled() {
+  if (_posWriteTimer || !netCanSend()) return;
+  _posWriteTimer = setTimeout(() => {
+    _posWriteTimer = null;
+    if (!netCanSend()) return;
+    const p = state.players[state.activePlayer | 0];
+    set(ref(rtdb, rtdbPaths.player(state.net.worldId, state.net.uid)), {
+      x: p.x, y: p.y, mode: state.mode, updatedAt: Date.now(),
+    });
+  }, 90); // was ~110ms server round-trip cadence; close enough to feel the same
+}
+
+function movePlayerOnline(dx, dy) {
+  const p = state.players[state.activePlayer | 0];
+  if (!p) return;
+  const nx = Math.max(0, Math.min(WORLD_W - 1, (p.x + dx) | 0));
+  const ny = Math.max(0, Math.min(WORLD_H - 1, (p.y + dy) | 0));
+  const tilesMoved = Math.abs(nx - p.x) + Math.abs(ny - p.y);
+  if (tilesMoved > 0) {
+    p.resting = false;
+    p.stamina = Math.max(0, (p.stamina ?? STAMINA_MAX) - STAMINA_COST_PER_TILE * tilesMoved);
+  }
+  p.x = nx; p.y = ny; p.fx = nx; p.fy = ny; p.path = [];
+  if (state.mode === "overworld" && typeof revealAroundPlayers === "function") revealAroundPlayers();
+  writePlayerPositionThrottled();
+}
+
+// Host-only: push the current in-memory world to Firestore. Called once on
+// first connect (if nothing's published yet) and again whenever
+// saveCurrentWorldSoon() fires locally, so Firestore stays a few hundred ms
+// behind the host's own local save at most.
+function publishWorld() {
+  if (!state.net?.isHost || !state.net?.worldId || !firebaseReady) return;
+  const wid = state.net.worldId;
+  const payload = worldToPayload(state.world, wid, state.world.seed);
+  const version = Date.now();
+  _appliedWorldVersion = version;
+  setDoc(doc(db, FIRESTORE.worlds, String(wid)), {
+    hostUid: state.net.uid,
+    worldJson: JSON.stringify(payload),
+    version,
+    updatedAt: serverTimestamp(),
+  }).catch((e) => console.error("[NET] publishWorld failed:", e));
+}
+
+function publishWorldOp(op) {
+  if (!netCanSend() || state.net.suppressWorldOps) return;
+  push(ref(rtdb, rtdbPaths.worldOps(state.net.worldId)), { op, by: state.net.uid, at: Date.now() });
+}
+
+function publishLogEntry(text) {
+  if (!netCanSend()) return;
+  addDoc(collection(db, FIRESTORE.log), {
+    worldId: String(state.net.worldId), text: String(text ?? ""), by: state.net.uid, at: serverTimestamp(),
+  }).catch((e) => console.error("[NET] publishLogEntry failed:", e));
+}
+
+function publishChatMessage(text) {
+  if (!netCanSend()) return;
+  addDoc(collection(db, FIRESTORE.chat), {
+    worldId: String(state.net.worldId), text, by: state.net.uid, at: serverTimestamp(),
+  }).catch((e) => console.error("[NET] publishChatMessage failed:", e));
+}
+
+function publishTime(phaseT, day, t) {
+  if (!netCanSend()) return;
+  set(ref(rtdb, rtdbPaths.time(state.net.worldId)), { phaseT, day, t, updatedAt: Date.now() });
+}
+
+function publishInteraction(msg) {
+  if (!netCanSend()) return;
+  set(ref(rtdb, rtdbPaths.interaction(state.net.worldId)), { ...msg, by: state.net.uid, at: Date.now() });
+}
+
+function applyInteractionMessage(msg) {
+  const myIdx = state.activePlayer | 0;
+  if (msg.kind === "interaction_request") {
+    if (msg.fromIndex === myIdx) return;
+    if (!state.interactionRequest) {
+      state.interactionRequest = { type: msg.reqType, fromIndex: msg.fromIndex, toIndex: msg.toIndex, createdAt: Date.now() };
     }
+  } else if (msg.kind === "interaction_respond") {
+    if (msg.toIndex === myIdx) return;
+    if (msg.accepted && msg.reqType === "Trade") openTradeUI(msg.fromIndex, msg.toIndex);
+    state.interactionRequest = null;
+  } else if (msg.kind === "trade_inv") {
+    if (msg.playerIdx === myIdx) return;
+    if (typeof msg.playerIdx === "number" && Array.isArray(msg.inv)) state.inventories[msg.playerIdx] = msg.inv;
+  } else if (msg.kind === "trade_state") {
+    if (msg.senderIdx === myIdx) return;
+    if (!state.trade?.open) return;
+    const ts = state.trade;
+    if (msg.senderIdx === ts.p0idx) { ts.p0offer = Array.isArray(msg.offer) ? msg.offer : []; ts.confirm0 = !!msg.confirmMe; }
+    else if (msg.senderIdx === ts.p1idx) { ts.p1offer = Array.isArray(msg.offer) ? msg.offer : []; ts.confirm1 = !!msg.confirmMe; }
+    if (typeof msg.senderIdx === "number" && Array.isArray(msg.inv)) state.inventories[msg.senderIdx] = msg.inv;
+    if (ts.confirm0 && ts.confirm1) executeTrade();
+  } else if (msg.kind === "trade_cancel") {
+    if (state.trade?.open) { state.trade._netCancel = true; closeTradeUI(true); }
   }
+}
 
-  // Online movement comes from snapshots, so fog must update here.
-  // ✅ But fog/exploration is overworld-only. Do not run this while in interior/dungeon.
-  if (anyMoved && state.mode === "overworld") {
-    if (typeof revealAroundPlayers === "function") revealAroundPlayers();
+// Adapter layer: every existing call site (sendNetInput({type:"move",...}),
+// sendNet({type:"world_set",...}), etc.) is left completely unchanged —
+// only these two functions route to Firebase instead of a WS socket.
+function sendNetInput(payload) {
+  if (!payload) return;
+  switch (payload.type) {
+    case "move": return movePlayerOnline(payload.dx, payload.dy);
+    case "log": return publishLogEntry(payload.text);
+    case "world_op": return publishWorldOp(payload.op);
+    case "chat": return publishChatMessage(payload.text);
+    case "time_sync": return publishTime(payload.phaseT, payload.day, payload.t);
+    case "interaction_request": return publishInteraction({ kind: "interaction_request", reqType: payload.reqType, fromIndex: payload.fromIndex, toIndex: payload.toIndex });
+    case "interaction_respond": return publishInteraction({ kind: "interaction_respond", accepted: payload.accepted, reqType: payload.reqType, fromIndex: payload.fromIndex, toIndex: payload.toIndex });
+    case "trade_inv": return publishInteraction({ kind: "trade_inv", playerIdx: payload.playerIdx, inv: payload.inv });
+    case "trade_state": return publishInteraction({ kind: "trade_state", senderIdx: payload.senderIdx, offer: payload.offer, confirmMe: payload.confirmMe, inv: payload.inv });
+    case "trade_cancel": return publishInteraction({ kind: "trade_cancel" });
+    default: console.warn("[NET] sendNetInput: unhandled payload type", payload.type);
   }
+}
+
+function sendNet(obj) {
+  if (!obj) return;
+  if (obj.type === "world_set") return publishWorld();
+  if (obj.type === "input") return sendNetInput(obj.payload); // old {type:"input",payload:{...}} wrapper
+  // "world_request" no longer applies — Firestore onSnapshot delivers the
+  // current doc the moment we subscribe, no explicit request needed.
 }
 
 // --- Online click-to-move: queue + drip-feed steps to server ---
@@ -1678,8 +1482,7 @@ function netQueuePath(path) {
 }
 
 function netTick() {
-  if (!state.net?.enabled) return;
-  if (!state.net.ws || state.net.ws.readyState !== 1) return;
+  if (!netCanSend()) return;
 
   // Only process overworld movement — dungeon/interior paths are local-only.
   // Sending non-overworld coordinates would corrupt the server's player position.
@@ -1927,18 +1730,17 @@ function ensureOnlineIndicator() {
 function updateOnlineIndicator() {
   if (!document.getElementById("onlineIndicator")) return; // not yet created
 
-  const slots = Array.isArray(state.net?.connectedSlots) ? state.net.connectedSlots : [];
-  const wsOpen = !!(state.net?.enabled && state.net?.ws?.readyState === 1);
+  const presentUids = Array.isArray(state.net?.presenceUids) ? state.net.presenceUids : [];
+  const connected = !!(state.net?.enabled && state.net?.uid);
   const myIdx = state.activePlayer | 0;
 
   for (let i = 0; i < 2; i++) {
     const row = document.getElementById(`onlineRow${i}`);
     if (!row) continue;
 
-    // Determine online status:
-    // - me: online if WS is open
-    // - other: online if server reported them in connectedSlots (and we have a WS)
-    const isOnline = wsOpen && (i === myIdx ? true : slots.includes(i));
+    // me: online if we're signed in and subscribed; other: online if their
+    // uid shows up in the presence list (RTDB onDisconnect keeps it honest).
+    const isOnline = i === myIdx ? connected : (connected && presentUids.some((uid) => uid !== state.net.uid));
 
     row._img.style.filter = isOnline ? "none" : "grayscale(1)";
     row._img.style.opacity = isOnline ? "1" : "0.4";
@@ -1978,9 +1780,7 @@ function sendChatMessage(fromIndex, text) {
   applyChatMessage(fromIndex, clean, { silent: true });
 
   // OFFLINE? done.
-  const ws = state.net?.ws;
-  const canSend = !!(state.net?.enabled && ws && ws.readyState === 1);
-  if (!canSend) {
+  if (!netCanSend()) {
     // If you ever allow “offline chat”, keep it local only.
     playSound("message");
     return;
@@ -14944,15 +14744,10 @@ async function boot() {
   // Ensure at least one world exists in localStorage (bookkeeping only, no generation)
   ensureAtLeastOneWorld();
 
-  // Connect to co-op server
-  if (!state.net?.ws || state.net.ws.readyState !== 1) {
-    const params = new URLSearchParams(location.search);
-    const wsOverride = params.get("ws");
-    // Always use the same hostname as the page on port 8081.
-    // This means Tailscale, localhost, and LAN all just work —
-    // whoever hosts the HTTP server also runs the WS server.
-    const WS_URL = wsOverride || `ws://${location.hostname}:8081`;
-    connectOnline(WS_URL);
+  // Connect to co-op (Firebase Auth + Firestore/RTDB — same project as
+  // apps/couples-app, no separate login and no server to host anymore).
+  if (!state.net?.enabled) {
+    connectOnline();
   }
 
   // Start the game loop — title screen is open by default, world loads on Continue
