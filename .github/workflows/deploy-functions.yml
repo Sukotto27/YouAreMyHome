@@ -8,10 +8,6 @@ on:
       - '.github/workflows/deploy-functions.yml'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  id-token: write
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -26,11 +22,12 @@ jobs:
         working-directory: functions
         run: npm install
 
-      - id: auth
-        uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT_EMAIL }}
-
+      # Firebase's Admin SDK / CLI tooling does not support Workload Identity
+      # Federation credentials (confirmed via google-github-actions/auth
+      # docs), and this org blocks service account key creation entirely.
+      # A `firebase login:ci` token is a personal OAuth token, not a service
+      # account key, so it isn't affected by that policy.
       - name: Deploy to Firebase Functions
-        run: npx firebase-tools@latest deploy --only functions --project youaremyhome-24fa2 --non-interactive
+        run: npx firebase-tools@latest deploy --only functions --project youaremyhome-24fa2 --non-interactive --token "$FIREBASE_TOKEN"
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
