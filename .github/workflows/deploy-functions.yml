@@ -28,6 +28,6 @@ jobs:
       # A `firebase login:ci` token is a personal OAuth token, not a service
       # account key, so it isn't affected by that policy.
       - name: Deploy to Firebase Functions
-        run: npx firebase-tools@latest deploy --only functions --project youaremyhome-24fa2 --non-interactive --token "$FIREBASE_TOKEN"
+        run: npx firebase-tools@latest deploy --only functions --project youaremyhome-24fa2 --non-interactive --force --token "$FIREBASE_TOKEN"
         env:
           FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
