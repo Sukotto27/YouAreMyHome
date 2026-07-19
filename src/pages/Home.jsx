@@ -1,4 +1,5 @@
 import RelationshipCounter from '../components/counter/RelationshipCounter'
+import InstallBanner from '../components/InstallBanner'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 import cristina from '../assets/images/cristina.jpg'
@@ -20,6 +21,8 @@ export default function Home() {
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(54,37,33,0.06)_100%)]" />
 
       <div className="relative mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-6 py-10 text-center">
+        <InstallBanner />
+
         <div className="relative h-24 w-28 sm:h-32 sm:w-36" aria-hidden="true">
           <img
             src={heartLeft}

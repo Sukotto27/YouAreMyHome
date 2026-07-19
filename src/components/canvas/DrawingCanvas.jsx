@@ -2,10 +2,11 @@ import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { ref, push, set, onChildAdded, onChildRemoved, serverTimestamp } from 'firebase/database'
 import { rtdb, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
+import { DEFAULT_CANVAS_BACKGROUND } from './palette'
 
 const MIN_DISTANCE_FRACTION = 0.003
 
-const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction }, ref_) {
+const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, background }, ref_) {
   const { user } = useAuth()
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -15,6 +16,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction }
   const activeStrokeRef = useRef(null)
   const colorRef = useRef(color)
   const brushFractionRef = useRef(brushFraction)
+  const backgroundRef = useRef(background || DEFAULT_CANVAS_BACKGROUND)
   const localIdRef = useRef(0)
 
   useEffect(() => {
@@ -24,6 +26,12 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction }
   useEffect(() => {
     brushFractionRef.current = brushFraction
   }, [brushFraction])
+
+  useEffect(() => {
+    backgroundRef.current = background || DEFAULT_CANVAS_BACKGROUND
+    fullRedraw()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [background])
 
   function pointToPixel(point) {
     return {
@@ -59,7 +67,8 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction }
   function fullRedraw() {
     const ctx = ctxRef.current
     if (!ctx) return
-    ctx.clearRect(0, 0, rectSizeRef.current.width, rectSizeRef.current.height)
+    ctx.fillStyle = backgroundRef.current
+    ctx.fillRect(0, 0, rectSizeRef.current.width, rectSizeRef.current.height)
     for (const stroke of strokesRef.current.values()) {
       let prevPixel = null
       for (const point of stroke.points) {
@@ -78,13 +87,13 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction }
     exportPNG() {
       const canvas = canvasRef.current
       if (!canvas || canvas.width === 0) return null
-      // Flatten onto a paper-colored background so saved drawings don't
-      // export with a transparent hole where the page background showed through.
+      // Flatten onto the current background so saved drawings don't export
+      // with a transparent hole where the page background showed through.
       const flattened = document.createElement('canvas')
       flattened.width = canvas.width
       flattened.height = canvas.height
       const flatCtx = flattened.getContext('2d')
-      flatCtx.fillStyle = '#fbf2e9'
+      flatCtx.fillStyle = backgroundRef.current
       flatCtx.fillRect(0, 0, flattened.width, flattened.height)
       flatCtx.drawImage(canvas, 0, 0)
       return flattened.toDataURL('image/png')
@@ -214,7 +223,7 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction }
   }
 
   return (
-    <div ref={containerRef} className="h-full w-full overflow-hidden rounded-3xl bg-white/50">
+    <div ref={containerRef} className="h-full w-full overflow-hidden">
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}

@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
-import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
-import { readDemoList } from '../lib/demoStore'
+import { readDemoList, writeDemoList } from '../lib/demoStore'
 import { useMarkSeen } from '../hooks/useMarkSeen'
 
 export default function Scrapbook() {
   useMarkSeen('scrapbook')
   const [entries, setEntries] = useState(firebaseReady ? [] : readDemoList('scrapbook'))
   const [selected, setSelected] = useState(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     if (!firebaseReady) return
@@ -18,16 +20,58 @@ export default function Scrapbook() {
     return unsubscribe
   }, [])
 
+  async function handleDelete() {
+    if (!selected) return
+    setDeleting(true)
+    try {
+      if (firebaseReady) {
+        await deleteDoc(doc(db, 'scrapbook', selected.id))
+      } else {
+        const next = entries.filter((entry) => entry.id !== selected.id)
+        setEntries(next)
+        writeDemoList('scrapbook', next)
+      }
+      setSelected(null)
+      setConfirmingDelete(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (selected) {
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
-        <button
-          type="button"
-          onClick={() => setSelected(null)}
-          className="self-start font-body text-sm text-ink-soft transition-colors hover:text-rose"
-        >
-          ← Back to scrapbook
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => {
+              setSelected(null)
+              setConfirmingDelete(false)
+            }}
+            className="font-body text-sm text-ink-soft transition-colors hover:text-rose"
+          >
+            ← Back to scrapbook
+          </button>
+          {confirmingDelete ? (
+            <div className="flex items-center gap-2 font-body text-sm">
+              <span className="text-ink-soft">Delete this?</span>
+              <button type="button" onClick={handleDelete} disabled={deleting} className="font-medium text-rose">
+                {deleting ? 'Deleting…' : 'Yes'}
+              </button>
+              <button type="button" onClick={() => setConfirmingDelete(false)} className="text-ink-soft">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="font-body text-sm text-ink-soft transition-colors hover:text-rose"
+            >
+              Delete
+            </button>
+          )}
+        </div>
         <img
           src={selected.imageDataUrl}
           alt="Saved drawing"

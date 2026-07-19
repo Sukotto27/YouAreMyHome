@@ -21,3 +21,16 @@ export const BRUSH_PRESETS = [
 
 export const DEFAULT_COLOR = COLOR_PALETTE[1].value
 export const DEFAULT_BRUSH_FRACTION = BRUSH_PRESETS[1].px / REFERENCE_WIDTH
+
+// The canvas itself is shared, so its background is synced (RTDB) rather
+// than a personal per-device preference like Chat's wallpaper.
+export const CANVAS_BACKGROUNDS = [
+  { name: 'Paper', value: '#fbf2e9' },
+  { name: 'White', value: '#ffffff' },
+  { name: 'Blush', value: '#fbdad7' },
+  { name: 'Sky', value: '#e4f0ef' },
+  { name: 'Dusk', value: '#efe6ec' },
+  { name: 'Black', value: '#1c1614' },
+]
+
+export const DEFAULT_CANVAS_BACKGROUND = CANVAS_BACKGROUNDS[0].value
