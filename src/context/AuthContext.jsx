@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import {
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth'
@@ -41,8 +42,13 @@ export function AuthProvider({ children }) {
   }
   const logout = () => (firebaseReady ? signOut(auth) : Promise.resolve())
 
+  const resetPassword = (email) => {
+    if (!firebaseReady) return Promise.reject(new Error('Firebase is not configured yet'))
+    return sendPasswordResetEmail(auth, email)
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, resetPassword }}>
       {children}
     </AuthContext.Provider>
   )

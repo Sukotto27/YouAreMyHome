@@ -5,14 +5,33 @@ import { firebaseReady } from '../firebase'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 
+function errorMessageFor(code) {
+  switch (code) {
+    case 'auth/too-many-requests':
+      return "Too many attempts in a row — Firebase has temporarily paused sign-ins for this account. Wait a few minutes, or reset your password below."
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return "That password doesn't match what's on file. Try again, or reset it below."
+    case 'auth/user-not-found':
+      return "There's no account with that email."
+    case 'auth/user-disabled':
+      return 'This account has been disabled.'
+    case 'auth/invalid-email':
+      return "That doesn't look like a valid email address."
+    default:
+      return "That didn't work — check your email and password and try again."
+  }
+}
+
 export default function Login() {
-  const { user, login } = useAuth()
+  const { user, login, resetPassword } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [resetStatus, setResetStatus] = useState('')
 
   if (user) {
     const redirectTo = location.state?.from ?? '/chat'
@@ -22,14 +41,30 @@ export default function Login() {
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
+    setResetStatus('')
     setSubmitting(true)
     try {
       await login(email, password)
       navigate('/chat', { replace: true })
-    } catch {
-      setError("That didn't work — check your email and password and try again.")
+    } catch (err) {
+      setError(errorMessageFor(err.code))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  async function handleForgotPassword() {
+    setError('')
+    setResetStatus('')
+    if (!email.trim()) {
+      setError('Enter your email above first, then tap "Forgot password?" again.')
+      return
+    }
+    try {
+      await resetPassword(email.trim())
+      setResetStatus(`Check ${email.trim()} for a reset link.`)
+    } catch (err) {
+      setError(errorMessageFor(err.code))
     }
   }
 
@@ -92,6 +127,7 @@ export default function Login() {
           </div>
 
           {error && <p className="text-sm text-rose">{error}</p>}
+          {resetStatus && <p className="text-sm text-teal">{resetStatus}</p>}
 
           <button
             type="submit"
@@ -99,6 +135,15 @@ export default function Login() {
             className="w-full rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
           >
             {submitting ? 'Signing in…' : 'Come on in'}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={!firebaseReady}
+            className="w-full font-body text-sm text-ink-soft transition-colors hover:text-rose disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Forgot password?
           </button>
         </form>
       </div>
