@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { collection, onSnapshot, orderBy, query } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { readDemoList } from '../lib/demoStore'
+import { useMarkSeen } from '../hooks/useMarkSeen'
 
 export default function Scrapbook() {
+  useMarkSeen('scrapbook')
   const [entries, setEntries] = useState(firebaseReady ? [] : readDemoList('scrapbook'))
   const [selected, setSelected] = useState(null)
 

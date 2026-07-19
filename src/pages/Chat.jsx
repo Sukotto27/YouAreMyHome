@@ -23,11 +23,13 @@ import {
 import BackgroundPicker from '../components/chat/BackgroundPicker'
 import EmojiPicker from '../components/chat/EmojiPicker'
 import { useLongPress } from '../hooks/useLongPress'
+import { useMarkSeen } from '../hooks/useMarkSeen'
 
 const RECENT_LIMIT = 200
 
 export default function Chat() {
   const { user } = useAuth()
+  useMarkSeen('chat')
   const [messages, setMessages] = useState([])
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)

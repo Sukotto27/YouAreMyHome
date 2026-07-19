@@ -18,6 +18,7 @@ import AnswerForm from '../components/qa/AnswerForm'
 import WaitingView from '../components/qa/WaitingView'
 import RevealView from '../components/qa/RevealView'
 import RewindList from '../components/qa/RewindList'
+import { useMarkSeen } from '../hooks/useMarkSeen'
 
 const DEMO_PARTNER_UID = 'demo-partner'
 
@@ -27,6 +28,7 @@ function isComplete(round) {
 
 export default function QA() {
   const { user } = useAuth()
+  useMarkSeen('qa')
   const [rounds, setRounds] = useState(firebaseReady ? [] : readDemoList('qaRounds'))
   const [loading, setLoading] = useState(firebaseReady)
   const [busy, setBusy] = useState(false)

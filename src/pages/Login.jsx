@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { firebaseReady } from '../firebase'
 import heartLeft from '../assets/images/heart-left.png'
@@ -34,7 +34,6 @@ function DebugCode({ code }) {
 export default function Login() {
   const { user, login, resetPassword } = useAuth()
   const navigate = useNavigate()
-  const location = useLocation()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -43,8 +42,7 @@ export default function Login() {
   const [resetStatus, setResetStatus] = useState('')
 
   if (user) {
-    const redirectTo = location.state?.from ?? '/chat'
-    return <Navigate to={redirectTo} replace />
+    return <Navigate to="/" replace />
   }
 
   async function handleSubmit(event) {
@@ -60,7 +58,7 @@ export default function Login() {
 
     try {
       await login(emailValue, passwordValue)
-      navigate('/chat', { replace: true })
+      navigate('/', { replace: true })
     } catch (err) {
       setError(errorMessageFor(err.code))
       setErrorCode(err.code || err.message)

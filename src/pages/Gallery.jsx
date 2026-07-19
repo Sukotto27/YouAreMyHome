@@ -4,9 +4,11 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
 import { resizeImageFile } from '../lib/image'
+import { useMarkSeen } from '../hooks/useMarkSeen'
 
 export default function Gallery() {
   const { user } = useAuth()
+  useMarkSeen('gallery')
   const [photos, setPhotos] = useState(firebaseReady ? [] : readDemoList('gallery'))
   const [selected, setSelected] = useState(null)
   const [uploading, setUploading] = useState(false)

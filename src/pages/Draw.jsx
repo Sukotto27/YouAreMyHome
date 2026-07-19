@@ -66,7 +66,7 @@ export default function Draw() {
           {savedMessage}
         </p>
       )}
-      <div className="flex-1 p-3 sm:p-4">
+      <div className="min-h-0 flex-1 p-1.5 sm:p-3">
         <DrawingCanvas ref={canvasRef} color={color} brushFraction={brushFraction} />
       </div>
     </div>

@@ -3,6 +3,7 @@ import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
+import { useUnreadBadges } from '../../hooks/useUnreadBadges'
 import CompactCounter from '../counter/CompactCounter'
 import NavIcon from './NavIcon'
 import Wordmark from './Wordmark'
@@ -10,13 +11,13 @@ import heartLeft from '../../assets/images/heart-left.png'
 import heartRight from '../../assets/images/heart-right.png'
 
 const NAV_ITEMS = [
-  { to: '/chat', label: 'Chat', icon: 'chat' },
-  { to: '/qa', label: 'Q&A', icon: 'qa' },
+  { to: '/chat', label: 'Chat', icon: 'chat', badgeKey: 'chat' },
+  { to: '/qa', label: 'Q&A', icon: 'qa', badgeKey: 'qa' },
   { to: '/draw', label: 'Draw', icon: 'draw' },
-  { to: '/scrapbook', label: 'Scrapbook', icon: 'scrapbook' },
-  { to: '/gallery', label: 'Gallery', icon: 'gallery' },
-  { to: '/mail', label: 'Mail', icon: 'mail' },
-  { to: '/milestones', label: 'Milestones', icon: 'calendar' },
+  { to: '/scrapbook', label: 'Scrapbook', icon: 'scrapbook', badgeKey: 'scrapbook' },
+  { to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
+  { to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
+  { to: '/milestones', label: 'Milestones', icon: 'calendar', badgeKey: 'milestones' },
 ]
 
 const GREETED_KEY = 'you-are-my-home:greeted'
@@ -24,6 +25,7 @@ const GREETED_KEY = 'you-are-my-home:greeted'
 export default function Shell() {
   const { user, logout } = useAuth()
   const [greeting, setGreeting] = useState(null)
+  const unread = useUnreadBadges()
 
   useEffect(() => {
     if (sessionStorage.getItem(GREETED_KEY)) return
@@ -49,7 +51,7 @@ export default function Shell() {
           </div>
         </div>
       )}
-      <header className="flex items-center justify-between gap-3 border-b border-ink/10 px-4 py-3 sm:px-6">
+      <header className="flex items-center justify-between gap-3 border-b border-ink/10 px-4 py-2 sm:px-6">
         <Link to="/" className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-70">
           <span className="relative inline-block h-5 w-5 shrink-0">
             <img src={heartLeft} alt="" className="absolute inset-0 h-full w-full object-contain" />
@@ -87,7 +89,12 @@ export default function Shell() {
                 }`
               }
             >
-              <NavIcon name={item.icon} className="h-5 w-5" />
+              <span className="relative inline-flex">
+                <NavIcon name={item.icon} className="h-5 w-5" />
+                {item.badgeKey && unread[item.badgeKey] && (
+                  <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose" />
+                )}
+              </span>
               <span className="whitespace-nowrap">{item.label}</span>
             </NavLink>
           ))}

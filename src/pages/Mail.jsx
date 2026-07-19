@@ -12,6 +12,7 @@ import {
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { encodeSecret, decodeSecret } from '../lib/cipher'
+import { useMarkSeen } from '../hooks/useMarkSeen'
 
 const DEMO_PARTNER_UID = 'demo-partner'
 
@@ -30,6 +31,7 @@ const DEMO_SEED = [
 
 export default function Mail() {
   const { user } = useAuth()
+  useMarkSeen('mail')
   const [letters, setLetters] = useState(firebaseReady ? [] : DEMO_SEED)
   const [selectedId, setSelectedId] = useState(null)
   const [composing, setComposing] = useState(false)

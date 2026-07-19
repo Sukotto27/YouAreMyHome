@@ -2,7 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import Shell from './components/layout/Shell'
-import Landing from './pages/Landing'
+import Home from './pages/Home'
 import Login from './pages/Login'
 import Chat from './pages/Chat'
 import QA from './pages/QA'
@@ -17,7 +17,6 @@ function App() {
     <HashRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route
             element={
@@ -26,6 +25,7 @@ function App() {
               </ProtectedRoute>
             }
           >
+            <Route path="/" element={<Home />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/qa" element={<QA />} />
             <Route path="/draw" element={<Draw />} />

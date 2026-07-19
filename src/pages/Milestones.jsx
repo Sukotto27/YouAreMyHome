@@ -4,9 +4,11 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
 import { HISTORY_MILESTONES, nextOccurrence } from '../lib/milestones'
+import { useMarkSeen } from '../hooks/useMarkSeen'
 
 export default function Milestones() {
   const { user } = useAuth()
+  useMarkSeen('milestones')
   const [custom, setCustom] = useState(firebaseReady ? [] : readDemoList('milestones'))
   const [adding, setAdding] = useState(false)
   const [title, setTitle] = useState('')
