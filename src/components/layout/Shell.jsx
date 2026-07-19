@@ -1,25 +1,32 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
 import { seedHistoryMilestones } from '../../lib/migrations'
 import { useUnreadBadges } from '../../hooks/useUnreadBadges'
+import { useNotificationSounds } from '../../hooks/useNotificationSounds'
+import { useThumbkiss } from '../../hooks/useThumbkiss'
+import { useThumbkissGesture } from '../../hooks/useThumbkissGesture'
 import CompactCounter from '../counter/CompactCounter'
 import NamePrompt from '../NamePrompt'
-import NavIcon from './NavIcon'
+import ThumbkissOverlay from '../ThumbkissOverlay'
+import SwipeableNav from './SwipeableNav'
 import Wordmark from './Wordmark'
 import heartLeft from '../../assets/images/heart-left.png'
 import heartRight from '../../assets/images/heart-right.png'
 
 const NAV_ITEMS = [
-  { to: '/chat', label: 'Chat', icon: 'chat', badgeKey: 'chat' },
-  { to: '/qa', label: 'Q&A', icon: 'qa', badgeKey: 'qa' },
-  { to: '/draw', label: 'Draw', icon: 'draw' },
-  { to: '/scrapbook', label: 'Scrapbook', icon: 'scrapbook', badgeKey: 'scrapbook' },
-  { to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
-  { to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
-  { to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
+  { key: 'home', to: '/', label: 'Home', icon: 'home' },
+  { key: 'chat', to: '/chat', label: 'Chat', icon: 'chat', badgeKey: 'chat' },
+  { key: 'qa', to: '/qa', label: 'Q&A', icon: 'qa', badgeKey: 'qa' },
+  { key: 'draw', to: '/draw', label: 'Draw', icon: 'draw' },
+  { key: 'scrapbook', to: '/scrapbook', label: 'Scrapbook', icon: 'scrapbook', badgeKey: 'scrapbook' },
+  { key: 'gallery', to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
+  { key: 'mail', to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
+  { key: 'calendar', to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
+  { key: 'thumbkiss', action: 'thumbkiss', label: 'Kiss', icon: 'thumbkiss' },
+  { key: 'journal', to: '/journal', label: 'Journal', icon: 'journal', badgeKey: 'journal' },
 ]
 
 const GREETED_KEY = 'you-are-my-home:greeted'
@@ -28,6 +35,9 @@ export default function Shell() {
   const { user, logout } = useAuth()
   const [greeting, setGreeting] = useState(null)
   const unread = useUnreadBadges()
+  useNotificationSounds(unread)
+  const thumbkiss = useThumbkiss()
+  useThumbkissGesture(thumbkiss.startPress, thumbkiss.endPress)
 
   // App Badging API: shows a count on the home-screen icon once installed.
   // Chromium (Android/desktop) only — Safari/iOS has no equivalent API.
@@ -58,6 +68,11 @@ export default function Shell() {
   return (
     <div className="flex min-h-svh flex-col bg-paper text-ink">
       <NamePrompt />
+      <ThumbkissOverlay
+        myPressing={thumbkiss.myPressing}
+        partnerPressing={thumbkiss.partnerPressing}
+        both={thumbkiss.both}
+      />
       {!firebaseReady && (
         <div className="bg-gold/15 px-4 py-1.5 text-center font-body text-xs text-ink-soft">
           Previewing without Firebase connected — nothing here is saved or synced yet.
@@ -96,29 +111,16 @@ export default function Shell() {
         <Outlet />
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-10 flex justify-center border-t border-ink/10 bg-paper/95 backdrop-blur sm:static sm:border-t-0 sm:bg-transparent sm:py-2">
-        <div className="flex w-full max-w-2xl overflow-x-auto">
-          {NAV_ITEMS.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `flex flex-1 flex-col items-center gap-0.5 px-2 py-2 font-body text-[11px] transition-colors ${
-                  isActive ? 'text-rose' : 'text-ink-soft hover:text-ink'
-                }`
-              }
-            >
-              <span className="relative inline-flex">
-                <NavIcon name={item.icon} className="h-5 w-5" />
-                {item.badgeKey && unread[item.badgeKey] && (
-                  <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose" />
-                )}
-              </span>
-              <span className="whitespace-nowrap">{item.label}</span>
-            </NavLink>
-          ))}
-        </div>
-      </nav>
+      <SwipeableNav
+        items={NAV_ITEMS}
+        unread={unread}
+        thumbkissHandlers={{
+          onPointerDown: thumbkiss.startPress,
+          onPointerUp: thumbkiss.endPress,
+          onPointerLeave: thumbkiss.endPress,
+          onPointerCancel: thumbkiss.endPress,
+        }}
+      />
     </div>
   )
 }

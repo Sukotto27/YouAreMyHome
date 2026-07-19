@@ -41,6 +41,22 @@ const PATHS = {
       <path d="M16 3v4" />
     </>
   ),
+  home: (
+    <>
+      <path d="M4 11.5L12 4l8 7.5" />
+      <path d="M6 10v9h12v-9" />
+      <path d="M10 19v-5h4v5" />
+    </>
+  ),
+  thumbkiss: <path d="M12 19s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 2.5C19 14.65 12 19 12 19Z" />,
+  journal: (
+    <>
+      <rect x="5" y="3" width="14" height="18" rx="2" />
+      <path d="M8.5 8h7" />
+      <path d="M8.5 12h7" />
+      <path d="M8.5 16h4" />
+    </>
+  ),
 }
 
 export default function NavIcon({ name, className }) {

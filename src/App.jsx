@@ -11,6 +11,8 @@ import Scrapbook from './pages/Scrapbook'
 import Gallery from './pages/Gallery'
 import Mail from './pages/Mail'
 import Calendar from './pages/Calendar'
+import Journal from './pages/Journal'
+import ShareTarget from './pages/ShareTarget'
 
 function App() {
   return (
@@ -33,6 +35,8 @@ function App() {
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/mail" element={<Mail />} />
             <Route path="/calendar" element={<Calendar />} />
+            <Route path="/journal" element={<Journal />} />
+            <Route path="/share-target" element={<ShareTarget />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

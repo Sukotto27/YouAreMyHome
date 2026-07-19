@@ -19,6 +19,9 @@ images/*.jpg
 images/desktop.ini
 journal.docx
 
+# Original sound uploads — app-used copies live in src/assets/sounds.
+sounds/*.mp3
+
 # Editor directories and files
 .claude
 .vscode/*

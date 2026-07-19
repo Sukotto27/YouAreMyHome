@@ -35,6 +35,21 @@ export default defineConfig({
             purpose: 'maskable',
           },
         ],
+        // Android/Chrome only — Apple has never implemented Web Share
+        // Target in Safari. Lets this installed PWA appear in the OS share
+        // sheet; src/sw.js intercepts the resulting POST since this is a
+        // static site with no server to actually receive it.
+        share_target: {
+          action: '/YouAreMyHome/share-target',
+          method: 'POST',
+          enctype: 'multipart/form-data',
+          params: {
+            title: 'title',
+            text: 'text',
+            url: 'url',
+            files: [{ name: 'images', accept: ['image/*'] }],
+          },
+        },
       },
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,png,jpg,svg,woff2}'],

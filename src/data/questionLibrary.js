@@ -9,6 +9,7 @@ export const QUESTION_CATEGORIES = [
   'Surveys',
   'Favorites',
   'Love Language',
+  'Conversation Starters',
 ]
 
 export const QUESTION_LIBRARY = [
@@ -137,6 +138,19 @@ export const QUESTION_LIBRARY = [
   { id: 'love-12', category: 'Love Language', text: 'Which way of feeling loved do you think I need more of from you?' },
   { id: 'love-13', category: 'Love Language', text: 'What\'s something I do without realizing how much it means to you?' },
   { id: 'love-14', category: 'Love Language', text: 'How has the way you show love changed since being with me?' },
+
+  // Conversation Starters — light, get-to-know-you prompts for whenever you
+  // want a quick spark rather than a deep dive.
+  { id: 'convo-01', category: 'Conversation Starters', text: "What's a rule you think everyone should live by?" },
+  { id: 'convo-02', category: 'Conversation Starters', text: "What's the best piece of advice you've ever ignored?" },
+  { id: 'convo-03', category: 'Conversation Starters', text: 'If you could instantly master one skill, what would it be?' },
+  { id: 'convo-04', category: 'Conversation Starters', text: "What's a small thing that always makes your day better?" },
+  { id: 'convo-05', category: 'Conversation Starters', text: "What's a food you refuse to apologize for loving?" },
+  { id: 'convo-06', category: 'Conversation Starters', text: "What's a trend you never understood?" },
+  { id: 'convo-07', category: 'Conversation Starters', text: 'What would your perfect Saturday look like, start to finish?' },
+  { id: 'convo-08', category: 'Conversation Starters', text: "What's something you learned recently that surprised you?" },
+  { id: 'convo-09', category: 'Conversation Starters', text: 'If you could ask anyone, living or not, one question, who and what?' },
+  { id: 'convo-10', category: 'Conversation Starters', text: "What's a movie or show you could rewatch endlessly?" },
 ]
 
 export function randomQuestion(excludeIds = []) {

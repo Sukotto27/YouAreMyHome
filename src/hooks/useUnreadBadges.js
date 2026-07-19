@@ -32,6 +32,7 @@ const TRACKED_FEATURES = [
     activityField: 'lastActivityAt',
     activityAuthorField: 'lastActivityByUid',
   },
+  { key: 'journal', collectionName: 'journalEvents', activityField: 'createdAt', activityAuthorField: 'authorUid' },
 ]
 
 export function useUnreadBadges() {

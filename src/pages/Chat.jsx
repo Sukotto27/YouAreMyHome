@@ -21,6 +21,7 @@ import { backgroundStyleFor } from '../lib/chatBackgrounds'
 import { chatFontClassName } from '../lib/chatFonts'
 import { textColorFor } from '../lib/bubbleColors'
 import { avatarFor } from '../lib/avatars'
+import { playSound } from '../lib/sounds'
 import ChatMenu from '../components/chat/ChatMenu'
 import EmojiPicker from '../components/chat/EmojiPicker'
 import MessageActionMenu from '../components/chat/MessageActionMenu'
@@ -52,6 +53,24 @@ export default function Chat() {
   const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
 
   useEffect(() => stopTyping, [stopTyping])
+
+  const prevPartnerTypingRef = useRef(false)
+  useEffect(() => {
+    if (partnerTyping && !prevPartnerTypingRef.current) playSound('typing')
+    prevPartnerTypingRef.current = partnerTyping
+  }, [partnerTyping])
+
+  const myLastMessage = [...messages].reverse().find((m) => m.senderUid === user.uid)
+  const myLastMessageRead = !!(
+    myLastMessage &&
+    partnerSeenAt &&
+    toDate(myLastMessage.createdAt).getTime() <= partnerSeenAt.toMillis()
+  )
+  const prevReadRef = useRef(false)
+  useEffect(() => {
+    if (myLastMessageRead && !prevReadRef.current) playSound('chat_read')
+    prevReadRef.current = myLastMessageRead
+  }, [myLastMessageRead])
 
   useEffect(() => {
     if (!firebaseReady) return
@@ -117,6 +136,7 @@ export default function Chat() {
     const text = draft.trim()
     if (!text || sending) return
 
+    playSound('chat_send')
     setSending(true)
     setDraft('')
     stopTyping()
@@ -403,23 +423,24 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
   const customColor = chatSettings.bubbleColors[message.senderName]
   const fontClassName = chatFontClassName(chatSettings.font)
 
+  const isMedia = message.type === 'image' || message.type === 'link'
+
   const bubbleStyle =
-    message.type !== 'image' && customColor
+    !isMedia && customColor
       ? { backgroundColor: customColor, color: textColorFor(customColor), WebkitTouchCallout: 'none' }
       : { WebkitTouchCallout: 'none' }
 
-  const bubbleClassName =
-    message.type === 'image'
+  const bubbleClassName = isMedia
+    ? isOwn
+      ? 'rounded-br-sm bg-rose/20'
+      : 'rounded-bl-sm border border-teal/30 bg-white/70'
+    : customColor
       ? isOwn
-        ? 'rounded-br-sm bg-rose/20'
-        : 'rounded-bl-sm border border-teal/30 bg-white/70'
-      : customColor
-        ? isOwn
-          ? 'rounded-br-sm'
-          : 'rounded-bl-sm'
-        : isOwn
-          ? 'rounded-br-sm bg-rose text-paper'
-          : 'rounded-bl-sm border border-teal/30 bg-white/70 text-ink'
+        ? 'rounded-br-sm'
+        : 'rounded-bl-sm'
+      : isOwn
+        ? 'rounded-br-sm bg-rose text-paper'
+        : 'rounded-bl-sm border border-teal/30 bg-white/70 text-ink'
 
   return (
     <div className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${tight ? 'mb-0.5' : 'mb-2'}`}>
@@ -433,7 +454,7 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
           <div
             {...pressHandlers}
             className={`select-none rounded-2xl px-4 py-2.5 ${fontClassName} ${
-              message.type === 'image' ? 'overflow-hidden p-1.5' : ''
+              isMedia ? 'overflow-hidden p-1.5' : ''
             } ${bubbleClassName}`}
             style={bubbleStyle}
           >
@@ -449,6 +470,19 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
             )}
             {message.type === 'image' ? (
               <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
+            ) : message.type === 'link' ? (
+              <a href={message.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-white">
+                {message.previewImage && (
+                  <img src={message.previewImage} alt="" className="max-h-48 w-full object-cover" />
+                )}
+                <div className="p-2.5">
+                  <p className="font-body text-sm font-medium text-ink">{message.previewTitle || message.url}</p>
+                  {message.previewDomain && (
+                    <p className="mt-0.5 font-body text-xs text-ink-soft">{message.previewDomain}</p>
+                  )}
+                  {message.caption && <p className="mt-1.5 font-body text-sm text-ink">{message.caption}</p>}
+                </div>
+              </a>
             ) : (
               message.text
             )}

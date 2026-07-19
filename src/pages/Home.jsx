@@ -2,12 +2,18 @@ import RelationshipCounter from '../components/counter/RelationshipCounter'
 import InstallBanner from '../components/InstallBanner'
 import NotificationBanner from '../components/NotificationBanner'
 import LocationClocks from '../components/LocationClocks'
+import MoodBubble from '../components/MoodBubble'
+import { useAuth } from '../context/AuthContext'
+import { useMoods } from '../hooks/useMoods'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 import cristina from '../assets/images/cristina.jpg'
 import scott from '../assets/images/scott.jpg'
 
 export default function Home() {
+  const { user } = useAuth()
+  const { moods, setMyMood } = useMoods()
+
   return (
     <div className="relative flex flex-1 flex-col overflow-y-auto">
       {/* faint paper grain */}
@@ -50,10 +56,24 @@ export default function Home() {
 
         <RelationshipCounter />
 
-        <div className="flex items-center gap-6 sm:gap-10">
-          <Avatar src={cristina} name="Cristina" ring="ring-blush" />
-          <span className="font-display text-2xl text-gold">&amp;</span>
-          <Avatar src={scott} name="Scott" ring="ring-teal" />
+        <div className="flex items-start gap-6 sm:gap-10">
+          <Avatar
+            src={cristina}
+            name="Cristina"
+            ring="ring-blush"
+            mood={moodFor('Cristina', user, moods)}
+            isMine={user.displayName === 'Cristina'}
+            onSetMood={setMyMood}
+          />
+          <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
+          <Avatar
+            src={scott}
+            name="Scott"
+            ring="ring-teal"
+            mood={moodFor('Scott', user, moods)}
+            isMine={user.displayName === 'Scott'}
+            onSetMood={setMyMood}
+          />
         </div>
 
         <LocationClocks />
@@ -68,7 +88,13 @@ export default function Home() {
   )
 }
 
-function Avatar({ src, name, ring }) {
+function moodFor(name, user, moods) {
+  if (name === user.displayName) return moods[user.uid]
+  const partnerEntry = Object.entries(moods).find(([uid]) => uid !== user.uid)
+  return partnerEntry?.[1]
+}
+
+function Avatar({ src, name, ring, mood, isMine, onSetMood }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <img
@@ -77,6 +103,7 @@ function Avatar({ src, name, ring }) {
         className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring}`}
       />
       <span className="font-body text-sm text-ink-soft">{name}</span>
+      <MoodBubble mood={mood} isMine={isMine} onSetMood={onSetMood} />
     </div>
   )
 }
