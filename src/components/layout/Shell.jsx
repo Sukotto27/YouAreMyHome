@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
@@ -26,11 +26,6 @@ export default function Shell() {
   const { user, logout } = useAuth()
   const [greeting, setGreeting] = useState(null)
   const unread = useUnreadBadges()
-  const location = useLocation()
-  // Draw wants every pixel it can get — it provides its own compact
-  // save/clear bar in place of the standard nav, and stays reachable via
-  // the header's Home link.
-  const hideNav = location.pathname === '/draw'
 
   useEffect(() => {
     if (sessionStorage.getItem(GREETED_KEY)) return
@@ -78,35 +73,33 @@ export default function Shell() {
         </button>
       </header>
 
-      <main className={`flex flex-1 flex-col overflow-hidden ${hideNav ? '' : 'pb-16 sm:pb-0'}`}>
+      <main className="flex flex-1 flex-col overflow-hidden pb-16 sm:pb-0">
         <Outlet />
       </main>
 
-      {!hideNav && (
-        <nav className="fixed inset-x-0 bottom-0 z-10 flex justify-center border-t border-ink/10 bg-paper/95 backdrop-blur sm:static sm:border-t-0 sm:bg-transparent sm:py-2">
-          <div className="flex w-full max-w-2xl overflow-x-auto">
-            {NAV_ITEMS.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) =>
-                  `flex flex-1 flex-col items-center gap-0.5 px-2 py-2 font-body text-[11px] transition-colors ${
-                    isActive ? 'text-rose' : 'text-ink-soft hover:text-ink'
-                  }`
-                }
-              >
-                <span className="relative inline-flex">
-                  <NavIcon name={item.icon} className="h-5 w-5" />
-                  {item.badgeKey && unread[item.badgeKey] && (
-                    <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose" />
-                  )}
-                </span>
-                <span className="whitespace-nowrap">{item.label}</span>
-              </NavLink>
-            ))}
-          </div>
-        </nav>
-      )}
+      <nav className="fixed inset-x-0 bottom-0 z-10 flex justify-center border-t border-ink/10 bg-paper/95 backdrop-blur sm:static sm:border-t-0 sm:bg-transparent sm:py-2">
+        <div className="flex w-full max-w-2xl overflow-x-auto">
+          {NAV_ITEMS.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              className={({ isActive }) =>
+                `flex flex-1 flex-col items-center gap-0.5 px-2 py-2 font-body text-[11px] transition-colors ${
+                  isActive ? 'text-rose' : 'text-ink-soft hover:text-ink'
+                }`
+              }
+            >
+              <span className="relative inline-flex">
+                <NavIcon name={item.icon} className="h-5 w-5" />
+                {item.badgeKey && unread[item.badgeKey] && (
+                  <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-rose" />
+                )}
+              </span>
+              <span className="whitespace-nowrap">{item.label}</span>
+            </NavLink>
+          ))}
+        </div>
+      </nav>
     </div>
   )
 }

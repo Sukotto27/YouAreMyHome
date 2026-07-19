@@ -79,7 +79,7 @@ export default function Draw() {
           {savedMessage}
         </p>
       )}
-      <div className="min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         <DrawingCanvas
           ref={canvasRef}
           color={color}

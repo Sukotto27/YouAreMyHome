@@ -113,10 +113,12 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, 
       const rect = container.getBoundingClientRect()
       const dpr = window.devicePixelRatio || 1
       rectSizeRef.current = { width: rect.width, height: rect.height }
+      // The canvas's on-screen box size comes from CSS (absolute + inset-0
+      // against this container), guaranteed correct by the layout engine
+      // regardless of when this JS runs. This only sets the drawing buffer's
+      // pixel resolution to match, for crispness.
       canvas.width = rect.width * dpr
       canvas.height = rect.height * dpr
-      canvas.style.width = `${rect.width}px`
-      canvas.style.height = `${rect.height}px`
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       fullRedraw()
     }
@@ -223,14 +225,14 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, 
   }
 
   return (
-    <div ref={containerRef} className="h-full w-full overflow-hidden">
+    <div ref={containerRef} className="absolute inset-0 overflow-hidden">
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={endStroke}
         onPointerCancel={endStroke}
-        className="touch-none"
+        className="absolute inset-0 h-full w-full touch-none"
       />
     </div>
   )
