@@ -20,6 +20,7 @@ export const firebaseReady = Boolean(firebaseConfig.apiKey && firebaseConfig.pro
 // before real Firebase credentials are ever added.
 const app = firebaseReady ? initializeApp(firebaseConfig) : null
 
+export { app }
 export const auth = app ? getAuth(app) : null
 export const db = app ? getFirestore(app) : null
 export const rtdb = app ? getDatabase(app) : null
