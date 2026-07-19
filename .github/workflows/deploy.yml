@@ -25,7 +25,11 @@ jobs:
           node-version: 22
           cache: npm
 
-      - run: npm ci
+      # npm ci requires package-lock.json to have every platform's optional
+      # deps pre-resolved; a Windows-generated lockfile won't include Linux
+      # WASM-fallback packages it never needed locally. npm install
+      # resolves what this platform actually needs instead of failing.
+      - run: npm install
 
       - run: npm run build
         env:
