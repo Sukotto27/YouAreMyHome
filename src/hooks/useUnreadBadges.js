@@ -42,7 +42,15 @@ export function useUnreadBadges() {
 
   useEffect(() => {
     if (!firebaseReady || !user) return
-    return onSnapshot(doc(db, 'presence', user.uid), (snap) => setPresence(snap.data() || {}))
+    // Skip the local echo of our own pending writes: useMarkSeen() writes
+    // serverTimestamp(), which resolves to null in the optimistic local
+    // snapshot until the server acks it — reading that null momentarily
+    // makes a just-seen feature look unread again and fires a false
+    // notification sound. Waiting for confirmation avoids the flicker.
+    return onSnapshot(doc(db, 'presence', user.uid), (snap) => {
+      if (snap.metadata.hasPendingWrites) return
+      setPresence(snap.data() || {})
+    })
   }, [user])
 
   useEffect(() => {
