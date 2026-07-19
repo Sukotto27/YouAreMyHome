@@ -23,6 +23,14 @@ function errorMessageFor(code) {
   }
 }
 
+// Shown alongside the friendly message so issues can be diagnosed remotely
+// without guessing — this is a 2-person app, not a public product, so a raw
+// error code on screen is more useful than it is embarrassing.
+function DebugCode({ code }) {
+  if (!code) return null
+  return <p className="font-body text-xs text-ink-soft/60">({code})</p>
+}
+
 export default function Login() {
   const { user, login, resetPassword } = useAuth()
   const navigate = useNavigate()
@@ -30,6 +38,7 @@ export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [errorCode, setErrorCode] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [resetStatus, setResetStatus] = useState('')
 
@@ -41,30 +50,41 @@ export default function Login() {
   async function handleSubmit(event) {
     event.preventDefault()
     setError('')
+    setErrorCode('')
     setResetStatus('')
     setSubmitting(true)
+
+    const formData = new FormData(event.currentTarget)
+    const emailValue = String(formData.get('email') || '').trim()
+    const passwordValue = String(formData.get('password') || '')
+
     try {
-      await login(email, password)
+      await login(emailValue, passwordValue)
       navigate('/chat', { replace: true })
     } catch (err) {
       setError(errorMessageFor(err.code))
+      setErrorCode(err.code || err.message)
     } finally {
       setSubmitting(false)
     }
   }
 
-  async function handleForgotPassword() {
+  async function handleForgotPassword(event) {
     setError('')
+    setErrorCode('')
     setResetStatus('')
-    if (!email.trim()) {
+    const form = event.currentTarget.closest('form')
+    const emailValue = String(new FormData(form).get('email') || '').trim()
+    if (!emailValue) {
       setError('Enter your email above first, then tap "Forgot password?" again.')
       return
     }
     try {
-      await resetPassword(email.trim())
-      setResetStatus(`Check ${email.trim()} for a reset link.`)
+      await resetPassword(emailValue)
+      setResetStatus(`Check ${emailValue} for a reset link.`)
     } catch (err) {
       setError(errorMessageFor(err.code))
+      setErrorCode(err.code || err.message)
     }
   }
 
@@ -102,6 +122,7 @@ export default function Login() {
             </label>
             <input
               id="email"
+              name="email"
               type="email"
               required
               autoComplete="email"
@@ -117,6 +138,7 @@ export default function Login() {
             </label>
             <input
               id="password"
+              name="password"
               type="password"
               required
               autoComplete="current-password"
@@ -126,7 +148,12 @@ export default function Login() {
             />
           </div>
 
-          {error && <p className="text-sm text-rose">{error}</p>}
+          {error && (
+            <div>
+              <p className="text-sm text-rose">{error}</p>
+              <DebugCode code={errorCode} />
+            </div>
+          )}
           {resetStatus && <p className="text-sm text-teal">{resetStatus}</p>}
 
           <button
