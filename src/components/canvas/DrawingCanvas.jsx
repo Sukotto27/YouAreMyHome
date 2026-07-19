@@ -1,12 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
-import { ref, push, set, onChildAdded, onChildRemoved, serverTimestamp } from 'firebase/database'
+import { ref, push, set, remove, onChildAdded, onChildRemoved, serverTimestamp } from 'firebase/database'
 import { rtdb, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { DEFAULT_CANVAS_BACKGROUND } from './palette'
 
 const MIN_DISTANCE_FRACTION = 0.003
 
-const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, background }, ref_) {
+const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, background, tool, onCanUndoChange }, ref_) {
   const { user } = useAuth()
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -17,11 +17,21 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, 
   const colorRef = useRef(color)
   const brushFractionRef = useRef(brushFraction)
   const backgroundRef = useRef(background || DEFAULT_CANVAS_BACKGROUND)
+  const toolRef = useRef(tool || 'pen')
+  const myStrokeIdsRef = useRef([])
   const localIdRef = useRef(0)
+
+  function reportCanUndo() {
+    onCanUndoChange?.(myStrokeIdsRef.current.length > 0)
+  }
 
   useEffect(() => {
     colorRef.current = color
   }, [color])
+
+  useEffect(() => {
+    toolRef.current = tool || 'pen'
+  }, [tool])
 
   useEffect(() => {
     brushFractionRef.current = brushFraction
@@ -79,11 +89,26 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, 
     }
   }
 
+  function undoLast() {
+    const strokeId = myStrokeIdsRef.current.pop()
+    if (!strokeId) return
+    reportCanUndo()
+    if (firebaseReady) {
+      remove(ref(rtdb, `strokes/${strokeId}`))
+    } else {
+      strokesRef.current.delete(strokeId)
+      fullRedraw()
+    }
+  }
+
   useImperativeHandle(ref_, () => ({
     clearLocal() {
       strokesRef.current.clear()
+      myStrokeIdsRef.current = []
+      reportCanUndo()
       fullRedraw()
     },
+    undoLast,
     exportPNG() {
       const canvas = canvasRef.current
       if (!canvas || canvas.width === 0) return null
@@ -162,6 +187,11 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, 
       pointDetachers.get(strokeId)?.()
       pointDetachers.delete(strokeId)
       strokesRef.current.delete(strokeId)
+      const mineIndex = myStrokeIdsRef.current.indexOf(strokeId)
+      if (mineIndex !== -1) {
+        myStrokeIdsRef.current.splice(mineIndex, 1)
+        reportCanUndo()
+      }
       fullRedraw()
     })
 
@@ -195,11 +225,14 @@ const DrawingCanvas = forwardRef(function DrawingCanvas({ color, brushFraction, 
 
     localIdRef.current += 1
     const strokeId = firebaseReady ? push(ref(rtdb, 'strokes')).key : `local-${localIdRef.current}`
-    const meta = { uid: user.uid, color: colorRef.current, size: brushFractionRef.current }
+    const strokeColor = toolRef.current === 'eraser' ? backgroundRef.current : colorRef.current
+    const meta = { uid: user.uid, color: strokeColor, size: brushFractionRef.current }
     if (firebaseReady) {
       set(ref(rtdb, `strokes/${strokeId}/meta`), { ...meta, createdAt: serverTimestamp() })
     }
     strokesRef.current.set(strokeId, { meta, points: [] })
+    myStrokeIdsRef.current.push(strokeId)
+    reportCanUndo()
 
     activeStrokeRef.current = { id: strokeId, meta, lastPoint: null }
     const point = toNormalizedPoint(event)

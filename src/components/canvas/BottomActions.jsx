@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-export default function BottomActions({ onSave, saving, onClear }) {
+export default function BottomActions({ onSave, saving, onClear, onUndo, canUndo }) {
   const [confirmingClear, setConfirmingClear] = useState(false)
 
   function handleClear() {
@@ -34,6 +34,18 @@ export default function BottomActions({ onSave, saving, onClear }) {
           <path d="M6 4h12a1 1 0 0 1 1 1v15l-7-4-7 4V5a1 1 0 0 1 1-1Z" />
         </svg>
         {saving ? 'Saving…' : 'Save to scrapbook'}
+      </button>
+      <button
+        type="button"
+        onClick={onUndo}
+        disabled={!canUndo}
+        className="flex items-center gap-1.5 font-body text-sm text-ink-soft transition-colors hover:text-rose disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="h-4.5 w-4.5">
+          <path d="M9 14 4 9l5-5" />
+          <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+        </svg>
+        Undo
       </button>
       <button
         type="button"

@@ -14,6 +14,8 @@ export default function Draw() {
   const [color, setColor] = useState(DEFAULT_COLOR)
   const [brushFraction, setBrushFraction] = useState(DEFAULT_BRUSH_FRACTION)
   const [background, setBackground] = useState(DEFAULT_CANVAS_BACKGROUND)
+  const [tool, setTool] = useState('pen')
+  const [canUndo, setCanUndo] = useState(false)
   const [saving, setSaving] = useState(false)
   const [savedMessage, setSavedMessage] = useState('')
   const canvasRef = useRef(null)
@@ -36,6 +38,10 @@ export default function Draw() {
     } else {
       canvasRef.current?.clearLocal()
     }
+  }
+
+  function handleUndo() {
+    canvasRef.current?.undoLast()
   }
 
   async function handleSave() {
@@ -73,6 +79,8 @@ export default function Draw() {
         onBrushFractionChange={setBrushFraction}
         background={background}
         onBackgroundChange={handleBackgroundChange}
+        tool={tool}
+        onToolChange={setTool}
       />
       {savedMessage && (
         <p className="bg-blush-soft/60 px-4 py-1.5 text-center font-hand text-sm text-rose">
@@ -85,9 +93,11 @@ export default function Draw() {
           color={color}
           brushFraction={brushFraction}
           background={background}
+          tool={tool}
+          onCanUndoChange={setCanUndo}
         />
       </div>
-      <BottomActions onSave={handleSave} saving={saving} onClear={handleClear} />
+      <BottomActions onSave={handleSave} saving={saving} onClear={handleClear} onUndo={handleUndo} canUndo={canUndo} />
     </div>
   )
 }

@@ -7,18 +7,41 @@ export default function Toolbar({
   onBrushFractionChange,
   background,
   onBackgroundChange,
+  tool,
+  onToolChange,
 }) {
   return (
     <div className="flex items-center gap-2 overflow-x-auto border-b border-ink/10 px-3 py-1.5 sm:px-4">
+      <button
+        type="button"
+        aria-label="Eraser"
+        aria-pressed={tool === 'eraser'}
+        onClick={() => onToolChange(tool === 'eraser' ? 'pen' : 'eraser')}
+        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full border transition-colors ${
+          tool === 'eraser' ? 'border-rose bg-blush-soft text-rose' : 'border-ink/15 bg-white/50 text-ink-soft'
+        }`}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+          <path d="M18.5 13.5 10 22H5l-2.5-2.5a2 2 0 0 1 0-2.83l9.67-9.67a2 2 0 0 1 2.83 0l3.5 3.5a2 2 0 0 1 0 2.83Z" />
+          <path d="M13 6 18.5 11.5" />
+          <path d="M5 22h14" />
+        </svg>
+      </button>
+
+      <div className="mx-1 h-5 w-px shrink-0 bg-ink/10" />
+
       <div className="flex shrink-0 items-center gap-1">
         {COLOR_PALETTE.map((swatch) => (
           <button
             key={swatch.value}
             type="button"
             aria-label={swatch.name}
-            onClick={() => onColorChange(swatch.value)}
+            onClick={() => {
+              onToolChange('pen')
+              onColorChange(swatch.value)
+            }}
             className={`h-6 w-6 shrink-0 rounded-full ring-offset-2 ring-offset-paper transition-transform hover:scale-110 ${
-              color === swatch.value ? 'ring-2 ring-ink' : ''
+              tool !== 'eraser' && color === swatch.value ? 'ring-2 ring-ink' : ''
             }`}
             style={{ backgroundColor: swatch.value }}
           />

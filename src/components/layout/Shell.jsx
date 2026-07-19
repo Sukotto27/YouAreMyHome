@@ -27,6 +27,18 @@ export default function Shell() {
   const [greeting, setGreeting] = useState(null)
   const unread = useUnreadBadges()
 
+  // App Badging API: shows a count on the home-screen icon once installed.
+  // Chromium (Android/desktop) only — Safari/iOS has no equivalent API.
+  useEffect(() => {
+    if (!('setAppBadge' in navigator)) return
+    const count = Object.values(unread).filter(Boolean).length
+    if (count > 0) {
+      navigator.setAppBadge(count).catch(() => {})
+    } else {
+      navigator.clearAppBadge().catch(() => {})
+    }
+  }, [unread])
+
   useEffect(() => {
     if (sessionStorage.getItem(GREETED_KEY)) return
     const nickname = nicknameFor(user)
