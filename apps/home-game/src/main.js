@@ -1178,15 +1178,31 @@ function movePlayerOnline(dx, dy) {
 // first connect (if nothing's published yet) and again whenever
 // saveCurrentWorldSoon() fires locally, so Firestore stays a few hundred ms
 // behind the host's own local save at most.
+// Firestore documents cap out at 1MiB; worldJson is comfortably under that
+// at the current 80x80 map size (tens of KB), but a much larger map could
+// approach it. Guard so that failure mode is a loud, actionable warning
+// instead of a silent setDoc rejection nobody sees — see schema.js's
+// FIRESTORE.worlds comment for the Cloud Storage migration path once a
+// bigger map actually needs it.
+const WORLD_JSON_SAFE_BYTES = 900_000;
+
 function publishWorld() {
   if (!state.net?.isHost || !state.net?.worldId || !firebaseReady) return;
   const wid = state.net.worldId;
   const payload = worldToPayload(state.world, wid, state.world.seed);
+  const worldJson = JSON.stringify(payload);
+  if (worldJson.length > WORLD_JSON_SAFE_BYTES) {
+    console.error(
+      `[NET] world save (${worldJson.length} bytes) is too close to Firestore's 1MiB doc limit — ` +
+      `skipping cloud sync. See FIRESTORE.worlds in src/game/schema.js for the Cloud Storage migration path.`
+    );
+    return;
+  }
   const version = Date.now();
   _appliedWorldVersion = version;
   setDoc(doc(db, FIRESTORE.worlds, String(wid)), {
     hostUid: state.net.uid,
-    worldJson: JSON.stringify(payload),
+    worldJson,
     version,
     updatedAt: serverTimestamp(),
   }).catch((e) => console.error("[NET] publishWorld failed:", e));
