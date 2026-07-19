@@ -1,6 +1,7 @@
 import RelationshipCounter from '../components/counter/RelationshipCounter'
 import InstallBanner from '../components/InstallBanner'
 import NotificationBanner from '../components/NotificationBanner'
+import LocationClocks from '../components/LocationClocks'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 import cristina from '../assets/images/cristina.jpg'
@@ -54,6 +55,8 @@ export default function Home() {
           <span className="font-display text-2xl text-gold">&amp;</span>
           <Avatar src={scott} name="Scott" ring="ring-teal" />
         </div>
+
+        <LocationClocks />
       </div>
 
       <footer className="relative pb-6 text-center">

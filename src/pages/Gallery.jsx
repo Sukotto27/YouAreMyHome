@@ -5,6 +5,7 @@ import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
 import { resizeImageFile } from '../lib/image'
 import { useMarkSeen } from '../hooks/useMarkSeen'
+import CommentThread from '../components/CommentThread'
 
 export default function Gallery() {
   const { user } = useAuth()
@@ -52,6 +53,9 @@ export default function Gallery() {
         uploadedBy: user.uid,
         uploadedByName: user.displayName || user.email,
         createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        lastActivityByUid: user.uid,
+        commentCount: 0,
       })
     } finally {
       setUploading(false)
@@ -72,6 +76,9 @@ export default function Gallery() {
         <p className="text-center font-hand text-lg text-ink-soft">
           from {selected.uploadedByName} · {formatDate(selected.createdAt)}
         </p>
+        <div className="rounded-2xl border border-ink/10 bg-white/40 p-4">
+          <CommentThread collectionName="gallery" parentId={selected.id} />
+        </div>
       </div>
     )
   }

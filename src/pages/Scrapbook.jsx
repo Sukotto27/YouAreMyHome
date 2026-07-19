@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { collection, doc, getDocs, onSnapshot, orderBy, query, writeBatch } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
 import { useMarkSeen } from '../hooks/useMarkSeen'
+import CommentThread from '../components/CommentThread'
 
 export default function Scrapbook() {
   useMarkSeen('scrapbook')
@@ -25,7 +26,11 @@ export default function Scrapbook() {
     setDeleting(true)
     try {
       if (firebaseReady) {
-        await deleteDoc(doc(db, 'scrapbook', selected.id))
+        const commentsSnap = await getDocs(collection(db, 'scrapbook', selected.id, 'comments'))
+        const batch = writeBatch(db)
+        commentsSnap.docs.forEach((commentDoc) => batch.delete(commentDoc.ref))
+        batch.delete(doc(db, 'scrapbook', selected.id))
+        await batch.commit()
       } else {
         const next = entries.filter((entry) => entry.id !== selected.id)
         setEntries(next)
@@ -80,6 +85,9 @@ export default function Scrapbook() {
         <p className="text-center font-hand text-lg text-ink-soft">
           saved by {selected.savedByName} · {formatDate(selected.createdAt)}
         </p>
+        <div className="rounded-2xl border border-ink/10 bg-white/40 p-4">
+          <CommentThread collectionName="scrapbook" parentId={selected.id} />
+        </div>
       </div>
     )
   }

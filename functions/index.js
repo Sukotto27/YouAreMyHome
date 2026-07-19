@@ -1,20 +1,41 @@
 const { initializeApp } = require('firebase-admin/app')
-const { getFirestore } = require('firebase-admin/firestore')
+const { FieldValue, getFirestore } = require('firebase-admin/firestore')
 const { getMessaging } = require('firebase-admin/messaging')
 const { onDocumentCreated } = require('firebase-functions/v2/firestore')
+const { onRequest } = require('firebase-functions/v2/https')
+const { buildIcsFeed } = require('./lib/ics')
 
 initializeApp()
 const db = getFirestore()
 
 // Mirrors src/hooks/useUnreadBadges.js on the client — Draw is excluded
 // there for the same reason (it's a live canvas, not a read/unread feed).
+// For the 4 commentable features, activityField/activityAuthorField point
+// at lastActivityAt/lastActivityByUid instead of createdAt/authorField — a
+// comment (or edit) bumps those without changing who created the doc, so
+// "is this mine" must compare against who acted last, not who authored it.
 const FEATURES = [
-  { key: 'chat', collection: 'messages', authorField: 'senderUid' },
-  { key: 'qa', collection: 'qaRounds', authorField: 'createdBy' },
-  { key: 'scrapbook', collection: 'scrapbook', authorField: 'savedBy' },
-  { key: 'gallery', collection: 'gallery', authorField: 'uploadedBy' },
-  { key: 'mail', collection: 'loveLetters', authorField: 'fromUid' },
-  { key: 'milestones', collection: 'milestones', authorField: 'addedBy' },
+  { key: 'chat', collection: 'messages', activityField: 'createdAt', activityAuthorField: 'senderUid' },
+  { key: 'qa', collection: 'qaRounds', activityField: 'lastActivityAt', activityAuthorField: 'lastActivityByUid' },
+  {
+    key: 'scrapbook',
+    collection: 'scrapbook',
+    activityField: 'lastActivityAt',
+    activityAuthorField: 'lastActivityByUid',
+  },
+  {
+    key: 'gallery',
+    collection: 'gallery',
+    activityField: 'lastActivityAt',
+    activityAuthorField: 'lastActivityByUid',
+  },
+  { key: 'mail', collection: 'loveLetters', activityField: 'createdAt', activityAuthorField: 'fromUid' },
+  {
+    key: 'milestones',
+    collection: 'milestones',
+    activityField: 'lastActivityAt',
+    activityAuthorField: 'lastActivityByUid',
+  },
 ]
 
 async function computeUnreadCount(recipientUid) {
@@ -22,13 +43,13 @@ async function computeUnreadCount(recipientUid) {
   const presence = presenceSnap.exists ? presenceSnap.data() : {}
 
   let count = 0
-  for (const { key, collection, authorField } of FEATURES) {
-    const latestSnap = await db.collection(collection).orderBy('createdAt', 'desc').limit(1).get()
+  for (const { key, collection, activityField, activityAuthorField } of FEATURES) {
+    const latestSnap = await db.collection(collection).orderBy(activityField, 'desc').limit(1).get()
     if (latestSnap.empty) continue
     const doc = latestSnap.docs[0].data()
-    if (!doc.createdAt || doc[authorField] === recipientUid) continue
+    if (!doc[activityField] || doc[activityAuthorField] === recipientUid) continue
     const seenAt = presence[key]
-    if (!seenAt || doc.createdAt.toMillis() > seenAt.toMillis()) count += 1
+    if (!seenAt || doc[activityField].toMillis() > seenAt.toMillis()) count += 1
   }
   return count
 }
@@ -131,6 +152,61 @@ exports.notifyOnMilestone = onDocumentCreated('milestones/{id}', async (event) =
   await notifyPartner(data.addedBy, {
     title: 'New milestone',
     body: truncate(data.title) || 'Added a new milestone',
-    url: '/YouAreMyHome/#/milestones',
+    url: '/YouAreMyHome/#/calendar',
   })
+})
+
+// Each new comment bumps its parent doc's lastActivityAt/lastActivityByUid
+// (which is what the badge queries above actually look at) and its
+// commentCount, then notifies the partner the same way every other feature
+// does. Comments are add-only in v1 — no decrement path needed.
+function notifyOnComment(parentCollection, { title, url }) {
+  return onDocumentCreated(`${parentCollection}/{parentId}/comments/{commentId}`, async (event) => {
+    const comment = event.data.data()
+    const parentRef = db.doc(`${parentCollection}/${event.params.parentId}`)
+    await parentRef.update({
+      lastActivityAt: comment.createdAt,
+      lastActivityByUid: comment.authorUid,
+      commentCount: FieldValue.increment(1),
+    })
+    await notifyPartner(comment.authorUid, {
+      title,
+      body: `${comment.authorName || 'They'} commented: ${truncate(comment.text)}`,
+      url,
+    })
+  })
+}
+
+exports.notifyOnMilestoneComment = notifyOnComment('milestones', {
+  title: 'New comment',
+  url: '/YouAreMyHome/#/calendar',
+})
+exports.notifyOnQaComment = notifyOnComment('qaRounds', { title: 'New comment', url: '/YouAreMyHome/#/qa' })
+exports.notifyOnScrapbookComment = notifyOnComment('scrapbook', {
+  title: 'New comment',
+  url: '/YouAreMyHome/#/scrapbook',
+})
+exports.notifyOnGalleryComment = notifyOnComment('gallery', {
+  title: 'New comment',
+  url: '/YouAreMyHome/#/gallery',
+})
+
+// Public (unauthenticated) — calendar apps can't send Firebase auth headers,
+// so a random token (generated client-side, stored in config/calendarFeed)
+// gates access instead. `invoker: 'public'` is required for 2nd-gen HTTPS
+// functions, which otherwise default to rejecting unauthenticated calls.
+exports.calendarFeed = onRequest({ invoker: 'public' }, async (req, res) => {
+  const configSnap = await db.doc('config/calendarFeed').get()
+  const expectedToken = configSnap.exists ? configSnap.data().token : null
+
+  if (!expectedToken || req.query.token !== expectedToken) {
+    res.status(403).send('Forbidden')
+    return
+  }
+
+  const snap = await db.collection('milestones').get()
+  const items = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+
+  res.set('Content-Type', 'text/calendar; charset=utf-8')
+  res.send(buildIcsFeed(items))
 })

@@ -10,7 +10,7 @@ import Draw from './pages/Draw'
 import Scrapbook from './pages/Scrapbook'
 import Gallery from './pages/Gallery'
 import Mail from './pages/Mail'
-import Milestones from './pages/Milestones'
+import Calendar from './pages/Calendar'
 
 function App() {
   return (
@@ -32,7 +32,7 @@ function App() {
             <Route path="/scrapbook" element={<Scrapbook />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/mail" element={<Mail />} />
-            <Route path="/milestones" element={<Milestones />} />
+            <Route path="/calendar" element={<Calendar />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

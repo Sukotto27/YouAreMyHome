@@ -1,4 +1,7 @@
+import CommentThread from '../CommentThread'
+
 export default function RevealView({
+  roundId,
   questionText,
   answers,
   currentUid,
@@ -41,6 +44,12 @@ export default function RevealView({
           </div>
         ))}
       </div>
+
+      {roundId && (
+        <div className="rounded-2xl border border-ink/10 bg-white/40 p-4">
+          <CommentThread collectionName="qaRounds" parentId={roundId} />
+        </div>
+      )}
 
       {!rewind && (
         <button

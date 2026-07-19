@@ -72,6 +72,9 @@ export default function QA() {
         answers: {},
         createdBy: user.uid,
         createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        lastActivityByUid: user.uid,
+        commentCount: 0,
       })
       setComposing(false)
     } finally {
@@ -126,6 +129,7 @@ export default function QA() {
   if (rewindTarget) {
     return (
       <RevealView
+        roundId={rewindTarget.id}
         questionText={rewindTarget.questionText}
         answers={rewindTarget.answers}
         currentUid={user.uid}
@@ -172,6 +176,7 @@ export default function QA() {
   if (answerCount >= 2) {
     return (
       <RevealView
+        roundId={latest.id}
         questionText={latest.questionText}
         answers={answers}
         currentUid={user.uid}

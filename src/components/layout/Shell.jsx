@@ -3,8 +3,10 @@ import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
+import { seedHistoryMilestones } from '../../lib/migrations'
 import { useUnreadBadges } from '../../hooks/useUnreadBadges'
 import CompactCounter from '../counter/CompactCounter'
+import NamePrompt from '../NamePrompt'
 import NavIcon from './NavIcon'
 import Wordmark from './Wordmark'
 import heartLeft from '../../assets/images/heart-left.png'
@@ -17,7 +19,7 @@ const NAV_ITEMS = [
   { to: '/scrapbook', label: 'Scrapbook', icon: 'scrapbook', badgeKey: 'scrapbook' },
   { to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
   { to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
-  { to: '/milestones', label: 'Milestones', icon: 'calendar', badgeKey: 'milestones' },
+  { to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
 ]
 
 const GREETED_KEY = 'you-are-my-home:greeted'
@@ -40,6 +42,10 @@ export default function Shell() {
   }, [unread])
 
   useEffect(() => {
+    if (firebaseReady) seedHistoryMilestones()
+  }, [])
+
+  useEffect(() => {
     if (sessionStorage.getItem(GREETED_KEY)) return
     const nickname = nicknameFor(user)
     if (!nickname) return
@@ -51,6 +57,7 @@ export default function Shell() {
 
   return (
     <div className="flex min-h-svh flex-col bg-paper text-ink">
+      <NamePrompt />
       {!firebaseReady && (
         <div className="bg-gold/15 px-4 py-1.5 text-center font-body text-xs text-ink-soft">
           Previewing without Firebase connected — nothing here is saved or synced yet.

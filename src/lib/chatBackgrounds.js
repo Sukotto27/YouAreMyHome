@@ -25,21 +25,22 @@ export const CHAT_BACKGROUNDS = [
   },
 ]
 
-export const DEFAULT_CHAT_BACKGROUND = CHAT_BACKGROUNDS[0].id
-const STORAGE_KEY = 'you-are-my-home:chat-bg'
+export const DEFAULT_CHAT_BACKGROUND = { type: 'preset', id: CHAT_BACKGROUNDS[0].id }
 
-export function getSavedChatBackground() {
-  try {
-    return localStorage.getItem(STORAGE_KEY) || DEFAULT_CHAT_BACKGROUND
-  } catch {
-    return DEFAULT_CHAT_BACKGROUND
+// `background` is either { type: 'preset', id } or { type: 'photo', url } (a
+// gallery photo's data URL). Falls back to the default preset if the chosen
+// preset id no longer exists.
+export function backgroundStyleFor(background) {
+  if (background?.type === 'photo' && background.url) {
+    return {
+      backgroundImage: `url(${background.url})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+    }
   }
-}
-
-export function saveChatBackground(id) {
-  try {
-    localStorage.setItem(STORAGE_KEY, id)
-  } catch {
-    // localStorage unavailable — background choice just won't persist
-  }
+  const id = background?.type === 'preset' ? background.id : DEFAULT_CHAT_BACKGROUND.id
+  return (
+    CHAT_BACKGROUNDS.find((bg) => bg.id === id)?.style ??
+    CHAT_BACKGROUNDS.find((bg) => bg.id === DEFAULT_CHAT_BACKGROUND.id).style
+  )
 }

@@ -1,56 +1,14 @@
-// The fixed chapters of our story. Custom milestones (birthdays, trips, etc.)
-// get added on top of these from Firestore/local storage — these ones don't
-// move.
-export const HISTORY_MILESTONES = [
-  {
-    id: 'met',
-    title: 'The first "hi"',
-    date: '2024-01-18',
-    note: 'Where it all began — a shared Facebook page for Life is Strange.',
-  },
-  {
-    id: 'dune-line',
-    title: 'The hidden message',
-    date: '2024-03-08',
-    note: '"As long as I breathe, I will." — the Dune line that started it.',
-  },
-  {
-    id: 'i-love-you',
-    title: 'First "I love you"',
-    date: '2024-03-11',
-    note: 'Eu te amo. In any language.',
-  },
-  {
-    id: 'anniversary',
-    title: 'Official anniversary',
-    date: '2024-03-30',
-    note: 'Um casal oficial.',
-  },
-  {
-    id: 'eclipse',
-    title: 'The eclipse & the letter',
-    date: '2024-04-08',
-    note: 'The Great North American Eclipse — your first letter arrived the same day.',
-  },
-  {
-    id: 'valentine-br',
-    title: "Brazilian Valentine's Day",
-    date: '2024-06-12',
-    note: 'Dia dos Namorados — three days late, worth every minute.',
-  },
-  {
-    id: 'first-date',
-    title: 'First (virtual) date',
-    date: '2024-08-31',
-    note: "Alien: Romulus, popcorn vs. McDonald's, separate theaters.",
-  },
-]
+export const CATEGORIES = ['milestone', 'plan', 'goal']
 
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
+// Returns null for undated items (Plans/Goals can be undated "someday"
+// entries) — callers must check for null before using the result.
 export function nextOccurrence(milestone, now = new Date()) {
+  if (!milestone.date) return null
+
   const [year, month, day] = milestone.date.split('-').map(Number)
   const original = new Date(year, month - 1, day)
   const today = startOfDay(now)

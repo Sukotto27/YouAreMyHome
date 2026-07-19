@@ -61,6 +61,9 @@ export default function Draw() {
           savedBy: user.uid,
           savedByName: user.displayName || user.email,
           createdAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          lastActivityByUid: user.uid,
+          commentCount: 0,
         })
       }
       setSavedMessage('Saved to the scrapbook!')

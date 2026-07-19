@@ -4,6 +4,7 @@ import {
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut,
+  updateProfile,
 } from 'firebase/auth'
 import { auth, firebaseReady } from '../firebase'
 
@@ -47,8 +48,18 @@ export function AuthProvider({ children }) {
     return sendPasswordResetEmail(auth, email)
   }
 
+  // Sets displayName on the Firebase Auth account itself (not just local state),
+  // so it persists across devices/sessions and every `user.displayName` read
+  // throughout the app — including the Cloud Functions push notifications —
+  // resolves to a real name instead of falling back to the login email.
+  const setDisplayName = async (displayName) => {
+    if (!firebaseReady || !auth.currentUser) return
+    await updateProfile(auth.currentUser, { displayName })
+    setUser({ ...auth.currentUser })
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, resetPassword }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, resetPassword, setDisplayName }}>
       {children}
     </AuthContext.Provider>
   )
