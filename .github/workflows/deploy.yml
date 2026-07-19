@@ -31,6 +31,8 @@ jobs:
       # resolves what this platform actually needs instead of failing.
       - run: npm install
 
+      # Builds both workspaces (apps/couples-app, apps/home-game) via the
+      # root package.json "build" script.
       - run: npm run build
         env:
           VITE_FIREBASE_API_KEY: ${{ secrets.VITE_FIREBASE_API_KEY }}
@@ -41,6 +43,16 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ secrets.VITE_FIREBASE_APP_ID }}
           VITE_FIREBASE_DATABASE_URL: ${{ secrets.VITE_FIREBASE_DATABASE_URL }}
           VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
+
+      # Merge both apps into one Pages artifact: couples-app at the site
+      # root (base: /YouAreMyHome/), the game under /game/ (base:
+      # /YouAreMyHome/game/) to match each app's Vite `base` config.
+      - name: Assemble combined dist/
+        run: |
+          mkdir -p dist
+          cp -r apps/couples-app/dist/. dist/
+          mkdir -p dist/game
+          cp -r apps/home-game/dist/. dist/game/
 
       - uses: actions/upload-pages-artifact@v3
         with:

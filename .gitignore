@@ -15,8 +15,8 @@ dist-ssr
 # Original upload staging — app-used copies live in src/assets/images and
 # public/icons; only the heart halves are still needed here (by
 # scripts/generate-icons.mjs to regenerate app icons).
-images/*.jpg
-images/desktop.ini
+apps/couples-app/images/*.jpg
+apps/couples-app/images/desktop.ini
 journal.docx
 
 # Original sound uploads — app-used copies live in src/assets/sounds.
