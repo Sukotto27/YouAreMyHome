@@ -1634,15 +1634,30 @@ function setChatInputVisible(visible) {
   if (indicator) indicator.style.display = visible ? "flex" : "none";
 }
 
+// Safe-area insets (notch/home-indicator) as pixel numbers, read once from the
+// CSS env() custom properties set in index.html. NOTE: this HUD's fixed pixel
+// widths (UI_LEFTBAR_W, INV_COLS * cell, etc.) assume a desktop-width canvas
+// (~700-900px+) regardless of safe-area — on a ~375-430px phone viewport the
+// bottom bar/inventory/chat will overflow off-screen well before safe-area
+// padding becomes the limiting factor. That's a real gap a narrow-viewport
+// HUD reflow needs to address; this offset only handles notch/home-indicator
+// clipping on devices wide enough for the HUD to fit in the first place.
+function safeAreaInsets() {
+  const cs = getComputedStyle(document.documentElement);
+  const n = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
+  return { top: n("--safe-top"), right: n("--safe-right"), bottom: n("--safe-bottom"), left: n("--safe-left") };
+}
+
 function positionChatInput() {
   const wrap = document.getElementById("chatWrap");
   const input = document.getElementById("chatInput");
   if (!wrap || !input) return;
 
-  const baseY = window.innerHeight - UI_BOTTOM_H;
+  const safe = safeAreaInsets();
+  const baseY = window.innerHeight - UI_BOTTOM_H - safe.bottom;
   const cell = 44, pad = 10;
 
-  const gridX = UI_LEFTBAR_W + pad;
+  const gridX = UI_LEFTBAR_W + pad + safe.left;
   const gridY = baseY + 50;
   const gridW = INV_COLS * (cell + 6);
 
