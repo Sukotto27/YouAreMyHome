@@ -5,7 +5,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: '/CouplesApp/',
+  base: '/YouAreMyHome/',
   plugins: [
     react(),
     tailwindcss(),
@@ -13,12 +13,12 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/*.png'],
       manifest: {
-        id: '/CouplesApp/',
+        id: '/YouAreMyHome/',
         name: 'You Are My Home',
         short_name: 'Home',
         description: 'A little corner of the internet, just for the two of us.',
-        start_url: '/CouplesApp/',
-        scope: '/CouplesApp/',
+        start_url: '/YouAreMyHome/',
+        scope: '/YouAreMyHome/',
         display: 'standalone',
         background_color: '#fbf2e9',
         theme_color: '#fbf2e9',
