@@ -272,7 +272,7 @@ const UI_TOP_H = 58;        // room for stamina bar
 const UI_BOTTOM_H = 230;    // inventory + crafting + misc
 
 // ---- Left sidebar UI ----
-const UI_LEFTBAR_W = 64; // width of the new left sidebar
+let UI_LEFTBAR_W = 64; // width of the new left sidebar; shrinks on narrow viewports, see resize()
 
 // Pointer drag threshold
 const DRAG_THRESHOLD_PX = 8;
@@ -926,6 +926,9 @@ function overworldReady() {
 // ---- Resize -----------------------------------------------------------------------------------------------
 function resize() {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
+  // Narrow phone viewport: shrink the sidebar to claw back width for the
+  // inventory grid (see invGridMetrics()).
+  UI_LEFTBAR_W = window.innerWidth < 480 ? 44 : 64;
   canvas.width = Math.floor(window.innerWidth * dpr);
   canvas.height = Math.floor(window.innerHeight * dpr);
   canvas.style.width = `${window.innerWidth}px`;
@@ -1635,17 +1638,76 @@ function setChatInputVisible(visible) {
 }
 
 // Safe-area insets (notch/home-indicator) as pixel numbers, read once from the
-// CSS env() custom properties set in index.html. NOTE: this HUD's fixed pixel
-// widths (UI_LEFTBAR_W, INV_COLS * cell, etc.) assume a desktop-width canvas
-// (~700-900px+) regardless of safe-area — on a ~375-430px phone viewport the
-// bottom bar/inventory/chat will overflow off-screen well before safe-area
-// padding becomes the limiting factor. That's a real gap a narrow-viewport
-// HUD reflow needs to address; this offset only handles notch/home-indicator
-// clipping on devices wide enough for the HUD to fit in the first place.
+// CSS env() custom properties set in index.html.
 function safeAreaInsets() {
   const cs = getComputedStyle(document.documentElement);
   const n = (v) => parseFloat(cs.getPropertyValue(v)) || 0;
   return { top: n("--safe-top"), right: n("--safe-right"), bottom: n("--safe-bottom"), left: n("--safe-left") };
+}
+
+// Single source of truth for the inventory grid's on-screen pixel layout.
+// drawInventoryUI(), invIndexAtScreen(), drawChatLog(), and
+// positionChatInput() all read this instead of re-deriving their own copies,
+// so draw and hit-test can't drift out of sync. INV_COLS/INV_ROWS/INV_SLOTS
+// (inventory capacity — total slot count) never change here. What DOES
+// change on a narrow phone is how those same INV_SLOTS slots are laid out
+// on screen: fewer columns per row, more rows, at a bigger/legible cell
+// size — a straight cell-shrink at a fixed 12-wide layout was tried first
+// and the arithmetic doesn't close (12 columns needs ~480px+ of width even
+// at a bare-minimum 30px cell; real phones are 375-430px), so this reflows
+// visual columns instead, the same way responsive CSS grids do.
+function invGridMetrics() {
+  const safe = safeAreaInsets();
+  const pad = 10;
+  const gap = 6;
+  const headerH = 44; // vertical offset from the bottom bar's top edge to the grid
+  const bottomMargin = 12;
+
+  const availableW = window.innerWidth - UI_LEFTBAR_W - pad * 2 - safe.left - safe.right;
+  const availableH = UI_BOTTOM_H - headerH - bottomMargin;
+
+  // Reflow to fewer, taller columns once 12-wide would need a sub-legible
+  // cell to fit; recompute at each candidate column count until one fits
+  // (or fall back to the narrowest option, INV_SLOTS-wide single column).
+  const candidateCols = [INV_COLS, 8, 6, 4];
+  let visualCols = INV_COLS;
+  let cell = 30;
+  for (const cols of candidateCols) {
+    const rows = Math.ceil(INV_SLOTS / cols);
+    const rawCellW = Math.floor((availableW - (cols - 1) * gap) / cols);
+    const rawCellH = Math.floor((availableH - (rows - 1) * gap) / rows);
+    const candidateCell = Math.max(0, Math.min(44, rawCellW, rawCellH));
+    if (candidateCell >= 30 || cols === candidateCols[candidateCols.length - 1]) {
+      visualCols = cols;
+      cell = Math.max(20, candidateCell); // absolute floor even on the narrowest fallback
+      break;
+    }
+  }
+  const visualRows = Math.ceil(INV_SLOTS / visualCols);
+
+  const gridX = UI_LEFTBAR_W + pad + safe.left;
+  const baseY = window.innerHeight - UI_BOTTOM_H; // matches drawInventoryUI's bar background
+  const gridY = baseY + headerH;
+  const gridW = visualCols * cell + (visualCols - 1) * gap;
+  const gridH = visualRows * cell + (visualRows - 1) * gap;
+
+  // Below this width there's no room to the right of the inventory grid for
+  // chat — stack it in a strip directly above the bottom bar instead of
+  // letting it clip off-screen. drawChatLog() and positionChatInput() both
+  // read these same stacked* numbers so the canvas-drawn log and the DOM
+  // input box stay visually aligned.
+  const stacked = (gridX + gridW + 200) > window.innerWidth;
+  const stackedLogH = 90, stackedInputH = 34, stackedGap = 6, stackedMargin = 6;
+  const stackedX = pad + safe.left;
+  const stackedW = window.innerWidth - stackedX - pad - safe.right;
+  const stackedTop = baseY - stackedMargin - stackedInputH - stackedGap - stackedLogH;
+
+  return {
+    pad, gap, cell, visualCols, visualRows, gridX, gridY, baseY, gridW, gridH, safe,
+    stacked, stackedX, stackedW, stackedLogH, stackedInputH,
+    stackedLogY: stackedTop,
+    stackedInputY: stackedTop + stackedLogH + stackedGap,
+  };
 }
 
 function positionChatInput() {
@@ -1653,26 +1715,23 @@ function positionChatInput() {
   const input = document.getElementById("chatInput");
   if (!wrap || !input) return;
 
-  const safe = safeAreaInsets();
-  const baseY = window.innerHeight - UI_BOTTOM_H - safe.bottom;
-  const cell = 44, pad = 10;
+  const m = invGridMetrics();
+  let x, y, w, maxW;
 
-  const gridX = UI_LEFTBAR_W + pad + safe.left;
-  const gridY = baseY + 50;
-  const gridW = INV_COLS * (cell + 6);
-
-  // Anchor to the right of inventory
-  const x = gridX + gridW + 12;
-
-  // Compact log metrics (must match drawChatLog)
-  const logY = gridY;
-  const logH = 88;
-
-  // Input sits below log
-  const y = logY + logH + 10;
-
-  const maxW = Math.max(180, window.innerWidth - x - 12);
-  const w = Math.min(340, maxW);
+  if (m.stacked) {
+    x = m.stackedX;
+    y = m.stackedInputY;
+    maxW = m.stackedW;
+    w = maxW;
+  } else {
+    // Anchor to the right of inventory
+    x = m.gridX + m.gridW + 12;
+    // Compact log metrics (must match drawChatLog's non-stacked branch)
+    const logH = 88;
+    y = m.gridY + logH + 10; // input sits below log
+    maxW = Math.max(180, window.innerWidth - x - 12);
+    w = Math.min(340, maxW);
+  }
 
   input.style.width = `${w}px`;
   input.style.maxWidth = `${maxW}px`;
@@ -1680,13 +1739,21 @@ function positionChatInput() {
   wrap.style.left = `${x}px`;
   wrap.style.top = `${y}px`;
 
-  // Position the indicator: to the right of the input, vertically centered in the bottom bar
   const indicator = document.getElementById("onlineIndicator");
   if (indicator) {
     const indicatorH = 2 * 48 + 6; // two rows + gap = 102px
-    indicator.style.left = `${x + w + 40}px`;
-    // Center vertically within the bottom bar
-    indicator.style.top = `${window.innerHeight - UI_BOTTOM_H + Math.round((UI_BOTTOM_H - indicatorH) / 2)}px`;
+    if (m.stacked) {
+      // No room beside the input on a narrow screen — top-right corner,
+      // clear of both the left sidebar and the stacked chat/inventory strip.
+      // NOT visually verified against the canvas-drawn sidebar/top HUD —
+      // check this first when testing on an actual phone.
+      indicator.style.left = `${window.innerWidth - 54 - m.safe.right}px`;
+      indicator.style.top = `${UI_TOP_H + m.safe.top + 4}px`;
+    } else {
+      // Position the indicator: to the right of the input, vertically centered in the bottom bar
+      indicator.style.left = `${x + w + 40}px`;
+      indicator.style.top = `${window.innerHeight - UI_BOTTOM_H + Math.round((UI_BOTTOM_H - indicatorH) / 2)}px`;
+    }
     indicator.style.bottom = "auto";
   }
 }
@@ -1834,23 +1901,23 @@ function drawChatLog() {
   ctx.save();
   ctx.globalAlpha = 1;
 
-  // Bottom UI bar anchor
-  const baseY = window.innerHeight - UI_BOTTOM_H;
-
-  // Inventory layout assumptions (match your inv hitbox math)
-  const pad = 10;
-  const cell = 44;
-  const gap = 6;
-
-  const gridX = UI_LEFTBAR_W + pad;
-  const gridY = baseY + 52;
-  const invW = (INV_COLS * cell) + ((INV_COLS - 1) * gap);
-
-  // Chat log sits to the RIGHT of inventory
-  const x = gridX + invW + 12;
-  const y = gridY;          // log goes on top
-  const boxW = Math.min(380, Math.max(180, window.innerWidth - x - 12));
-  const boxH = 88;
+  const m = invGridMetrics();
+  let x, y, boxW, boxH;
+  if (m.stacked) {
+    // No room to the right of the inventory grid at this width — stack the
+    // log in a strip directly above the bottom bar instead (see
+    // invGridMetrics()'s stacked* fields; positionChatInput() mirrors this).
+    x = m.stackedX;
+    y = m.stackedLogY;
+    boxW = m.stackedW;
+    boxH = m.stackedLogH;
+  } else {
+    // Chat log sits to the RIGHT of inventory
+    x = m.gridX + m.gridW + 12;
+    y = m.gridY; // log goes on top
+    boxW = Math.min(380, Math.max(180, window.innerWidth - x - 12));
+    boxH = 88;
+  }
 
   drawRect(x, y, boxW, boxH, "rgba(0,0,0,0.50)");
   ctx.strokeStyle = "rgba(255,255,255,0.12)";
@@ -1860,9 +1927,9 @@ function drawChatLog() {
   const lines = state.chatMessages.slice(-4);
   let yy = y + 18;
 
-  for (const m of lines) {
-    const name = state.players[m.fromIndex]?.name ?? "???";
-    drawText(`${name}: ${m.text}`, x + 10, yy, 11, "left", "#ffffff");
+  for (const msg of lines) {
+    const name = state.players[msg.fromIndex]?.name ?? "???";
+    drawText(`${name}: ${msg.text}`, x + 10, yy, 11, "left", "#ffffff");
     yy += 16;
   }
 
@@ -11409,12 +11476,13 @@ const selectedNames = sel ? (itemDef(sel.id)?.name ?? sel.id) : "";
 
 
   // --- Inventory grid ---
-  const cell = 44, pad = 10;
-  const gridX = UI_LEFTBAR_W + pad;
-  const gridY = baseY + 44;
+  const gm = invGridMetrics();
+  const cell = gm.cell, gap = gm.gap;
+  const gridX = gm.gridX;
+  const gridY = gm.gridY;
 
-  const UI_COLS = 12;
-  const UI_ROWS = 2;
+  const UI_COLS = gm.visualCols;
+  const UI_ROWS = gm.visualRows;
 
   drawText(`Inventory (${inv.length}/${INV_SLOTS})`, gridX, gridY - 10, 13);
   drawText(
@@ -11430,8 +11498,8 @@ const selectedNames = sel ? (itemDef(sel.id)?.name ?? sel.id) : "";
     const c = i % UI_COLS;
     if (r >= UI_ROWS) break;
 
-    const x = gridX + c * (cell + 6);
-    const y = gridY + r * (cell + 6);
+    const x = gridX + c * (cell + gap);
+    const y = gridY + r * (cell + gap);
 
     drawRect(x, y, cell, cell, "rgba(255,255,255,0.06)");
     ctx.strokeStyle = "rgba(255,255,255,0.10)";
@@ -11468,16 +11536,14 @@ if (!state.craftingOpen && i === state.selectedInvIdx) {
 }
 
 function invIndexAtScreen(px, py) {
-  const baseY = window.innerHeight - UI_BOTTOM_H;
-  const cell = 44, pad = 10;
-  const gridX = UI_LEFTBAR_W + pad; // <-- sidebar offset
-  const gridY = baseY + 44;         // <-- MUST match drawInventoryUI's gridY
+  const gm = invGridMetrics(); // MUST match drawInventoryUI's metrics — same function, not a copy
 
-  const col = Math.floor((px - gridX) / (cell + 6));
-  const row = Math.floor((py - gridY) / (cell + 6));
-  if (col < 0 || col >= INV_COLS || row < 0 || row >= INV_ROWS) return -1;
+  const col = Math.floor((px - gm.gridX) / (gm.cell + gm.gap));
+  const row = Math.floor((py - gm.gridY) / (gm.cell + gm.gap));
+  if (col < 0 || col >= gm.visualCols || row < 0 || row >= gm.visualRows) return -1;
 
-  return row * INV_COLS + col;
+  const idx = row * gm.visualCols + col;
+  return idx < INV_SLOTS ? idx : -1;
 }
 
 // ------------------------------------------------------------------------ CRAFTING FUNCTIONS ----
@@ -12904,8 +12970,6 @@ function handleStockpileTap(px, py) {
 }
 
 function handleInventoryTap(px, py) {
-  const baseY = window.innerHeight - UI_BOTTOM_H;
-
   // crafting recipe clicks
   if (state.craftingOpen) {
     const matches = recipesMatchingSelection();
@@ -12918,16 +12982,11 @@ function handleInventoryTap(px, py) {
     }
   }
 
-  // inventory grid
-  const cell = 44, pad = 10;
-  const gridX = UI_LEFTBAR_W + pad;
-  const gridY = baseY + 44;
+  // inventory grid — delegates to invIndexAtScreen() so this can't drift
+  // out of sync with what drawInventoryUI() actually drew.
+  const idx = invIndexAtScreen(px, py);
+  if (idx < 0) return false;
 
-  const col = Math.floor((px - gridX) / (cell + 6));
-  const row = Math.floor((py - gridY) / (cell + 6));
-  if (col < 0 || col >= INV_COLS || row < 0 || row >= INV_ROWS) return false;
-
-  const idx = row * INV_COLS + col;
   const inv = activeInv();
   const stack = inv[idx];
   if (!stack) return false;
