@@ -66,11 +66,24 @@ export default function Chat() {
     partnerSeenAt &&
     toDate(myLastMessage.createdAt).getTime() <= partnerSeenAt.toMillis()
   )
+  const [messagesLoaded, setMessagesLoaded] = useState(!firebaseReady)
+  // Both messages and partnerSeenAt load asynchronously, so myLastMessageRead
+  // can already be true (partner read it a while ago) the moment data
+  // arrives — that's not a new read event. Wait for both to load once and
+  // use that as the baseline before comparing further changes.
+  const settledRef = useRef(false)
   const prevReadRef = useRef(false)
   useEffect(() => {
+    if (!settledRef.current) {
+      if (messagesLoaded && partnerSeenAt) {
+        settledRef.current = true
+        prevReadRef.current = myLastMessageRead
+      }
+      return
+    }
     if (myLastMessageRead && !prevReadRef.current) playSound('chat_read')
     prevReadRef.current = myLastMessageRead
-  }, [myLastMessageRead])
+  }, [myLastMessageRead, messagesLoaded, partnerSeenAt])
 
   useEffect(() => {
     if (!firebaseReady) return
@@ -81,6 +94,7 @@ export default function Chat() {
     )
     const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
       setMessages(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).reverse())
+      setMessagesLoaded(true)
     })
     return unsubscribe
   }, [])
