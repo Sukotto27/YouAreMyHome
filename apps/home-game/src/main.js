@@ -972,6 +972,7 @@ function connectOnline() {
   state.net._pendingLogTexts = state.net._pendingLogTexts || [];
 
   onAuthStateChanged(auth, (user) => {
+    console.info(`[NET] onAuthStateChanged fired: user=${user ? user.uid : "null (not signed in)"}`);
     // Tear down any listeners from a previous user before (re)subscribing.
     for (const unsub of [_worldUnsub, _logUnsub, _chatUnsub, _playersUnsub, _opsUnsub, _timeUnsub, _interactionUnsub, _presenceUnsub]) {
       if (typeof unsub === "function") unsub();
@@ -997,13 +998,22 @@ function connectOnline() {
     if (!wid) wid = 1;
     state.net.worldId = wid;
 
+    console.info(
+      `[NET] connected as uid=${user.uid} name=${JSON.stringify(user.displayName)} email=${JSON.stringify(user.email)} ` +
+      `-> role=${role ?? "(none — roleFor() matched neither 'scott' nor 'cristina')"} isHost=${state.net.isHost} worldId=${wid}`
+    );
+
     // ---- World: Firestore doc is authoritative; localStorage is the offline cache ----
     _appliedWorldVersion = null;
     const worldRef = doc(db, FIRESTORE.worlds, String(wid));
     _worldUnsub = onSnapshot(worldRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        if (data.version === _appliedWorldVersion) return; // our own write echoing back
+        if (data.version === _appliedWorldVersion) {
+          console.info(`[NET] world/${wid} snapshot echo (version=${data.version}) — ignoring our own write`);
+          return;
+        }
+        console.info(`[NET] world/${wid} snapshot received (hostUid=${data.hostUid}, version=${data.version}) — applying`);
         _appliedWorldVersion = data.version;
         try {
           const payload = JSON.parse(data.worldJson);
@@ -1020,7 +1030,10 @@ function connectOnline() {
         }
       } else if (state.net.isHost) {
         // Nothing published yet — host seeds it from local state.
+        console.info(`[NET] world/${wid} doesn't exist in Firestore yet — publishing as host`);
         publishWorld();
+      } else {
+        console.warn(`[NET] world/${wid} doesn't exist in Firestore and we're not host — waiting for host to publish. If this never changes, the host device is either not connecting, using a different worldId, or not being recognized as host.`);
       }
     });
 

@@ -1,0 +1,21 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "gameChat",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "worldId", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "gameLog",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "worldId", "order": "ASCENDING" },
+        { "fieldPath": "at", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
