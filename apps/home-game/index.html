@@ -52,6 +52,12 @@
       ">Loading...</div>
     </div>
 
+    <!-- TEMPORARY debug console for on-phone testing during the co-op sync
+         investigation — remove before Phase 6 cutover. Tap the floating
+         button it adds to see console.log/[NET] output directly on-device. -->
+    <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+    <script>eruda.init();</script>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 
