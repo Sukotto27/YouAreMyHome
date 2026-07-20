@@ -4,14 +4,16 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 
 // Draw is intentionally excluded — it's a live/ephemeral shared canvas, not a
-// feed of items you either have or haven't "read". For the 4 commentable
-// features (qa/scrapbook/gallery/milestones), `activityField`/
-// `activityAuthorField` point at `lastActivityAt`/`lastActivityByUid` instead
-// of `createdAt`/`authorField` — a comment (or edit) bumps those without
-// changing who originally created the doc, so the "is this mine" check must
-// compare against who acted last, not who authored the item.
+// feed of items you either have or haven't "read". For qa/scrapbook/gallery/
+// milestones/chat, `activityField`/`activityAuthorField` point at
+// `lastActivityAt`/`lastActivityByUid` instead of `createdAt`/`authorField`
+// — a comment/reaction (or edit) bumps those without changing who originally
+// created the doc, so the "is this mine" check must compare against who
+// acted last, not who authored the item. Chat specifically: a reaction (see
+// Chat.jsx's toggleReaction) bumps these the same way a brand-new message
+// does, so it counts as unread activity too, not just new messages.
 const TRACKED_FEATURES = [
-  { key: 'chat', collectionName: 'messages', activityField: 'createdAt', activityAuthorField: 'senderUid' },
+  { key: 'chat', collectionName: 'messages', activityField: 'lastActivityAt', activityAuthorField: 'lastActivityByUid' },
   { key: 'qa', collectionName: 'qaRounds', activityField: 'lastActivityAt', activityAuthorField: 'lastActivityByUid' },
   {
     key: 'scrapbook',

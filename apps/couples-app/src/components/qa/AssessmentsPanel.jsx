@@ -15,7 +15,7 @@ const CARDS = [
   { kind: 'satisfaction-index', ...SATISFACTION_INDEX },
 ]
 
-export default function AssessmentsPanel() {
+export default function AssessmentsPanel({ onBack }) {
   const [openId, setOpenId] = useState(null)
   const openCard = CARDS.find((c) => c.id === openId)
 
@@ -25,6 +25,15 @@ export default function AssessmentsPanel() {
 
   return (
     <div className="space-y-4">
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          className="font-body text-sm text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
+        >
+          ← All categories
+        </button>
+      )}
       <p className="font-hand text-lg text-ink-soft">
         A fun way to reflect together — not a clinical or diagnostic tool.
       </p>

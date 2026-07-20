@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { collection, doc, getDocs, onSnapshot, orderBy, query, writeBatch } from 'firebase/firestore'
-import { db, firebaseReady } from '../firebase'
-import { readDemoList, writeDemoList } from '../lib/demoStore'
-import { useMarkSeen } from '../hooks/useMarkSeen'
-import CommentThread from '../components/CommentThread'
+import { db, firebaseReady } from '../../firebase'
+import { readDemoList, writeDemoList } from '../../lib/demoStore'
+import { useMarkSeen } from '../../hooks/useMarkSeen'
+import CommentThread from '../CommentThread'
 
-export default function Scrapbook() {
+// Saved drawings from the Draw canvas — now a tab inside Games > Draw rather
+// than its own top-level page, but otherwise unchanged.
+export default function ScrapbookGallery() {
   useMarkSeen('scrapbook')
   const [entries, setEntries] = useState(firebaseReady ? [] : readDemoList('scrapbook'))
   const [selected, setSelected] = useState(null)
@@ -45,7 +47,7 @@ export default function Scrapbook() {
 
   if (selected) {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
         <div className="flex items-center justify-between">
           <button
             type="button"
@@ -77,11 +79,7 @@ export default function Scrapbook() {
             </button>
           )}
         </div>
-        <img
-          src={selected.imageDataUrl}
-          alt="Saved drawing"
-          className="w-full rounded-3xl border border-ink/10"
-        />
+        <img src={selected.imageDataUrl} alt="Saved drawing" className="w-full rounded-3xl border border-ink/10" />
         <p className="text-center font-hand text-lg text-ink-soft">
           saved by {selected.savedByName} · {formatDate(selected.createdAt)}
         </p>
@@ -94,7 +92,6 @@ export default function Scrapbook() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
-      <h1 className="font-display text-2xl italic text-ink">Scrapbook</h1>
       {entries.length === 0 ? (
         <p className="pt-10 text-center font-hand text-xl text-ink-soft">
           nothing saved yet — draw something and save it

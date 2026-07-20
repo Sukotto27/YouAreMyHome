@@ -32,6 +32,35 @@ import { usePartnerSeenAt } from '../hooks/usePartnerSeenAt'
 import { useTypingIndicator } from '../hooks/useTypingIndicator'
 
 const RECENT_LIMIT = 200
+// Roughly 3 lines of the message textarea at this font size, plus its
+// vertical padding — CSS `max-h` + `overflow-y-auto` cap growth beyond this,
+// so no line-height math is needed to enforce the 3-line limit exactly.
+const MAX_INPUT_HEIGHT = 84
+const URL_PATTERN = /(https?:\/\/[^\s]+)/g
+
+// Splits plain message text on URLs and turns those into real links —
+// separate from the rich-preview `type: 'link'` messages the share-target
+// flow creates, this just makes a URL typed/pasted mid-sentence tappable.
+function renderMessageText(text) {
+  const parts = text.split(URL_PATTERN)
+  if (parts.length === 1) return text
+  return parts.map((part, index) =>
+    index % 2 === 1 ? (
+      <a
+        key={index}
+        href={part}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(event) => event.stopPropagation()}
+        className="text-inherit underline decoration-1 underline-offset-2"
+      >
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  )
+}
 
 export default function Chat() {
   const { user } = useAuth()
@@ -45,12 +74,21 @@ export default function Chat() {
   const [pickingMenu, setPickingMenu] = useState(false)
   const [pickingEmoji, setPickingEmoji] = useState(false)
   const [replyingTo, setReplyingTo] = useState(null)
+  const [editingMessage, setEditingMessage] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [activeMenu, setActiveMenu] = useState(null)
+  const [atBottom, setAtBottomState] = useState(true)
   const bottomRef = useRef(null)
+  const listRef = useRef(null)
   const inputRef = useRef(null)
   const imageInputRef = useRef(null)
+  const atBottomRef = useRef(true)
   const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+
+  function setAtBottom(value) {
+    atBottomRef.current = value
+    setAtBottomState(value)
+  }
 
   useEffect(() => stopTyping, [stopTyping])
 
@@ -99,9 +137,70 @@ export default function Chat() {
     return unsubscribe
   }, [])
 
+  // Tracks whether the bottom sentinel is currently in view within the
+  // scrolling message list — drives both the "jump to bottom" button and
+  // whether a new message should auto-scroll (don't yank someone back down
+  // if they've scrolled up to read history, unless it's their own message).
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const list = listRef.current
+    const sentinel = bottomRef.current
+    if (!list || !sentinel) return
+    const observer = new IntersectionObserver(([entry]) => setAtBottom(entry.isIntersecting), {
+      root: list,
+      threshold: 1,
+    })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [])
+
+  const prevMessageCountRef = useRef(0)
+  useEffect(() => {
+    const isNewMessage = messages.length > prevMessageCountRef.current
+    prevMessageCountRef.current = messages.length
+    if (!isNewMessage) return
+    const lastMessage = messages[messages.length - 1]
+    const isMine = lastMessage?.senderUid === user.uid
+    if (atBottomRef.current || isMine) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [messages.length])
+
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // Registered by each MessageBubble so a reply snippet can scroll its
+  // original message into view and briefly highlight it. Not a ref map
+  // keyed once — messages re-render/re-key on every snapshot, so bubbles
+  // register/unregister themselves as they mount and unmount.
+  const messageElsRef = useRef({})
+  const [highlightedId, setHighlightedId] = useState(null)
+  const highlightTimerRef = useRef(null)
+
+  function registerMessageEl(id, el) {
+    if (el) messageElsRef.current[id] = el
+    else delete messageElsRef.current[id]
+  }
+
+  function jumpToMessage(id) {
+    const el = messageElsRef.current[id]
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    clearTimeout(highlightTimerRef.current)
+    setHighlightedId(id)
+    highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 1500)
+  }
+
+  // Re-measures on every keystroke (and on emoji insertion, since that also
+  // changes `draft` without going through the textarea's own onChange) —
+  // resetting to 'auto' first lets scrollHeight shrink back down when text
+  // is deleted, not just grow.
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_HEIGHT)}px`
+  }, [draft])
 
   function insertEmoji(emoji) {
     setDraft((prev) => prev + emoji)
@@ -112,6 +211,12 @@ export default function Chat() {
     setActiveMenu({ x: event.clientX, y: event.clientY, message })
   }
 
+  // A reaction is treated like a new message for notification purposes —
+  // only adding/changing one (not removing) bumps lastActivityAt/
+  // lastActivityByUid, the same fields a new message sets. That's what the
+  // 'chat' badge/push-notification pipeline watches (see useUnreadBadges.js
+  // and functions/index.js), and what a new Cloud Function trigger
+  // (notifyOnReaction) uses server-side to detect the change and push.
   async function toggleReaction(message, emoji) {
     const current = message.reactions?.[user.uid]
     const next = current === emoji ? null : emoji
@@ -123,16 +228,19 @@ export default function Chat() {
           const reactions = { ...m.reactions }
           if (next) reactions[user.uid] = next
           else delete reactions[user.uid]
-          return { ...m, reactions }
+          return next ? { ...m, reactions, lastActivityAt: { toDate: () => new Date() }, lastActivityByUid: user.uid } : { ...m, reactions }
         }),
       )
       setActiveMenu(null)
       return
     }
 
-    await updateDoc(doc(db, 'messages', message.id), {
-      [`reactions.${user.uid}`]: next ?? deleteField(),
-    })
+    const updates = { [`reactions.${user.uid}`]: next ?? deleteField() }
+    if (next) {
+      updates.lastActivityAt = serverTimestamp()
+      updates.lastActivityByUid = user.uid
+    }
+    await updateDoc(doc(db, 'messages', message.id), updates)
     setActiveMenu(null)
   }
 
@@ -145,8 +253,49 @@ export default function Chat() {
     }
   }
 
+  function startEditing(message) {
+    setEditingMessage(message)
+    setReplyingTo(null)
+    setDraft(message.text)
+    setActiveMenu(null)
+    inputRef.current?.focus()
+  }
+
+  function cancelEditing() {
+    setEditingMessage(null)
+    setDraft('')
+  }
+
+  async function handleSaveEdit() {
+    const text = draft.trim()
+    if (!text || sending) return
+    setSending(true)
+    try {
+      if (!firebaseReady) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === editingMessage.id ? { ...m, text, editedAt: { toDate: () => new Date() } } : m,
+          ),
+        )
+      } else {
+        await updateDoc(doc(db, 'messages', editingMessage.id), {
+          text,
+          editedAt: serverTimestamp(),
+        })
+      }
+      setEditingMessage(null)
+      setDraft('')
+    } finally {
+      setSending(false)
+    }
+  }
+
   async function handleSubmit(event) {
     event.preventDefault()
+    if (editingMessage) {
+      await handleSaveEdit()
+      return
+    }
     const text = draft.trim()
     if (!text || sending) return
 
@@ -168,6 +317,8 @@ export default function Chat() {
           senderUid: user.uid,
           senderName: user.displayName || user.email,
           createdAt: { toDate: () => new Date() },
+          lastActivityAt: { toDate: () => new Date() },
+          lastActivityByUid: user.uid,
         },
       ])
       setSending(false)
@@ -182,6 +333,8 @@ export default function Chat() {
         senderUid: user.uid,
         senderName: user.displayName || user.email,
         createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        lastActivityByUid: user.uid,
       })
     } finally {
       setSending(false)
@@ -211,6 +364,8 @@ export default function Chat() {
             senderUid: user.uid,
             senderName,
             createdAt: { toDate: () => new Date() },
+            lastActivityAt: { toDate: () => new Date() },
+            lastActivityByUid: user.uid,
           },
         ])
         const gallery = readDemoList('gallery')
@@ -228,6 +383,8 @@ export default function Chat() {
         senderUid: user.uid,
         senderName,
         createdAt: serverTimestamp(),
+        lastActivityAt: serverTimestamp(),
+        lastActivityByUid: user.uid,
       })
       await addDoc(collection(db, 'gallery'), {
         imageDataUrl,
@@ -297,7 +454,11 @@ export default function Chat() {
         />
       )}
 
-      <div className="flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6" style={backgroundStyle}>
+      <div
+        ref={listRef}
+        className="relative flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6"
+        style={backgroundStyle}
+      >
         {messages.length === 0 && (
           <p className="pt-10 text-center font-hand text-xl text-ink-soft">
             say something sweet... (algo doce)
@@ -318,6 +479,9 @@ export default function Chat() {
               tight={item.tight}
               onOpenMenu={openMessageMenu}
               chatSettings={chatSettings}
+              onRegister={registerMessageEl}
+              onJumpToMessage={jumpToMessage}
+              highlighted={highlightedId === item.message.id}
               read={
                 item.message.senderUid === user.uid &&
                 !!partnerSeenAt &&
@@ -330,23 +494,41 @@ export default function Chat() {
           <p className="px-1 font-hand text-lg text-ink-soft">{partnerName} is typing…</p>
         )}
         <div ref={bottomRef} />
+
+        {!atBottom && (
+          <button
+            type="button"
+            onClick={scrollToBottom}
+            aria-label="Jump to latest messages"
+            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-rose text-paper shadow-lg transition-transform hover:-translate-y-0.5 sm:right-6"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <path d="M12 5v14" />
+              <path d="M5 12l7 7 7-7" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {activeMenu && (
         <MessageActionMenu
           x={activeMenu.x}
           y={activeMenu.y}
+          message={activeMenu.message}
+          isOwn={activeMenu.message.senderUid === user.uid}
           onSelectReaction={(emoji) => toggleReaction(activeMenu.message, emoji)}
           onReply={() => {
+            setEditingMessage(null)
             setReplyingTo(activeMenu.message)
             setActiveMenu(null)
           }}
+          onEdit={() => startEditing(activeMenu.message)}
           onClose={() => setActiveMenu(null)}
         />
       )}
 
       {replyingTo && (
-        <div className="flex items-center gap-2 border-t border-ink/10 bg-blush-soft/40 px-4 py-2 sm:px-6">
+        <div className="flex shrink-0 items-center gap-2 border-t border-ink/10 bg-blush-soft/40 px-4 py-2 sm:px-6">
           <div className="min-w-0 flex-1 border-l-2 border-rose pl-2">
             <p className="font-body text-xs font-medium text-rose">
               Replying to {replyingTo.senderName}
@@ -366,9 +548,25 @@ export default function Chat() {
         </div>
       )}
 
+      {editingMessage && (
+        <div className="flex shrink-0 items-center gap-2 border-t border-ink/10 bg-blush-soft/40 px-4 py-2 sm:px-6">
+          <div className="min-w-0 flex-1 border-l-2 border-rose pl-2">
+            <p className="font-body text-xs font-medium text-rose">Editing message</p>
+          </div>
+          <button
+            type="button"
+            onClick={cancelEditing}
+            aria-label="Cancel edit"
+            className="shrink-0 font-body text-lg text-ink-soft hover:text-rose"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <form
         onSubmit={handleSubmit}
-        className="relative flex items-center gap-2 border-t border-ink/10 px-4 py-3 sm:px-6"
+        className="relative flex shrink-0 items-end gap-2 border-t border-ink/10 bg-paper px-4 py-3 sm:px-6"
       >
         {pickingEmoji && <EmojiPicker onSelect={insertEmoji} />}
         <button
@@ -382,7 +580,7 @@ export default function Chat() {
         <button
           type="button"
           onClick={() => imageInputRef.current?.click()}
-          disabled={uploadingImage}
+          disabled={uploadingImage || !!editingMessage}
           aria-label="Send a photo"
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-rose disabled:opacity-50"
         >
@@ -399,34 +597,41 @@ export default function Chat() {
           onChange={handleImageSelect}
           className="hidden"
         />
-        <input
+        <textarea
           ref={inputRef}
-          type="text"
+          rows={1}
           value={draft}
           onChange={(event) => {
             setDraft(event.target.value)
             if (event.target.value.trim()) notifyTyping()
           }}
-          placeholder="Type a message..."
-          className="flex-1 rounded-full border border-ink/15 bg-white/60 px-4 py-2.5 font-body text-ink outline-none transition-colors focus:border-rose"
+          placeholder={editingMessage ? 'Edit your message...' : 'Type a message...'}
+          style={{ maxHeight: `${MAX_INPUT_HEIGHT}px` }}
+          className="flex-1 resize-none overflow-y-auto rounded-2xl border border-ink/15 bg-white/60 px-4 py-2.5 font-body text-ink outline-none transition-colors focus:border-rose"
         />
         <button
           type="submit"
           disabled={!draft.trim() || sending}
-          aria-label="Send"
+          aria-label={editingMessage ? 'Save edit' : 'Send'}
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose text-paper transition-transform duration-200 ease-out hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
-            <path d="M12 19V5" />
-            <path d="M5 12l7-7 7 7" />
-          </svg>
+          {editingMessage ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+              <path d="M12 19V5" />
+              <path d="M5 12l7-7 7 7" />
+            </svg>
+          )}
         </button>
       </form>
     </div>
   )
 }
 
-function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }) {
+function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegister, onJumpToMessage, highlighted, read }) {
   const time = toDate(message.createdAt).toLocaleTimeString([], {
     hour: 'numeric',
     minute: '2-digit',
@@ -457,7 +662,10 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
         : 'rounded-bl-sm border border-teal/30 bg-white/70 text-ink'
 
   return (
-    <div className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${tight ? 'mb-0.5' : 'mb-2'}`}>
+    <div
+      ref={(el) => onRegister(message.id, el)}
+      className={`flex items-end gap-2 ${isOwn ? 'flex-row-reverse' : 'flex-row'} ${tight ? 'mb-0.5' : 'mb-2'}`}
+    >
       <div className="h-6 w-6 shrink-0">
         {avatarSrc && !tight && (
           <img src={avatarSrc} alt="" className="h-6 w-6 rounded-full object-cover" />
@@ -467,20 +675,27 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
         <div className="relative max-w-[80%] sm:max-w-[65%]">
           <div
             {...pressHandlers}
-            className={`select-none rounded-2xl px-4 py-2.5 ${fontClassName} ${
-              isMedia ? 'overflow-hidden p-1.5' : ''
-            } ${bubbleClassName}`}
+            className={`select-none whitespace-pre-wrap rounded-2xl px-4 py-2.5 transition-shadow duration-500 ${
+              highlighted ? 'ring-2 ring-rose ring-offset-2 ring-offset-paper' : ''
+            } ${fontClassName} ${isMedia ? 'overflow-hidden p-1.5' : ''} ${bubbleClassName}`}
             style={bubbleStyle}
           >
             {message.replyTo && (
-              <div
-                className={`mb-1.5 rounded-lg border-l-2 px-2 py-1 font-body text-xs ${
-                  isOwn ? 'border-paper/60 bg-white/15 text-paper/90' : 'border-rose bg-blush-soft/50 text-ink-soft'
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onJumpToMessage(message.replyTo.id)
+                }}
+                className={`mb-1.5 block w-full rounded-lg border-l-2 px-2 py-1 text-left font-body text-xs transition-colors ${
+                  isOwn
+                    ? 'border-paper/60 bg-white/15 text-paper/90 hover:bg-white/25'
+                    : 'border-rose bg-blush-soft/50 text-ink-soft hover:bg-blush-soft'
                 }`}
               >
                 <p className="font-medium">{message.replyTo.senderName}</p>
                 <p className="truncate">{message.replyTo.text}</p>
-              </div>
+              </button>
             )}
             {message.type === 'image' ? (
               <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
@@ -498,7 +713,7 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
                 </div>
               </a>
             ) : (
-              message.text
+              renderMessageText(message.text)
             )}
           </div>
           {reactionEmojis.length > 0 && (
@@ -516,6 +731,7 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, read }
         </div>
         {!tight && (
           <span className={`flex items-center gap-1 px-1 text-xs text-ink-soft/70 ${reactionEmojis.length > 0 ? 'mt-3' : 'mt-1'}`}>
+            {message.editedAt && <span className="italic">edited ·</span>}
             {time}
             {isOwn && <ReadReceipt read={read} />}
           </span>

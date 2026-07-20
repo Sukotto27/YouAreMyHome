@@ -1,16 +1,30 @@
 import { useState } from 'react'
 import { holidaysForYear } from '../../lib/holidays'
+import { recurrenceTypeOf } from '../../lib/milestones'
+import SendCardModal from './SendCardModal'
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
+const GIFT_ELIGIBLE_HOLIDAYS = new Set(["Valentine's Day"])
 
 function eventsForDay(items, date) {
   return items.filter((item) => {
     if (!item.date) return false
     const [y, m, d] = item.date.split('-').map(Number)
-    if (item.recurring !== false) {
+    const recurrenceType = recurrenceTypeOf(item)
+
+    if (recurrenceType === 'none') {
+      return y === date.getFullYear() && m - 1 === date.getMonth() && d === date.getDate()
+    }
+    if (recurrenceType === 'yearly') {
       return m - 1 === date.getMonth() && d === date.getDate()
     }
-    return y === date.getFullYear() && m - 1 === date.getMonth() && d === date.getDate()
+    const original = new Date(y, m - 1, d)
+    if (date < original) return false
+    const diffDays = Math.round((date - original) / 86400000)
+    if (recurrenceType === 'weekly') return diffDays % 7 === 0
+    if (recurrenceType === 'biweekly') return diffDays % 14 === 0
+    if (recurrenceType === 'monthly') return date.getDate() === d
+    return false
   })
 }
 
@@ -34,6 +48,7 @@ function buildGridDays(year, month) {
 export default function CalendarGrid({ items }) {
   const [viewDate, setViewDate] = useState(() => new Date())
   const [selectedDate, setSelectedDate] = useState(null)
+  const [giftHoliday, setGiftHoliday] = useState(null)
 
   const year = viewDate.getFullYear()
   const month = viewDate.getMonth()
@@ -108,14 +123,27 @@ export default function CalendarGrid({ items }) {
                 <li key={event.id}>🗓️ {event.title}</li>
               ))}
               {selectedHolidays.map((holiday) => (
-                <li key={holiday.name}>
-                  🎉 {holiday.name} <span className="text-xs text-ink-soft/60">({holiday.region})</span>
+                <li key={holiday.name} className="flex items-center gap-2">
+                  <span>
+                    🎉 {holiday.name} <span className="text-xs text-ink-soft/60">({holiday.region})</span>
+                  </span>
+                  {GIFT_ELIGIBLE_HOLIDAYS.has(holiday.name) && (
+                    <button
+                      type="button"
+                      onClick={() => setGiftHoliday(holiday.name)}
+                      className="font-body text-xs text-rose hover:text-ink"
+                    >
+                      💐 Send a card
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
           )}
         </div>
       )}
+
+      {giftHoliday && <SendCardModal occasion={giftHoliday} onClose={() => setGiftHoliday(null)} />}
     </div>
   )
 }

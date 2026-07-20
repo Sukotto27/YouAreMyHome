@@ -1,12 +1,31 @@
 import { useState } from 'react'
-import { nextOccurrence } from '../../lib/milestones'
+import { nextOccurrence, recurrenceTypeOf } from '../../lib/milestones'
+import { LOCATIONS } from '../../lib/locations'
+import { zonedTimeToUtc } from '../../lib/timezone'
 import CommentThread from '../CommentThread'
 import EventForm from './EventForm'
+import SendCardModal from './SendCardModal'
+
+const RECURRENCE_LABELS = {
+  weekly: 'Repeats every week',
+  biweekly: 'Repeats every 2 weeks',
+  monthly: 'Repeats every month',
+  yearly: 'Repeats every year',
+}
 
 function ordinal(n) {
   const s = ['th', 'st', 'nd', 'rd']
   const v = n % 100
   return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
+
+function bothTimesFor(item) {
+  if (!item.time || !item.timezone) return null
+  const utcInstant = zonedTimeToUtc(item.date, item.time, item.timezone)
+  return LOCATIONS.map((loc) => ({
+    name: loc.name,
+    time: utcInstant.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', timeZone: loc.timezone }),
+  }))
 }
 
 export default function EventRow({ item, category, onSave, onDelete }) {
@@ -15,6 +34,7 @@ export default function EventRow({ item, category, onSave, onDelete }) {
   const [showComments, setShowComments] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [sendingCard, setSendingCard] = useState(false)
 
   const occurrence = nextOccurrence(item)
   const soon = occurrence && occurrence.daysUntil >= 0 && occurrence.daysUntil <= 7
@@ -27,6 +47,8 @@ export default function EventRow({ item, category, onSave, onDelete }) {
           ? `in ${occurrence.daysUntil} days`
           : `${Math.abs(occurrence.daysUntil)} days ago`
     : 'someday'
+  const recurrenceType = recurrenceTypeOf(item)
+  const bothTimes = category === 'dateNight' ? bothTimesFor(item) : null
 
   async function handleSave(fields) {
     setSaving(true)
@@ -73,7 +95,17 @@ export default function EventRow({ item, category, onSave, onDelete }) {
           {occurrence && (
             <p className="mt-1 font-body text-xs text-ink-soft">
               {occurrence.next.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}
-              {occurrence.yearsSince > 0 && ` · ${ordinal(occurrence.yearsSince)} anniversary`}
+              {occurrence.yearsSince > 0 && item.showYearsSince !== false && ` · ${ordinal(occurrence.yearsSince)} anniversary`}
+            </p>
+          )}
+          {bothTimes && (
+            <p className="mt-1 font-body text-xs text-ink-soft">
+              {bothTimes.map((entry, index) => (
+                <span key={entry.name}>
+                  {index > 0 && ' · '}
+                  {entry.name}: {entry.time}
+                </span>
+              ))}
             </p>
           )}
         </div>
@@ -86,13 +118,18 @@ export default function EventRow({ item, category, onSave, onDelete }) {
         </span>
       </div>
 
-      <div className="mt-2 flex items-center gap-3 font-body text-xs text-ink-soft">
+      <div className="mt-2 flex flex-wrap items-center gap-3 font-body text-xs text-ink-soft">
         <button type="button" onClick={() => setShowComments((v) => !v)} className="hover:text-rose">
           💬 {item.commentCount || 0}
         </button>
         <button type="button" onClick={() => setEditing(true)} className="hover:text-rose">
           Edit
         </button>
+        {item.giftEligible && (
+          <button type="button" onClick={() => setSendingCard(true)} className="hover:text-rose">
+            💐 Send a card
+          </button>
+        )}
         {!item.protected &&
           (confirmingDelete ? (
             <span className="flex items-center gap-2">
@@ -109,6 +146,9 @@ export default function EventRow({ item, category, onSave, onDelete }) {
               Delete
             </button>
           ))}
+        {category === 'dateNight' && recurrenceType !== 'none' && (
+          <span className="text-ink-soft/60">{RECURRENCE_LABELS[recurrenceType]}</span>
+        )}
       </div>
 
       {showComments && (
@@ -116,6 +156,8 @@ export default function EventRow({ item, category, onSave, onDelete }) {
           <CommentThread collectionName="milestones" parentId={item.id} />
         </div>
       )}
+
+      {sendingCard && <SendCardModal occasion={item.title} onClose={() => setSendingCard(false)} />}
     </div>
   )
 }

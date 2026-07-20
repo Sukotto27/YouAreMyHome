@@ -6,8 +6,8 @@ import Home from './pages/Home'
 import Login from './pages/Login'
 import Chat from './pages/Chat'
 import QA from './pages/QA'
-import Draw from './pages/Draw'
-import Scrapbook from './pages/Scrapbook'
+import Games from './pages/Games'
+import Music from './pages/Music'
 import Gallery from './pages/Gallery'
 import Mail from './pages/Mail'
 import Calendar from './pages/Calendar'
@@ -30,8 +30,8 @@ function App() {
             <Route path="/" element={<Home />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/qa" element={<QA />} />
-            <Route path="/draw" element={<Draw />} />
-            <Route path="/scrapbook" element={<Scrapbook />} />
+            <Route path="/games" element={<Games />} />
+            <Route path="/music" element={<Music />} />
             <Route path="/gallery" element={<Gallery />} />
             <Route path="/mail" element={<Mail />} />
             <Route path="/calendar" element={<Calendar />} />

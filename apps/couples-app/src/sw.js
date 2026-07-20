@@ -58,18 +58,36 @@ self.addEventListener('push', (event) => {
   if (!title) return
 
   const count = Number(badgeCount) || 0
-  const tasks = [
-    self.registration.showNotification(title, {
-      body,
-      icon: '/YouAreMyHome/icons/icon-192.png',
-      badge: '/YouAreMyHome/icons/icon-192.png',
-      data: { url },
-    }),
-  ]
-  if ('setAppBadge' in navigator) {
-    tasks.push(count > 0 ? navigator.setAppBadge(count).catch(() => {}) : navigator.clearAppBadge().catch(() => {}))
-  }
-  event.waitUntil(Promise.all(tasks))
+
+  event.waitUntil(
+    (async () => {
+      // Skip the OS notification banner if the app is already open and
+      // focused — the in-app UI (live Firestore listeners + its own sound
+      // effects) already surfaces new activity, so a push on top would just
+      // be a redundant/annoying duplicate. Falls back to showing it if the
+      // browser doesn't report focus/visibility on WindowClient at all
+      // (inconsistent support, notably on Safari) — a missed suppression is
+      // a much smaller problem than a wrongly-suppressed real notification.
+      const clientsList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+      const appInForeground = clientsList.some((client) => client.focused && client.visibilityState === 'visible')
+
+      const tasks = []
+      if (!appInForeground) {
+        tasks.push(
+          self.registration.showNotification(title, {
+            body,
+            icon: '/YouAreMyHome/icons/icon-192.png',
+            badge: '/YouAreMyHome/icons/icon-192.png',
+            data: { url },
+          }),
+        )
+      }
+      if ('setAppBadge' in navigator) {
+        tasks.push(count > 0 ? navigator.setAppBadge(count).catch(() => {}) : navigator.clearAppBadge().catch(() => {}))
+      }
+      await Promise.all(tasks)
+    })(),
+  )
 })
 
 self.addEventListener('notificationclick', (event) => {

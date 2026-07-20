@@ -2,22 +2,26 @@ const { initializeApp } = require('firebase-admin/app')
 const { getAuth } = require('firebase-admin/auth')
 const { FieldValue, getFirestore } = require('firebase-admin/firestore')
 const { getMessaging } = require('firebase-admin/messaging')
-const { onDocumentCreated } = require('firebase-functions/v2/firestore')
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore')
 const { onRequest } = require('firebase-functions/v2/https')
+const { onSchedule } = require('firebase-functions/v2/scheduler')
 const { buildIcsFeed } = require('./lib/ics')
 const { extractOgTags } = require('./lib/ogTags')
+const { zonedTimeToUtc } = require('./lib/timezone')
 
 initializeApp()
 const db = getFirestore()
 
 // Mirrors src/hooks/useUnreadBadges.js on the client — Draw is excluded
 // there for the same reason (it's a live canvas, not a read/unread feed).
-// For the 4 commentable features, activityField/activityAuthorField point
-// at lastActivityAt/lastActivityByUid instead of createdAt/authorField — a
-// comment (or edit) bumps those without changing who created the doc, so
-// "is this mine" must compare against who acted last, not who authored it.
+// activityField/activityAuthorField point at lastActivityAt/
+// lastActivityByUid instead of createdAt/authorField for most features — a
+// comment/reaction (or edit) bumps those without changing who created the
+// doc, so "is this mine" must compare against who acted last, not who
+// authored it. Chat: a reaction (see notifyOnReaction below and the client's
+// toggleReaction) bumps these the same way a new message does.
 const FEATURES = [
-  { key: 'chat', collection: 'messages', activityField: 'createdAt', activityAuthorField: 'senderUid' },
+  { key: 'chat', collection: 'messages', activityField: 'lastActivityAt', activityAuthorField: 'lastActivityByUid' },
   { key: 'qa', collection: 'qaRounds', activityField: 'lastActivityAt', activityAuthorField: 'lastActivityByUid' },
   {
     key: 'scrapbook',
@@ -76,27 +80,33 @@ function isUnregisteredError(error) {
   )
 }
 
-async function notifyPartner(authorUid, { title, body, url }) {
+async function sendToUid(uid, { title, body, url }) {
+  const [tokenDocs, badgeCount] = await Promise.all([tokensForUser(uid), computeUnreadCount(uid)])
+  if (tokenDocs.length === 0) return
+
+  const response = await getMessaging().sendEachForMulticast({
+    tokens: tokenDocs.map((t) => t.token),
+    data: { title, body, url, badgeCount: String(badgeCount) },
+  })
+
+  const staleDocIds = response.responses
+    .map((result, index) => (!result.success && isUnregisteredError(result.error) ? tokenDocs[index].id : null))
+    .filter(Boolean)
+  await Promise.all(staleDocIds.map((id) => db.doc(`fcmTokens/${uid}/tokens/${id}`).delete()))
+}
+
+async function notifyPartner(authorUid, payload) {
   if (!authorUid) return
   const recipients = await partnerUids(authorUid)
-  if (recipients.length === 0) return
+  await Promise.all(recipients.map((uid) => sendToUid(uid, payload)))
+}
 
-  for (const uid of recipients) {
-    const [tokenDocs, badgeCount] = await Promise.all([tokensForUser(uid), computeUnreadCount(uid)])
-    if (tokenDocs.length === 0) continue
-
-    const response = await getMessaging().sendEachForMulticast({
-      tokens: tokenDocs.map((t) => t.token),
-      data: { title, body, url, badgeCount: String(badgeCount) },
-    })
-
-    const staleDocIds = response.responses
-      .map((result, index) => (!result.success && isUnregisteredError(result.error) ? tokenDocs[index].id : null))
-      .filter(Boolean)
-    await Promise.all(
-      staleDocIds.map((id) => db.doc(`fcmTokens/${uid}/tokens/${id}`).delete())
-    )
-  }
+// Unlike notifyPartner (which deliberately excludes whoever caused the
+// event), reminders aren't "authored" by either of you — both should be
+// pinged, including whoever set the Date Night up in the first place.
+async function notifyEveryone(payload) {
+  const docs = await db.collection('fcmTokens').listDocuments()
+  await Promise.all(docs.map((docRef) => sendToUid(docRef.id, payload)))
 }
 
 function truncate(text, max = 80) {
@@ -120,6 +130,42 @@ exports.notifyOnMessage = onDocumentCreated('messages/{id}', async (event) => {
   })
 })
 
+// Reactions are treated like a new message for notification purposes — the
+// client bumps lastActivityAt/lastActivityByUid on add/change (not removal,
+// see toggleReaction), and this diffs the before/after reactions maps the
+// same way to find who reacted, so it only fires for a genuinely new or
+// changed reaction, never for one being taken away.
+exports.notifyOnReaction = onDocumentUpdated('messages/{id}', async (event) => {
+  const before = event.data.before.data()
+  const after = event.data.after.data()
+  const beforeReactions = before.reactions || {}
+  const afterReactions = after.reactions || {}
+
+  const reactorUid = Object.keys(afterReactions).find(
+    (uid) => afterReactions[uid] && afterReactions[uid] !== beforeReactions[uid],
+  )
+  if (!reactorUid) return
+
+  const emoji = afterReactions[reactorUid]
+  let reactorName = 'They'
+  try {
+    const reactorRecord = await getAuth().getUser(reactorUid)
+    reactorName = reactorRecord.displayName || reactorRecord.email || reactorName
+  } catch {
+    // best effort — notification still makes sense with the generic fallback
+  }
+
+  const isSelfReact = after.senderUid === reactorUid
+  const preview = after.type === 'image' ? 'a photo' : truncate(after.text)
+  const target = isSelfReact ? 'their own message' : 'your message'
+
+  await notifyPartner(reactorUid, {
+    title: 'New reaction',
+    body: `${reactorName} reacted ${emoji} to ${target}${preview ? `: ${preview}` : ''}`,
+    url: '/YouAreMyHome/#/chat',
+  })
+})
+
 exports.notifyOnQaRound = onDocumentCreated('qaRounds/{id}', async (event) => {
   const data = event.data.data()
   await notifyPartner(data.createdBy, {
@@ -135,7 +181,7 @@ exports.notifyOnScrapbook = onDocumentCreated('scrapbook/{id}', async (event) =>
     notifyPartner(data.savedBy, {
       title: 'New drawing',
       body: `${data.savedByName || 'They'} saved a drawing to the scrapbook`,
-      url: '/YouAreMyHome/#/scrapbook',
+      url: '/YouAreMyHome/#/games',
     }),
     mirrorToJournal({
       type: 'scrapbook',
@@ -167,11 +213,16 @@ exports.notifyOnGallery = onDocumentCreated('gallery/{id}', async (event) => {
 
 exports.notifyOnMail = onDocumentCreated('loveLetters/{id}', async (event) => {
   const data = event.data.data()
-  // No body preview here on purpose — the letter content stays off the lock screen.
+  const isCard = data.type === 'card'
+  // No body preview for plain letters on purpose — content stays off the
+  // lock screen. Cards are a gift announcement, not a private message, so a
+  // preview is fine (and part of the fun) there.
   await Promise.all([
     notifyPartner(data.fromUid, {
-      title: 'New love letter',
-      body: 'You have a new letter waiting',
+      title: isCard ? 'A gift is waiting!' : 'New love letter',
+      body: isCard
+        ? `${data.fromName || 'They'} sent you a card for ${data.occasion}${data.withFlowers ? ' with flowers 💐' : ''}`
+        : 'You have a new letter waiting',
       url: '/YouAreMyHome/#/mail',
     }),
     mirrorToJournal({
@@ -179,6 +230,8 @@ exports.notifyOnMail = onDocumentCreated('loveLetters/{id}', async (event) => {
       sourceId: event.params.id,
       authorUid: data.fromUid,
       authorName: data.fromName,
+      isCard,
+      occasion: data.occasion || null,
     }),
   ])
 })
@@ -189,6 +242,104 @@ exports.notifyOnMilestone = onDocumentCreated('milestones/{id}', async (event) =
     title: 'New milestone',
     body: truncate(data.title) || 'Added a new milestone',
     url: '/YouAreMyHome/#/calendar',
+  })
+})
+
+// A Date Night doc tracks its own upcoming occurrence (`nextOccurrenceDate`)
+// separately from its original `date`, so a recurring one can roll forward
+// after each occurrence without losing the original anchor. `remindersSent`
+// is a one-shot flag pair per occurrence, reset on rollover; `lastActivityAt`
+// gets bumped with a null author whenever a reminder fires, which is what
+// piggybacks this onto the existing Calendar nav badge (see
+// useUnreadBadges.js/FEATURES above) for both of you, not just "the partner."
+function advanceOccurrence(dateStr, recurrenceType) {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  if (recurrenceType === 'weekly') date.setUTCDate(date.getUTCDate() + 7)
+  else if (recurrenceType === 'biweekly') date.setUTCDate(date.getUTCDate() + 14)
+  else if (recurrenceType === 'monthly') date.setUTCMonth(date.getUTCMonth() + 1)
+  else if (recurrenceType === 'yearly') date.setUTCFullYear(date.getUTCFullYear() + 1)
+  else return null
+  const y = date.getUTCFullYear()
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const d = String(date.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+exports.sendDateNightReminders = onSchedule('every 15 minutes', async () => {
+  const snapshot = await db.collection('milestones').where('category', '==', 'dateNight').get()
+  const now = Date.now()
+
+  for (const docSnap of snapshot.docs) {
+    const data = docSnap.data()
+    if (data.completed || !data.time || !data.nextOccurrenceDate || !data.timezone) continue
+
+    const occurrenceMs = zonedTimeToUtc(data.nextOccurrenceDate, data.time, data.timezone).getTime()
+    const minutesUntil = (occurrenceMs - now) / 60000
+    const remindersSent = data.remindersSent || {}
+    const updates = {}
+
+    if (minutesUntil <= 24 * 60 && minutesUntil > -30 && !remindersSent.dayBefore) {
+      await notifyEveryone({
+        title: 'Date Night tomorrow 💕',
+        body: `${truncate(data.title)} is coming up`,
+        url: '/YouAreMyHome/#/calendar',
+      })
+      updates['remindersSent.dayBefore'] = true
+    }
+    if (minutesUntil <= 15 && minutesUntil > -30 && !remindersSent.fifteenMin) {
+      await notifyEveryone({
+        title: 'Date Night starting soon 💕',
+        body: `${truncate(data.title)} starts in 15 minutes`,
+        url: '/YouAreMyHome/#/calendar',
+      })
+      updates['remindersSent.fifteenMin'] = true
+    }
+    if (Object.keys(updates).length > 0) {
+      updates.lastActivityAt = FieldValue.serverTimestamp()
+      updates.lastActivityByUid = null
+      await docSnap.ref.update(updates)
+    }
+
+    // 30 minutes past start: mirror to the Journal once per occurrence, then
+    // roll a recurring Date Night forward (resetting reminders) or mark a
+    // one-off as completed so it's skipped on future runs.
+    if (minutesUntil < -30) {
+      const tasks = []
+      if (data.journaledDate !== data.nextOccurrenceDate) {
+        tasks.push(
+          mirrorToJournal({
+            type: 'dateNight',
+            title: data.title,
+            authorUid: null,
+            authorName: null,
+          }),
+        )
+      }
+      const nextDate = advanceOccurrence(data.nextOccurrenceDate, data.recurrenceType)
+      tasks.push(
+        docSnap.ref.update(
+          nextDate
+            ? { nextOccurrenceDate: nextDate, remindersSent: {}, journaledDate: data.nextOccurrenceDate }
+            : { completed: true, journaledDate: data.nextOccurrenceDate },
+        ),
+      )
+      await Promise.all(tasks)
+    }
+  }
+})
+
+// Unlike every other trigger here, this doc exists purely to cause a
+// notification — the client's useDrawInvite hook also listens to this same
+// collection live, so the write does double duty as the push (this) and the
+// in-app popup (client-side onSnapshot), the same way Thumbkiss's RTDB write
+// drives its overlay but without needing a push.
+exports.notifyOnDrawInvite = onDocumentCreated('drawInvites/{id}', async (event) => {
+  const data = event.data.data()
+  await notifyPartner(data.fromUid, {
+    title: 'Draw with me?',
+    body: `${data.fromName || 'They'} wants to draw together right now`,
+    url: '/YouAreMyHome/#/games',
   })
 })
 
@@ -220,7 +371,7 @@ exports.notifyOnMilestoneComment = notifyOnComment('milestones', {
 exports.notifyOnQaComment = notifyOnComment('qaRounds', { title: 'New comment', url: '/YouAreMyHome/#/qa' })
 exports.notifyOnScrapbookComment = notifyOnComment('scrapbook', {
   title: 'New comment',
-  url: '/YouAreMyHome/#/scrapbook',
+  url: '/YouAreMyHome/#/games',
 })
 exports.notifyOnGalleryComment = notifyOnComment('gallery', {
   title: 'New comment',
@@ -230,15 +381,21 @@ exports.notifyOnGalleryComment = notifyOnComment('gallery', {
 // journalEvents holds mirrors of scrapbook/gallery/mail (already notified by
 // their own triggers above) plus thumbkiss connects (intentionally quiet —
 // it's a live, already-witnessed-by-both-of-you event) alongside genuinely
-// new mood/custom/gratitude/assessment entries — only those last four
-// should notify here, or everything else would double-notify.
-const JOURNAL_NOTIFY_TYPES = new Set(['mood', 'custom', 'gratitude', 'assessment'])
+// new mood/custom/gratitude/assessment/checkin/madlib entries — only those
+// last six should notify here, or everything else would double-notify.
+const JOURNAL_NOTIFY_TYPES = new Set(['mood', 'custom', 'gratitude', 'assessment', 'checkin', 'madlib'])
 
 exports.notifyOnJournalEvent = onDocumentCreated('journalEvents/{id}', async (event) => {
   const data = event.data.data()
   if (!JOURNAL_NOTIFY_TYPES.has(data.type)) return
 
-  const titles = { mood: 'Mood update', gratitude: 'Gratitude entry', assessment: 'Assessment completed' }
+  const titles = {
+    mood: 'Mood update',
+    gratitude: 'Gratitude entry',
+    assessment: 'Assessment completed',
+    checkin: 'Daily check-in',
+    madlib: 'Mad Libs',
+  }
   const body =
     data.type === 'mood'
       ? `${data.authorName || 'They'} is feeling ${data.emoji} ${data.label}`
@@ -246,12 +403,16 @@ exports.notifyOnJournalEvent = onDocumentCreated('journalEvents/{id}', async (ev
         ? `${data.authorName || 'They'} is grateful for: ${truncate(data.text)}`
         : data.type === 'assessment'
           ? `${data.authorName || 'They'} completed the ${data.title} assessment`
-          : `${data.authorName || 'They'}: ${truncate(data.text)}`
+          : data.type === 'checkin'
+            ? `${data.authorName || 'They'} checked in${data.mood ? ` feeling ${data.mood.emoji} ${data.mood.label}` : ''}`
+            : data.type === 'madlib'
+              ? `${data.authorName || 'They'} filled in "${data.title}" — your turn!`
+              : `${data.authorName || 'They'}: ${truncate(data.text)}`
 
   await notifyPartner(data.authorUid, {
     title: titles[data.type] || 'New journal entry',
     body,
-    url: '/YouAreMyHome/#/journal',
+    url: data.type === 'madlib' ? '/YouAreMyHome/#/games' : '/YouAreMyHome/#/journal',
   })
 })
 

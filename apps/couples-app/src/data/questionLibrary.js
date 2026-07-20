@@ -152,9 +152,3 @@ export const QUESTION_LIBRARY = [
   { id: 'convo-09', category: 'Conversation Starters', text: 'If you could ask anyone, living or not, one question, who and what?' },
   { id: 'convo-10', category: 'Conversation Starters', text: "What's a movie or show you could rewatch endlessly?" },
 ]
-
-export function randomQuestion(excludeIds = []) {
-  const pool = QUESTION_LIBRARY.filter((q) => !excludeIds.includes(q.id))
-  const source = pool.length > 0 ? pool : QUESTION_LIBRARY
-  return source[Math.floor(Math.random() * source.length)]
-}

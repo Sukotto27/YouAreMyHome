@@ -8,16 +8,21 @@ const PATHS = {
       <circle cx="15" cy="12" r="6" />
     </>
   ),
-  draw: (
+  music: (
     <>
-      <path d="M4 20l0.8-3.6L14.8 6.4a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4L7.6 19.2 4 20Z" />
-      <path d="M13.5 7.5l3 3" />
+      <path d="M9 18V5l11-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="17" cy="16" r="3" />
     </>
   ),
-  scrapbook: (
+  games: (
     <>
-      <path d="M4 5.5S6 4 9.5 4 12 5.7 12 5.7 12.5 4 16 4s5.5 1.5 5.5 1.5v13S19.5 17 16 17s-4 1.7-4 1.7-1-1.7-4.5-1.7S4 18.5 4 18.5v-13Z" />
-      <path d="M12 5.7v13" />
+      <rect x="4" y="4" width="16" height="16" rx="3" />
+      <circle cx="9" cy="9" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="9" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="9" cy="15" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="15" cy="15" r="0.9" fill="currentColor" stroke="none" />
     </>
   ),
   gallery: (

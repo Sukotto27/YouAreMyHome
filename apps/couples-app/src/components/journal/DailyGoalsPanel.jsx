@@ -5,8 +5,16 @@ import { useDailyGoals } from '../../hooks/useDailyGoals'
 
 export default function DailyGoalsPanel() {
   const { user } = useAuth()
-  const { myChecked, partnerChecked, toggleItem, addCustomItem, addGratitudeEntry, itemsForCategory } =
-    useDailyGoals()
+  const {
+    myChecked,
+    partnerChecked,
+    toggleItem,
+    addCustomItem,
+    editCustomItem,
+    removeCustomItem,
+    addGratitudeEntry,
+    itemsForCategory,
+  } = useDailyGoals()
   const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
 
   return (
@@ -23,6 +31,8 @@ export default function DailyGoalsPanel() {
               interactive
               onToggle={(itemId) => toggleItem(category.id, itemId)}
               onAddCustom={(label) => addCustomItem(category.id, label)}
+              onEditCustom={(itemId, label) => editCustomItem(category.id, itemId, label)}
+              onRemoveCustom={(itemId) => removeCustomItem(category.id, itemId)}
               onPromptSubmit={addGratitudeEntry}
             />
           ))}
@@ -47,9 +57,21 @@ export default function DailyGoalsPanel() {
   )
 }
 
-function CategorySection({ category, items, checked, interactive, onToggle, onAddCustom, onPromptSubmit }) {
+function CategorySection({
+  category,
+  items,
+  checked,
+  interactive,
+  onToggle,
+  onAddCustom,
+  onEditCustom,
+  onRemoveCustom,
+  onPromptSubmit,
+}) {
   const [addingCustom, setAddingCustom] = useState(false)
   const [customLabel, setCustomLabel] = useState('')
+  const [editingItemId, setEditingItemId] = useState(null)
+  const [editLabel, setEditLabel] = useState('')
   const checkedCount = items.filter((item) => checked[`${category.id}:${item.id}`]).length
 
   function submitCustom(event) {
@@ -58,6 +80,19 @@ function CategorySection({ category, items, checked, interactive, onToggle, onAd
     onAddCustom(customLabel)
     setCustomLabel('')
     setAddingCustom(false)
+  }
+
+  function startEdit(item) {
+    setEditingItemId(item.id)
+    setEditLabel(item.label)
+  }
+
+  function submitEdit(event) {
+    event.preventDefault()
+    if (!editLabel.trim()) return
+    onEditCustom(editingItemId, editLabel)
+    setEditingItemId(null)
+    setEditLabel('')
   }
 
   return (
@@ -83,21 +118,59 @@ function CategorySection({ category, items, checked, interactive, onToggle, onAd
               />
             )
           }
+          if (editingItemId === item.id) {
+            return (
+              <form key={item.id} onSubmit={submitEdit} className="flex gap-1">
+                <input
+                  type="text"
+                  autoFocus
+                  value={editLabel}
+                  onChange={(event) => setEditLabel(event.target.value)}
+                  className="min-w-0 flex-1 rounded-full border border-ink/15 bg-white/70 px-2.5 py-1 font-body text-xs text-ink outline-none focus:border-rose"
+                />
+                <button
+                  type="submit"
+                  disabled={!editLabel.trim()}
+                  className="shrink-0 rounded-full bg-rose px-3 py-1 font-body text-xs font-medium text-paper disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingItemId(null)}
+                  className="shrink-0 font-body text-xs text-ink-soft"
+                >
+                  Cancel
+                </button>
+              </form>
+            )
+          }
           return (
-            <label
-              key={item.id}
-              className={`flex items-center gap-2 font-body text-sm ${
-                interactive ? 'cursor-pointer text-ink' : 'text-ink-soft'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={isChecked}
-                disabled={!interactive}
-                onChange={() => interactive && onToggle(item.id)}
-              />
-              <span className={isChecked ? 'text-ink-soft line-through' : ''}>{item.label}</span>
-            </label>
+            <div key={item.id} className="flex items-center gap-2">
+              <label
+                className={`flex flex-1 items-center gap-2 font-body text-sm ${
+                  interactive ? 'cursor-pointer text-ink' : 'text-ink-soft'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  disabled={!interactive}
+                  onChange={() => interactive && onToggle(item.id)}
+                />
+                <span className={isChecked ? 'text-ink-soft line-through' : ''}>{item.label}</span>
+              </label>
+              {interactive && item.custom && (
+                <span className="flex shrink-0 gap-2 font-body text-xs text-ink-soft">
+                  <button type="button" onClick={() => startEdit(item)} className="hover:text-rose">
+                    Edit
+                  </button>
+                  <button type="button" onClick={() => onRemoveCustom(item.id)} className="hover:text-rose">
+                    Remove
+                  </button>
+                </span>
+              )}
+            </div>
           )
         })}
       </div>

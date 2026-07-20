@@ -30,7 +30,11 @@ function Body({ entry, isMine }) {
     case 'thumbkiss':
       return <p className="font-body text-sm text-ink">🤙 You shared a thumbkiss</p>
     case 'mail':
-      return (
+      return entry.isCard ? (
+        <p className="font-body text-sm text-ink">
+          💐 {isMine ? 'You sent' : `${entry.authorName} sent`} a card for {entry.occasion}
+        </p>
+      ) : (
         <p className="font-body text-sm text-ink">
           💌 {isMine ? 'You sent a letter' : `${entry.authorName} sent you a letter`}
         </p>
@@ -68,6 +72,45 @@ function Body({ entry, isMine }) {
         <p className="font-body text-sm text-ink">
           📋 {isMine ? 'You' : entry.authorName} completed the {entry.title} assessment
         </p>
+      )
+    case 'madlib':
+      return (
+        <p className="font-body text-sm text-ink">
+          🎲 {isMine ? 'You' : entry.authorName} filled in the Mad Lib "{entry.title}"
+        </p>
+      )
+    case 'dateNight':
+      return <p className="font-body text-sm text-ink">💕 Date Night: {entry.title}</p>
+    case 'checkin':
+      return (
+        <div>
+          <p className="font-body text-xs font-medium text-rose">
+            📝 {isMine ? 'You' : entry.authorName} checked in
+            {entry.mood ? ` feeling ${entry.mood.emoji} ${entry.mood.label}` : ''}
+          </p>
+          <div className="mt-1 space-y-1">
+            {entry.mind && (
+              <p className="whitespace-pre-wrap font-body text-sm text-ink">
+                <span className="text-ink-soft">On their mind:</span> {entry.mind}
+              </p>
+            )}
+            {entry.stress && (
+              <p className="whitespace-pre-wrap font-body text-sm text-ink">
+                <span className="text-ink-soft">Stressed about:</span> {entry.stress}
+              </p>
+            )}
+            {entry.gratitude && (
+              <p className="whitespace-pre-wrap font-body text-sm text-ink">
+                <span className="text-ink-soft">Grateful for:</span> {entry.gratitude}
+              </p>
+            )}
+            {entry.doingNow && (
+              <p className="whitespace-pre-wrap font-body text-sm text-ink">
+                <span className="text-ink-soft">Doing:</span> {entry.doingNow}
+              </p>
+            )}
+          </div>
+        </div>
       )
     default:
       return null

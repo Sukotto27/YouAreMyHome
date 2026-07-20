@@ -3,13 +3,15 @@ import { Link, Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
-import { seedHistoryMilestones } from '../../lib/migrations'
+import { seedHistoryMilestones, seedBirthdays } from '../../lib/migrations'
 import { useUnreadBadges } from '../../hooks/useUnreadBadges'
 import { useNotificationSounds } from '../../hooks/useNotificationSounds'
 import { useThumbkiss } from '../../hooks/useThumbkiss'
 import { useThumbkissGesture } from '../../hooks/useThumbkissGesture'
 import CompactCounter from '../counter/CompactCounter'
 import NamePrompt from '../NamePrompt'
+import CheckInReminder from '../CheckInReminder'
+import DrawInvitePopup from '../DrawInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
 import SwipeableNav from './SwipeableNav'
 import Wordmark from './Wordmark'
@@ -20,8 +22,8 @@ const NAV_ITEMS = [
   { key: 'home', to: '/', label: 'Home', icon: 'home' },
   { key: 'chat', to: '/chat', label: 'Chat', icon: 'chat', badgeKey: 'chat' },
   { key: 'qa', to: '/qa', label: 'Q&A', icon: 'qa', badgeKey: 'qa' },
-  { key: 'draw', to: '/draw', label: 'Draw', icon: 'draw' },
-  { key: 'scrapbook', to: '/scrapbook', label: 'Scrapbook', icon: 'scrapbook', badgeKey: 'scrapbook' },
+  { key: 'games', to: '/games', label: 'Games', icon: 'games', badgeKey: 'scrapbook' },
+  { key: 'music', to: '/music', label: 'Music', icon: 'music' },
   { key: 'gallery', to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
   { key: 'mail', to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
   { key: 'calendar', to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
@@ -52,7 +54,10 @@ export default function Shell() {
   }, [unread])
 
   useEffect(() => {
-    if (firebaseReady) seedHistoryMilestones()
+    if (firebaseReady) {
+      seedHistoryMilestones()
+      seedBirthdays()
+    }
   }, [])
 
   useEffect(() => {
@@ -66,8 +71,10 @@ export default function Shell() {
   }, [user])
 
   return (
-    <div className="flex min-h-svh flex-col bg-paper text-ink">
+    <div className="flex h-svh flex-col overflow-hidden bg-paper text-ink">
       <NamePrompt />
+      <CheckInReminder />
+      <DrawInvitePopup />
       <ThumbkissOverlay
         myPressing={thumbkiss.myPressing}
         partnerPressing={thumbkiss.partnerPressing}

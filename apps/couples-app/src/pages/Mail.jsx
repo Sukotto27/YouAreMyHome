@@ -13,6 +13,7 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { encodeSecret, decodeSecret } from '../lib/cipher'
 import { useMarkSeen } from '../hooks/useMarkSeen'
+import { readDemoList, writeDemoList } from '../lib/demoStore'
 
 const DEMO_PARTNER_UID = 'demo-partner'
 
@@ -29,10 +30,18 @@ const DEMO_SEED = [
   },
 ]
 
+// Reads persisted demo mail (so a card sent from Calendar's SendCardModal —
+// a separate component tree — actually shows up here), falling back to the
+// seed letter only the first time there's nothing saved yet.
+function readDemoLetters() {
+  const saved = readDemoList('loveLetters')
+  return saved.length > 0 ? saved : DEMO_SEED
+}
+
 export default function Mail() {
   const { user } = useAuth()
   useMarkSeen('mail')
-  const [letters, setLetters] = useState(firebaseReady ? [] : DEMO_SEED)
+  const [letters, setLetters] = useState(firebaseReady ? [] : readDemoLetters)
   const [selectedId, setSelectedId] = useState(null)
   const [composing, setComposing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -55,17 +64,21 @@ export default function Mail() {
     const body = encodeSecret(text)
 
     if (!firebaseReady) {
-      setLetters((prev) => [
-        {
-          id: crypto.randomUUID(),
-          fromUid: user.uid,
-          fromName: user.displayName,
-          body,
-          createdAt: { toDate: () => new Date() },
-          readAt: null,
-        },
-        ...prev,
-      ])
+      setLetters((prev) => {
+        const next = [
+          {
+            id: crypto.randomUUID(),
+            fromUid: user.uid,
+            fromName: user.displayName,
+            body,
+            createdAt: { toDate: () => new Date() },
+            readAt: null,
+          },
+          ...prev,
+        ]
+        writeDemoList('loveLetters', next)
+        return next
+      })
       setDraft('')
       setComposing(false)
       setSending(false)
@@ -92,11 +105,13 @@ export default function Mail() {
     if (letter.fromUid === user.uid || letter.readAt) return
 
     if (!firebaseReady) {
-      setLetters((prev) =>
-        prev.map((item) =>
+      setLetters((prev) => {
+        const next = prev.map((item) =>
           item.id === letter.id ? { ...item, readAt: { toDate: () => new Date() } } : item,
-        ),
-      )
+        )
+        writeDemoList('loveLetters', next)
+        return next
+      })
       return
     }
     await updateDoc(doc(db, 'loveLetters', letter.id), { readAt: serverTimestamp() })
@@ -159,6 +174,7 @@ export default function Mail() {
         {letters.map((letter) => {
           const isOwn = letter.fromUid === user.uid
           const unread = !isOwn && !letter.readAt
+          const isCard = letter.type === 'card'
           return (
             <button
               key={letter.id}
@@ -166,10 +182,16 @@ export default function Mail() {
               onClick={() => openLetter(letter)}
               className="flex w-full items-center gap-3 rounded-2xl border border-ink/10 bg-white/50 px-4 py-3 text-left transition-colors hover:border-rose"
             >
-              <EnvelopeGlyph sealed={unread} />
+              {isCard ? <CardGlyph sealed={unread} withFlowers={letter.withFlowers} /> : <EnvelopeGlyph sealed={unread} />}
               <div className="flex-1">
                 <p className="font-body text-sm text-ink">
-                  {isOwn ? 'You wrote to your partner' : `From ${letter.fromName}`}
+                  {isCard
+                    ? isOwn
+                      ? `You sent a card for ${letter.occasion}`
+                      : `${letter.fromName} sent you a card for ${letter.occasion}`
+                    : isOwn
+                      ? 'You wrote to your partner'
+                      : `From ${letter.fromName}`}
                 </p>
                 <p className="font-hand text-sm text-ink-soft">{formatDate(letter.createdAt)}</p>
               </div>
@@ -184,6 +206,7 @@ export default function Mail() {
 
 function LetterView({ letter, isOwn, onBack }) {
   const text = decodeSecret(letter.body)
+  const isCard = letter.type === 'card'
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
       <button
@@ -193,7 +216,13 @@ function LetterView({ letter, isOwn, onBack }) {
       >
         ← Back to mailbox
       </button>
-      <div className="rounded-3xl border border-ink/10 bg-white/60 p-6">
+      <div
+        className={`rounded-3xl border p-6 ${
+          isCard ? 'border-rose/30 bg-blush-soft/40 text-center' : 'border-ink/10 bg-white/60'
+        }`}
+      >
+        {isCard && <p className="mb-2 text-4xl">{letter.withFlowers ? '💐' : '💌'}</p>}
+        {isCard && <p className="mb-1 font-display text-xl italic text-ink">{letter.occasion}</p>}
         <p className="mb-4 font-hand text-lg text-ink-soft">
           {isOwn ? 'To your partner' : `From ${letter.fromName}`} · {formatDate(letter.createdAt)}
         </p>
@@ -228,8 +257,20 @@ function EnvelopeGlyph({ sealed }) {
   )
 }
 
+function CardGlyph({ sealed, withFlowers }) {
+  return (
+    <span
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-lg ${
+        sealed ? 'bg-rose text-paper' : 'bg-blush-soft'
+      }`}
+    >
+      {withFlowers ? '💐' : '🎁'}
+    </span>
+  )
+}
+
 function formatDate(timestamp) {
-  const date = timestamp?.toDate ? timestamp.toDate() : new Date()
+  const date = timestamp?.toDate ? timestamp.toDate() : new Date(timestamp || Date.now())
   return (
     date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
     ' · ' +

@@ -21,9 +21,10 @@ import OurStory from '../components/calendar/OurStory'
 import WebcalPanel from '../components/calendar/WebcalPanel'
 
 const TABS = [
-  { id: 'milestones', label: 'Milestones', category: 'milestone' },
-  { id: 'plans', label: 'Plans', category: 'plan' },
-  { id: 'goals', label: 'Goals', category: 'goal' },
+  { id: 'milestones', label: 'Milestones', category: 'milestone', singular: 'milestone' },
+  { id: 'dateNights', label: 'Date Night', category: 'dateNight', singular: 'date night' },
+  { id: 'plans', label: 'Plans', category: 'plan', singular: 'plan' },
+  { id: 'goals', label: 'Goals', category: 'goal', singular: 'goal' },
   { id: 'story', label: 'Our Story' },
   { id: 'grid', label: 'Calendar' },
 ]
@@ -170,7 +171,7 @@ export default function Calendar() {
               onClick={() => setAdding((v) => !v)}
               className="rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper transition-transform duration-200 ease-out hover:-translate-y-0.5"
             >
-              {adding ? 'Cancel' : `Add a ${activeTab.category}`}
+              {adding ? 'Cancel' : `Add a ${activeTab.singular}`}
             </button>
           </div>
 
@@ -179,7 +180,7 @@ export default function Calendar() {
           <div className="space-y-2">
             {categoryItems.length === 0 && !adding && (
               <p className="pt-10 text-center font-hand text-xl text-ink-soft">
-                nothing here yet — add your first {activeTab.category}
+                nothing here yet — add your first {activeTab.singular}
               </p>
             )}
             {categoryItems.map((item) => (

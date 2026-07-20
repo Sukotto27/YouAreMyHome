@@ -1,14 +1,18 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { QUICK_REACTIONS } from '../../data/emojis'
 
 const MENU_WIDTH = 240
-const MENU_HEIGHT = 96
+// Worst case: reactions row + Reply + Copy + Edit all shown — an
+// overestimate here just means extra clearance above the tap point, which
+// is safer than the menu clipping off the bottom of the screen.
+const MENU_HEIGHT = 200
 
 // Positioned `fixed` (viewport-relative) rather than absolute-inside-bubble
 // — the message list is overflow-y-auto and would clip an absolutely
 // positioned popup. Dismisses on any outside pointerdown.
-export default function MessageActionMenu({ x, y, onSelectReaction, onReply, onClose }) {
+export default function MessageActionMenu({ x, y, message, isOwn, onSelectReaction, onReply, onEdit, onClose }) {
   const ref = useRef(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     function handlePointerDown(event) {
@@ -20,6 +24,21 @@ export default function MessageActionMenu({ x, y, onSelectReaction, onReply, onC
 
   const left = Math.min(Math.max(x - MENU_WIDTH / 2, 8), window.innerWidth - MENU_WIDTH - 8)
   const top = Math.min(Math.max(y - MENU_HEIGHT - 12, 8), window.innerHeight - MENU_HEIGHT - 8)
+
+  const canCopy = message.type !== 'image'
+  const canEdit = isOwn && message.type === 'text'
+
+  async function handleCopy() {
+    const text = message.type === 'link' ? message.caption || message.url : message.text
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(onClose, 700)
+    } catch {
+      // Clipboard API unavailable/blocked — just close, nothing else to do.
+      onClose()
+    }
+  }
 
   return (
     <div
@@ -46,6 +65,24 @@ export default function MessageActionMenu({ x, y, onSelectReaction, onReply, onC
       >
         ↩ Reply
       </button>
+      {canCopy && (
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-body text-sm text-ink-soft transition-colors hover:text-rose"
+        >
+          {copied ? '✓ Copied' : '📋 Copy text'}
+        </button>
+      )}
+      {canEdit && (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-body text-sm text-ink-soft transition-colors hover:text-rose"
+        >
+          ✏️ Edit
+        </button>
+      )}
     </div>
   )
 }

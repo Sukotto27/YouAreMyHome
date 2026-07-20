@@ -95,6 +95,48 @@ export function useDailyGoals() {
     await setDoc(doc(db, 'dailyGoalsCustom', user.uid), { [categoryId]: arrayUnion(entry) }, { merge: true })
   }
 
+  // Renaming/removing writes the whole category array back rather than
+  // using arrayRemove/arrayUnion pairs — simpler, and `customItems` is
+  // already kept in sync locally so computing the new array is cheap.
+  async function editCustomItem(categoryId, itemId, label) {
+    const trimmed = label.trim()
+    if (!user || !trimmed) return
+    const updated = (customItems[categoryId] || []).map((item) =>
+      item.id === itemId ? { ...item, label: trimmed } : item,
+    )
+
+    if (!firebaseReady) {
+      const next = { ...customItems, [categoryId]: updated }
+      setCustomItems(next)
+      writeDemoList(`dailyGoalsCustom:${user.uid}`, next)
+      return
+    }
+
+    await setDoc(doc(db, 'dailyGoalsCustom', user.uid), { [categoryId]: updated }, { merge: true })
+  }
+
+  async function removeCustomItem(categoryId, itemId) {
+    if (!user) return
+    const updated = (customItems[categoryId] || []).filter((item) => item.id !== itemId)
+    const checkedKey = `${categoryId}:${itemId}`
+
+    if (!firebaseReady) {
+      const nextCustom = { ...customItems, [categoryId]: updated }
+      setCustomItems(nextCustom)
+      writeDemoList(`dailyGoalsCustom:${user.uid}`, nextCustom)
+      const nextChecked = { ...myChecked }
+      delete nextChecked[checkedKey]
+      setMyChecked(nextChecked)
+      writeDemoList(`dailyGoals:${user.uid}:${date}`, nextChecked)
+      return
+    }
+
+    await Promise.all([
+      setDoc(doc(db, 'dailyGoalsCustom', user.uid), { [categoryId]: updated }, { merge: true }),
+      setDoc(doc(db, 'dailyGoals', `${user.uid}_${date}`), { [checkedKey]: deleteField() }, { merge: true }),
+    ])
+  }
+
   // Marks the Nightly Routine "Daily Gratitude" item checked and logs the
   // actual text to the Journal timeline — unlike a plain checkbox, you can
   // add more than one gratitude entry per day, each becomes its own
@@ -136,11 +178,23 @@ export function useDailyGoals() {
     ])
   }
 
+  // `custom` is computed here (not stored) so it works retroactively for
+  // items added before this field existed — a preset item's id is always
+  // found in GOAL_CATEGORIES, a custom one never is.
   function itemsForCategory(categoryId, mine = true) {
     const preset = GOAL_CATEGORIES.find((c) => c.id === categoryId)?.items || []
     const custom = (mine ? customItems : partnerCustomItems)[categoryId] || []
-    return [...preset, ...custom]
+    return [...preset.map((item) => ({ ...item, custom: false })), ...custom.map((item) => ({ ...item, custom: true }))]
   }
 
-  return { myChecked, partnerChecked, toggleItem, addCustomItem, addGratitudeEntry, itemsForCategory }
+  return {
+    myChecked,
+    partnerChecked,
+    toggleItem,
+    addCustomItem,
+    editCustomItem,
+    removeCustomItem,
+    addGratitudeEntry,
+    itemsForCategory,
+  }
 }

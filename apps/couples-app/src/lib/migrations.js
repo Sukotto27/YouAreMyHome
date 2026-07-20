@@ -77,3 +77,45 @@ export async function seedHistoryMilestones() {
     // never gets created, so it'll simply retry on the next app load.
   }
 }
+
+// Birthdays, recurring yearly. The year in `date` is a placeholder (birth
+// year wasn't something to guess at) — `showYearsSince: false` keeps
+// EventRow from turning that placeholder into a fake "Nth anniversary"/age
+// label. `giftEligible` pre-enables the virtual card & flowers button.
+const BIRTHDAY_ITEMS = [
+  { title: "Cristina's Birthday", date: '2000-04-22' },
+  { title: "Scott's Birthday", date: '2000-01-27' },
+]
+
+export async function seedBirthdays() {
+  const sentinelRef = doc(db, 'meta', 'birthdaysSeeded')
+  const birthdayRefs = BIRTHDAY_ITEMS.map(() => doc(collection(db, 'milestones')))
+
+  try {
+    await runTransaction(db, async (transaction) => {
+      const sentinelSnap = await transaction.get(sentinelRef)
+      if (sentinelSnap.exists()) return
+
+      transaction.set(sentinelRef, { seededAt: serverTimestamp() })
+      BIRTHDAY_ITEMS.forEach((item, index) => {
+        transaction.set(birthdayRefs[index], {
+          title: item.title,
+          date: item.date,
+          notes: null,
+          category: 'milestone',
+          recurring: true,
+          showYearsSince: false,
+          giftEligible: true,
+          protected: true,
+          addedBy: null,
+          addedByName: null,
+          createdAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          lastActivityByUid: null,
+        })
+      })
+    })
+  } catch {
+    // Best-effort, same as seedHistoryMilestones above.
+  }
+}

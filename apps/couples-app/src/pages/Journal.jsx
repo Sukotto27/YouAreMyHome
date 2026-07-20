@@ -1,18 +1,20 @@
 import { useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useMarkSeen } from '../hooks/useMarkSeen'
 import JournalTimeline from '../components/journal/JournalTimeline'
+import PersonalStatusPanel from '../components/journal/PersonalStatusPanel'
 import DailyGoalsPanel from '../components/journal/DailyGoalsPanel'
-import AssessmentsPanel from '../components/journal/AssessmentsPanel'
 
 const TABS = [
   { id: 'timeline', label: 'Timeline' },
+  { id: 'status', label: 'Status' },
   { id: 'goals', label: 'Daily Goals' },
-  { id: 'assessments', label: 'Assessments' },
 ]
 
 export default function Journal() {
   useMarkSeen('journal')
-  const [tab, setTab] = useState('timeline')
+  const location = useLocation()
+  const [tab, setTab] = useState(location.state?.tab || 'timeline')
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
@@ -34,8 +36,8 @@ export default function Journal() {
       </div>
 
       {tab === 'timeline' && <JournalTimeline />}
+      {tab === 'status' && <PersonalStatusPanel />}
       {tab === 'goals' && <DailyGoalsPanel />}
-      {tab === 'assessments' && <AssessmentsPanel />}
     </div>
   )
 }

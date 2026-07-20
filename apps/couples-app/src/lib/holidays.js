@@ -30,6 +30,7 @@ export function holidaysForYear(year) {
 
   // US — fixed dates
   add(new Date(year, 0, 1), "New Year's Day", 'US')
+  add(new Date(year, 1, 14), "Valentine's Day", 'US')
   add(new Date(year, 5, 19), 'Juneteenth', 'US')
   add(new Date(year, 6, 4), 'Independence Day', 'US')
   add(new Date(year, 10, 11), 'Veterans Day', 'US')
