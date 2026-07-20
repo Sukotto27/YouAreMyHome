@@ -8,7 +8,7 @@ import {
   onChildAdded, onDisconnect, onValue, push, ref, remove, set,
 } from "firebase/database";
 import { auth, db, firebaseReady, rtdb } from "./firebase.js";
-import { FIRESTORE, HOST_ROLE, roleFor, rtdbPaths } from "./game/schema.js";
+import { FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths } from "./game/schema.js";
 
 const GAME_BUILD = 154;
 const TILE_SIZE = 48;
