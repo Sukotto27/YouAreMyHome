@@ -26,10 +26,13 @@ jobs:
           cache: npm
 
       # npm ci requires package-lock.json to have every platform's optional
-      # deps pre-resolved; a Windows-generated lockfile won't include Linux
-      # WASM-fallback packages it never needed locally. npm install
-      # resolves what this platform actually needs instead of failing.
-      - run: npm install
+      # deps pre-resolved; a Windows-generated lockfile doesn't reliably
+      # carry Linux-only native binaries (e.g. rolldown's platform binding)
+      # even under plain `npm install` — a known npm optional-deps bug
+      # (npm/cli#4828: "Cannot find native binding"). Deleting the lockfile
+      # first forces a fresh resolution against the runner's actual
+      # platform instead of trusting the Windows-computed one.
+      - run: rm -f package-lock.json && npm install
 
       # Builds both workspaces (apps/couples-app, apps/home-game) via the
       # root package.json "build" script.
