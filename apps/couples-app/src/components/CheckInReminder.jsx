@@ -14,7 +14,7 @@ const DISMISS_KEY_PREFIX = 'you-are-my-home:checkin-dismissed:'
 export default function CheckInReminder() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { myCheckIn, date } = useCheckIn()
+  const { myCheckIn, date, loading } = useCheckIn()
   const [dismissed, setDismissed] = useState(true)
 
   useEffect(() => {
@@ -22,8 +22,11 @@ export default function CheckInReminder() {
   }, [date])
 
   // Only ever show after NamePrompt has resolved (same fixed inset-0 z-30
-  // overlay slot — the two are mutually exclusive by design).
-  if (!user || !user.displayName || myCheckIn || dismissed) return null
+  // overlay slot — the two are mutually exclusive by design). Also waits out
+  // `loading` — myCheckIn starts null until the first Firestore snapshot
+  // arrives, so without this it would flash on every load before correcting
+  // itself once today's check-in (if any) actually loads in.
+  if (!user || !user.displayName || loading || myCheckIn || dismissed) return null
 
   function dismiss() {
     sessionStorage.setItem(DISMISS_KEY_PREFIX + date, '1')

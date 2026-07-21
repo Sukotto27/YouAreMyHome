@@ -343,6 +343,39 @@ exports.notifyOnDrawInvite = onDocumentCreated('drawInvites/{id}', async (event)
   })
 })
 
+// Every new storyTurns doc leaves a fresh blank for the *other* partner —
+// including order:0 (the very first turn, which starts the story) — so a
+// plain onDocumentCreated trigger is enough; no need to distinguish start
+// vs. continue the way notifyOnLoveNote distinguishes kiss vs. note.
+exports.notifyOnStoryTurn = onDocumentCreated('storyTurns/{id}', async (event) => {
+  const data = event.data.data()
+  await notifyPartner(data.authorUid, {
+    title: 'Never-Ending Story',
+    body: `${data.authorName || 'They'} left you a blank to fill in`,
+    url: '/YouAreMyHome/#/games',
+  })
+})
+
+// farkleGame/match is a single ever-live doc (see useFarkle), so a turn
+// change is an update, not a create — startGame's initial write leaves
+// currentTurnUid pointed at the starter themself (no notification needed),
+// and every following write that actually hands the turn to someone else
+// pings that specific person directly (sendToUid, not notifyPartner — this
+// needs the new current player, not "everyone but whoever just acted", since
+// the person banking/farkling and the person losing the turn are the same
+// one). Skipped once the match is finished, since applyBank/applyFarkle
+// still set a currentTurnUid there even though nobody's turn is next.
+exports.notifyOnFarkleTurn = onDocumentUpdated('farkleGame/{id}', async (event) => {
+  const before = event.data.before.data()
+  const after = event.data.after.data()
+  if (after.status !== 'playing' || before.currentTurnUid === after.currentTurnUid) return
+  await sendToUid(after.currentTurnUid, {
+    title: 'Farkle',
+    body: 'Your turn to roll!',
+    url: '/YouAreMyHome/#/games',
+  })
+})
+
 // A kiss or love note from the SendLoveMenu — like notifyOnDrawInvite, this
 // doc exists purely to cause a notification; the client's useLoveNotes hook
 // listens to the same collection live for the in-app popup.

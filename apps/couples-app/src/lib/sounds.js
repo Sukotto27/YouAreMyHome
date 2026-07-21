@@ -4,6 +4,7 @@ import newChat from '../assets/sounds/new_chat.mp3'
 import notification from '../assets/sounds/notification.mp3'
 import typing from '../assets/sounds/typing.mp3'
 import bubble from '../assets/sounds/bubble.mp3'
+import diceRoll from '../assets/sounds/dice_roll.mp3'
 
 const SOUNDS = {
   chat_send: chatSend,
@@ -12,6 +13,7 @@ const SOUNDS = {
   notification,
   typing,
   bubble,
+  dice_roll: diceRoll,
 }
 
 const audioCache = {}

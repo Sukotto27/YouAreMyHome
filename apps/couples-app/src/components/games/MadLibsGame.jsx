@@ -140,7 +140,7 @@ function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmi
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
       <button
         type="button"
         onClick={onBack}

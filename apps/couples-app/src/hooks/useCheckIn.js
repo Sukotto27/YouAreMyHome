@@ -19,6 +19,7 @@ export function useCheckIn() {
   const { user } = useAuth()
   const date = todayKey()
   const [myCheckIn, setMyCheckIn] = useState(() => (user ? readDemoCheckIn(`checkins:${user.uid}:${date}`) : null))
+  const [loading, setLoading] = useState(firebaseReady)
   const [partnerCheckIn, setPartnerCheckIn] = useState(null)
   const partnerUid = usePartnerUid()
 
@@ -26,6 +27,7 @@ export function useCheckIn() {
     if (!firebaseReady || !user) return
     return onSnapshot(doc(db, 'checkins', `${user.uid}_${date}`), (snap) => {
       setMyCheckIn(snap.exists() ? snap.data() : null)
+      setLoading(false)
     })
   }, [user, date])
 
@@ -73,5 +75,5 @@ export function useCheckIn() {
     ])
   }
 
-  return { myCheckIn, partnerCheckIn, submitCheckIn, date }
+  return { myCheckIn, partnerCheckIn, submitCheckIn, date, loading }
 }
