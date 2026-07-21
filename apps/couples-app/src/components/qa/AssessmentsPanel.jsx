@@ -24,7 +24,7 @@ export default function AssessmentsPanel({ onBack }) {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
       {onBack && (
         <button
           type="button"

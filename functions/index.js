@@ -343,6 +343,18 @@ exports.notifyOnDrawInvite = onDocumentCreated('drawInvites/{id}', async (event)
   })
 })
 
+// A kiss or love note from the SendLoveMenu — like notifyOnDrawInvite, this
+// doc exists purely to cause a notification; the client's useLoveNotes hook
+// listens to the same collection live for the in-app popup.
+exports.notifyOnLoveNote = onDocumentCreated('loveNotes/{id}', async (event) => {
+  const data = event.data.data()
+  await notifyPartner(data.fromUid, {
+    title: data.category === 'kiss' ? 'Sending a kiss' : 'Sending love',
+    body: data.message,
+    url: '/YouAreMyHome/#/',
+  })
+})
+
 // Each new comment bumps its parent doc's lastActivityAt/lastActivityByUid
 // (which is what the badge queries above actually look at) and its
 // commentCount, then notifies the partner the same way every other feature

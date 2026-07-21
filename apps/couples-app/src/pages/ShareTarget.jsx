@@ -129,7 +129,7 @@ export default function ShareTarget() {
   const domain = preview?.domain || (sharedUrl ? safeHostname(sharedUrl) : null)
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
       <h1 className="font-display text-2xl italic text-ink">Share to chat</h1>
 
       {imageDataUrl && <img src={imageDataUrl} alt="" className="w-full rounded-3xl border border-ink/10" />}

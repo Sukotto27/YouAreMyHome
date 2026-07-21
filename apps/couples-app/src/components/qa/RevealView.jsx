@@ -15,7 +15,7 @@ export default function RevealView({
 
   return (
     <div
-      className={`mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-6 px-4 py-8 sm:px-6 ${
+      className={`mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-6 overflow-y-auto px-4 py-8 sm:px-6 ${
         rewind ? 'animate-rewind-in' : ''
       }`}
     >

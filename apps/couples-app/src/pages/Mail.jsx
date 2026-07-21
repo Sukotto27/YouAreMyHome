@@ -208,7 +208,7 @@ function LetterView({ letter, isOwn, onBack }) {
   const text = decodeSecret(letter.body)
   const isCard = letter.type === 'card'
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
       <button
         type="button"
         onClick={onBack}

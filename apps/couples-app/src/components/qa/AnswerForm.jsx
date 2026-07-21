@@ -11,7 +11,7 @@ export default function AnswerForm({ questionText, options, partnerHasAnswered, 
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col justify-center gap-6 overflow-y-auto px-4 py-8 sm:px-6">
       {partnerHasAnswered && (
         <p className="text-center font-hand text-lg text-teal">
           your partner has already answered — your turn!

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useCheckIn } from '../../hooks/useCheckIn'
+import { useMoods } from '../../hooks/useMoods'
 import { MOOD_PRESETS } from '../../lib/moodPresets'
 
 const FIELDS = [
@@ -19,6 +20,7 @@ const EMPTY_FIELDS = { mind: '', stress: '', gratitude: '', doingNow: '' }
 export default function PersonalStatusPanel() {
   const { user } = useAuth()
   const { myCheckIn, partnerCheckIn, submitCheckIn } = useCheckIn()
+  const { setMyMood } = useMoods()
   const [mood, setMood] = useState(null)
   const [customMood, setCustomMood] = useState('')
   const [fields, setFields] = useState(EMPTY_FIELDS)
@@ -59,6 +61,7 @@ export default function PersonalStatusPanel() {
   async function handleSubmit(event) {
     event.preventDefault()
     await submitCheckIn({ mood, ...fields })
+    if (mood) await setMyMood(mood.emoji, mood.label)
     setSaved(true)
   }
 

@@ -220,6 +220,7 @@ export default function Chat() {
   async function toggleReaction(message, emoji) {
     const current = message.reactions?.[user.uid]
     const next = current === emoji ? null : emoji
+    if (next) playSound('bubble')
 
     if (!firebaseReady) {
       setMessages((prev) =>
@@ -456,7 +457,7 @@ export default function Chat() {
 
       <div
         ref={listRef}
-        className="relative flex-1 space-y-1 overflow-y-auto px-4 py-4 sm:px-6"
+        className="relative flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6"
         style={backgroundStyle}
       >
         {messages.length === 0 && (
@@ -675,7 +676,7 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegi
         <div className="relative max-w-[80%] sm:max-w-[65%]">
           <div
             {...pressHandlers}
-            className={`select-none whitespace-pre-wrap rounded-2xl px-4 py-2.5 transition-shadow duration-500 ${
+            className={`select-none whitespace-pre-wrap break-words rounded-2xl px-4 py-2.5 transition-shadow duration-500 ${
               highlighted ? 'ring-2 ring-rose ring-offset-2 ring-offset-paper' : ''
             } ${fontClassName} ${isMedia ? 'overflow-hidden p-1.5' : ''} ${bubbleClassName}`}
             style={bubbleStyle}
@@ -704,12 +705,12 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegi
                 {message.previewImage && (
                   <img src={message.previewImage} alt="" className="max-h-48 w-full object-cover" />
                 )}
-                <div className="p-2.5">
-                  <p className="font-body text-sm font-medium text-ink">{message.previewTitle || message.url}</p>
+                <div className="min-w-0 p-2.5">
+                  <p className="break-words font-body text-sm font-medium text-ink">{message.previewTitle || message.url}</p>
                   {message.previewDomain && (
-                    <p className="mt-0.5 font-body text-xs text-ink-soft">{message.previewDomain}</p>
+                    <p className="mt-0.5 break-words font-body text-xs text-ink-soft">{message.previewDomain}</p>
                   )}
-                  {message.caption && <p className="mt-1.5 font-body text-sm text-ink">{message.caption}</p>}
+                  {message.caption && <p className="mt-1.5 break-words font-body text-sm text-ink">{message.caption}</p>}
                 </div>
               </a>
             ) : (

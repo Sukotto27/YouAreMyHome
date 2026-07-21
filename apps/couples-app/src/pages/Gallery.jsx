@@ -64,7 +64,7 @@ export default function Gallery() {
 
   if (selected) {
     return (
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
         <button
           type="button"
           onClick={() => setSelected(null)}

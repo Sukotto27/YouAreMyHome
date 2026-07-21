@@ -76,8 +76,8 @@ self.addEventListener('push', (event) => {
         tasks.push(
           self.registration.showNotification(title, {
             body,
-            icon: '/YouAreMyHome/icons/icon-192.png',
-            badge: '/YouAreMyHome/icons/icon-192.png',
+            icon: '/YouAreMyHome/icons/heart-notification-192.png',
+            badge: '/YouAreMyHome/icons/heart-notification-192.png',
             data: { url },
           }),
         )

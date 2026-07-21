@@ -13,6 +13,8 @@ import NamePrompt from '../NamePrompt'
 import CheckInReminder from '../CheckInReminder'
 import DrawInvitePopup from '../DrawInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
+import SendLoveMenu from '../SendLoveMenu'
+import IncomingLoveNotePopup from '../IncomingLoveNotePopup'
 import SwipeableNav from './SwipeableNav'
 import Wordmark from './Wordmark'
 import heartLeft from '../../assets/images/heart-left.png'
@@ -27,7 +29,7 @@ const NAV_ITEMS = [
   { key: 'gallery', to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
   { key: 'mail', to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
   { key: 'calendar', to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
-  { key: 'thumbkiss', action: 'thumbkiss', label: 'Kiss', icon: 'thumbkiss' },
+  { key: 'thumbkiss', action: 'sendLove', label: 'Send Love', icon: 'thumbkiss' },
   { key: 'journal', to: '/journal', label: 'Journal', icon: 'journal', badgeKey: 'journal' },
 ]
 
@@ -36,6 +38,7 @@ const GREETED_KEY = 'you-are-my-home:greeted'
 export default function Shell() {
   const { user, logout } = useAuth()
   const [greeting, setGreeting] = useState(null)
+  const [sendLoveOpen, setSendLoveOpen] = useState(false)
   const unread = useUnreadBadges()
   useNotificationSounds(unread)
   const thumbkiss = useThumbkiss()
@@ -75,6 +78,12 @@ export default function Shell() {
       <NamePrompt />
       <CheckInReminder />
       <DrawInvitePopup />
+      <IncomingLoveNotePopup />
+      <SendLoveMenu
+        open={sendLoveOpen}
+        onClose={() => setSendLoveOpen(false)}
+        thumbkiss={{ startPress: thumbkiss.startPress, endPress: thumbkiss.endPress }}
+      />
       <ThumbkissOverlay
         myPressing={thumbkiss.myPressing}
         partnerPressing={thumbkiss.partnerPressing}
@@ -118,16 +127,7 @@ export default function Shell() {
         <Outlet />
       </main>
 
-      <SwipeableNav
-        items={NAV_ITEMS}
-        unread={unread}
-        thumbkissHandlers={{
-          onPointerDown: thumbkiss.startPress,
-          onPointerUp: thumbkiss.endPress,
-          onPointerLeave: thumbkiss.endPress,
-          onPointerCancel: thumbkiss.endPress,
-        }}
-      />
+      <SwipeableNav items={NAV_ITEMS} unread={unread} onOpenSendLove={() => setSendLoveOpen(true)} />
     </div>
   )
 }

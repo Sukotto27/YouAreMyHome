@@ -16,7 +16,7 @@ function chunk(items, size) {
 // obvious there's more than one page. A tap still navigates normally (drag
 // distance stays under DRAG_THRESHOLD); an actual swipe suppresses the
 // click that would otherwise fire on whatever item the finger lands on.
-export default function SwipeableNav({ items, unread, thumbkissHandlers }) {
+export default function SwipeableNav({ items, unread, onOpenSendLove }) {
   const pages = chunk(items, ITEMS_PER_PAGE)
   const [pageIndex, setPageIndex] = useState(0)
   const [dragOffset, setDragOffset] = useState(0)
@@ -94,13 +94,12 @@ export default function SwipeableNav({ items, unread, thumbkissHandlers }) {
           {pages.map((pageItems, pageI) => (
             <div key={pageI} className="flex w-full shrink-0">
               {pageItems.map((item) =>
-                item.action === 'thumbkiss' ? (
+                item.action === 'sendLove' ? (
                   <button
                     key={item.key}
                     type="button"
-                    {...thumbkissHandlers}
+                    onClick={onOpenSendLove}
                     className="flex flex-1 flex-col items-center gap-0.5 px-2 py-2 font-body text-[11px] text-ink-soft transition-colors hover:text-ink"
-                    style={{ WebkitTouchCallout: 'none', touchAction: 'none' }}
                   >
                     <NavIcon name={item.icon} className="h-5 w-5" />
                     <span className="whitespace-nowrap">{item.label}</span>

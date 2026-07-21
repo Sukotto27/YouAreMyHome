@@ -3,7 +3,7 @@
 // tab), so it no longer needs its own top-level nav item.
 export default function GamesMenu({ onSelectDraw, onSelectMadLibs }) {
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-8 sm:px-6">
       <div className="text-center">
         <h1 className="font-display text-3xl italic text-ink">Games</h1>
         <p className="mt-1 font-hand text-xl text-ink-soft">something to play together</p>
