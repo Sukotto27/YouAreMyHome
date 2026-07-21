@@ -71,7 +71,12 @@ export default function FarkleGame({ onBack }) {
 
   const myScore = game.scores[user.uid] || 0
   const partnerScore = game.scores[effectivePartnerUid] || 0
-  const selectionScore = scoreSelection(selected.map((i) => game.lastRoll[i]))
+  // `selected` is component state, reset via an effect keyed on
+  // game.lastRoll/awaitingKeep — that effect runs after the commit that
+  // clears lastRoll (e.g. right after Keep selected), so there's one render
+  // where `selected` still holds stale indices against a `lastRoll` that's
+  // already null. Guard here rather than assume they're always in sync.
+  const selectionScore = game.lastRoll ? scoreSelection(selected.map((i) => game.lastRoll[i])) : { valid: false, score: 0 }
   const canKeep = game.awaitingKeep && selected.length > 0 && selectionScore.valid
   const onBoard = myScore > 0
   const canBank = myTurn && !game.awaitingKeep && game.turnScore > 0 && (onBoard || game.turnScore >= onBoardMin)

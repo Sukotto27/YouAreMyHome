@@ -72,6 +72,12 @@ export default function ObstacleDropGame({ onBack }) {
   }
 
   // Canvas sizing — same fit-to-container-with-DPR approach as DrawingCanvas.
+  // Keyed on match status rather than `[]`: the canvas only exists in the
+  // DOM once a match is actually in progress (the lobby view before that
+  // has no <canvas> at all), so an empty dependency array would run this
+  // once against a null canvasRef during the lobby and never again —
+  // leaving the canvas stuck at the browser's 300x150 default forever once
+  // a match starts.
   useEffect(() => {
     const canvas = canvasRef.current
     const container = containerRef.current
@@ -91,7 +97,7 @@ export default function ObstacleDropGame({ onBack }) {
     const observer = new ResizeObserver(resize)
     observer.observe(container)
     return () => observer.disconnect()
-  }, [])
+  }, [match?.status])
 
   function pointToPixel(point) {
     return { x: point.x * rectSizeRef.current.width, y: point.y * rectSizeRef.current.height }

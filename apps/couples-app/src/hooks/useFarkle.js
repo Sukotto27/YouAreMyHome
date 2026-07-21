@@ -157,12 +157,16 @@ export function useFarkle() {
       const kept = autoKeep(values)
       const { score } = scoreSelection(kept)
       const remaining = current.dicePool - kept.length
+      // lastRoll must be cleared (not left set to `values`) on a successful
+      // keep — a populated lastRoll with awaitingKeep:false is exactly the
+      // signal FarkleGame uses to show "you farkled," so leaving it set here
+      // would make every ordinary demo-bot keep display as a bust.
       const afterKeep = {
         ...current,
         turnScore: current.turnScore + score,
         dicePool: remaining === 0 ? 6 : remaining,
-        lastRoll: values,
-        lastRollByUid: DEMO_PARTNER_UID,
+        lastRoll: null,
+        lastRollByUid: null,
         awaitingKeep: false,
       }
       setGame(afterKeep)
@@ -190,7 +194,16 @@ export function useFarkle() {
     return () => {
       cancelled = true
     }
-  }, [game, user])
+    // Deliberately NOT keyed on the whole `game` object — the bot's own
+    // setGame calls (every roll/keep) would otherwise change `game` and
+    // re-run this effect mid-turn, tearing down the in-flight recursive
+    // playTurn loop (marking it cancelled) while demoPlayingRef stays stuck
+    // true forever, since it's only ever reset on that loop's normal
+    // completion path. currentTurnUid/status are the only things that
+    // actually need to restart this effect (a turn changing hands, or the
+    // match starting/finishing).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.currentTurnUid, game?.status, user])
 
   return {
     game,
