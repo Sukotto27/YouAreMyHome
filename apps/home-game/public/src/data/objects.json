@@ -386,6 +386,60 @@
   },
 
   {
+    "id": "rubble",
+    "name": "Rubble",
+    "icon": "🧱",
+    "blocks": true,
+    "renewable": false,
+    "size": "medium",
+    "hp": 3,
+    "harvest": {
+      "requiresTool": "pickaxe",
+      "gives": { "stone": 1 }
+    }
+  },
+
+  {
+    "id": "lever",
+    "name": "Lever",
+    "icon": "🎚️",
+    "blocks": true,
+    "size": "small"
+  },
+
+  {
+    "id": "torch_unlit",
+    "name": "Unlit Torch",
+    "icon": "🕯️",
+    "blocks": false,
+    "size": "small"
+  },
+
+  {
+    "id": "torch_lit",
+    "name": "Lit Torch",
+    "icon": "🔥",
+    "blocks": false,
+    "size": "small"
+  },
+
+  {
+    "id": "boulder",
+    "name": "Boulder",
+    "icon": "🪨",
+    "blocks": true,
+    "size": "medium"
+  },
+
+  {
+    "id": "pressure_plate",
+    "name": "Pressure Plate",
+    "icon": "🔳",
+    "blocks": false,
+    "size": "small"
+  },
+
+  {
     "id": "fish_spot",
     "name": "Fishing Spot",
     "icon": "🐟",

@@ -1,6 +1,10 @@
 // Landing screen for Games — a small, growable menu of shared activities.
 // Draw also holds the Scrapbook now (saved drawings live inside it as a
 // tab), so it no longer needs its own top-level nav item.
+//
+// "You Are My Home — The Game" is its own installable PWA (separate Vite
+// app under apps/home-game, deployed alongside this one at /game/) rather
+// than a component here, so it's a plain link out instead of a view.
 export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory, onSelectFarkle, onSelectObstacleDrop }) {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-8 sm:px-6">
@@ -8,6 +12,16 @@ export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory
         <h1 className="font-display text-3xl italic text-ink">Games</h1>
         <p className="mt-1 font-hand text-xl text-ink-soft">something to play together</p>
       </div>
+
+      <a
+        href="/YouAreMyHome/game/"
+        className="rounded-2xl border border-gold/40 bg-gold/10 px-4 py-4 text-left transition-colors hover:border-rose"
+      >
+        <p className="font-body font-medium text-ink">The Home Game</p>
+        <p className="mt-1 font-body text-xs text-ink-soft">
+          Our cozy co-op world — farm, build, and explore dungeons together
+        </p>
+      </a>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <button

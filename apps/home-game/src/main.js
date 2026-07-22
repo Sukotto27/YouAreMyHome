@@ -262,6 +262,52 @@ const BASE_FONT = "BaseFont";
 const TITLE_FONT = "TitleFont";
 const GLYPH_FONT = "GlyphFont";
 
+// ---- In-game HUD theme ----
+// Matches apps/couples-app's paper/ink/rose/gold palette (src/index.css)
+// instead of generic black-panel/white-text game-HUD grey, so the gameplay
+// screen reads as the same "You Are My Home" world as the rest of the app.
+// Warm dark-ink panels stand in for the app's cream paper (a literal cream
+// HUD would wash out against the pixel-art world), gold is the one accent
+// color (buttons, borders, "active" states), rose is reserved for
+// notification badges — everything here is intentionally just a palette
+// swap over the existing HUD layouts, not a redesign; title/tutorial/
+// cutscene screens are untouched per request.
+const HUD = {
+  panel: "rgba(35,24,21,0.90)",        // ink #362521, darkened + translucent
+  panelSoft: "rgba(35,24,21,0.72)",
+  border: "rgba(200,169,110,0.30)",     // gold #c8a96e, low opacity
+  borderStrong: "rgba(232,213,163,0.55)",
+  text: "rgba(245,233,219,0.95)",       // paper-deep #f3e6d8
+  textMuted: "rgba(245,233,219,0.45)",
+  textDim: "rgba(245,233,219,0.68)",
+  gold: "#c8a96e",
+  goldText: "rgba(232,213,163,0.95)",
+  activeFill: "rgba(158,122,58,0.55)",
+  activeBorder: "rgba(232,213,163,0.65)",
+  rose: "#e27d7a",
+  roseSoft: "rgba(226,125,122,0.95)",
+};
+
+// Rounded-rect panel — floating HUD cards (popups, log, chat, toasts) use
+// this instead of a hard-cornered drawRect, matching the app's rounded-2xl
+// cards; edge-attached bars (top bar, sidebar, inventory bar) stay sharp
+// since they're flush against the screen edge, same as the app's own header/
+// bottom-nav bars.
+function drawHudPanel(x, y, w, h, r = 14, fill = HUD.panel, border = HUD.border, borderW = 1) {
+  ctx.save();
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x, y, w, h, r);
+  else ctx.rect(x, y, w, h);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  if (border) {
+    ctx.lineWidth = borderW;
+    ctx.strokeStyle = border;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // Inventory UI
 const INV_COLS = 12;
 const INV_ROWS = 2;
@@ -269,18 +315,70 @@ const INV_SLOTS = INV_COLS * INV_ROWS;
 
 // UI sizes
 const UI_TOP_H = 58;        // room for stamina bar
-const UI_BOTTOM_H = 230;    // inventory + crafting + misc
+
+// Bottom inventory bar: collapsed shows a single peek row (tap the handle or
+// swipe up to expand); expanded shows the full multi-row grid + crafting.
+// This — plus the left sidebar and activity log below — is the mobile HUD
+// redesign: the game wasn't originally laid out for phones, so all three
+// panels default to their smallest form and reveal on demand instead of
+// permanently eating screen space from the world.
+const INV_BOTTOM_H_COLLAPSED = 108;
+const INV_BOTTOM_H_EXPANDED = 230;
+let UI_BOTTOM_H = INV_BOTTOM_H_COLLAPSED; // recomputed every frame, see computeBottomH()
 
 // ---- Left sidebar UI ----
-let UI_LEFTBAR_W = 64; // width of the new left sidebar; shrinks on narrow viewports, see resize()
+// Always visible (no slide-out/collapse) — a permanent narrow strip with the
+// menu/log/chat icon buttons and, below them, the avatar rows. Wide enough
+// to fit an avatar image + name + coords underneath it.
+let UI_LEFTBAR_W = 84; // recomputed on resize(), see computeLeftbarW()
+
+function computeBottomH() {
+  return state.invExpanded ? INV_BOTTOM_H_EXPANDED : INV_BOTTOM_H_COLLAPSED;
+}
+function computeLeftbarW() {
+  return window.innerWidth < 480 ? 60 : 72;
+}
+
+// Animates UI_BOTTOM_H toward its target (expanded vs collapsed) each frame
+// instead of snapping, so the inventory bar visibly slides rather than
+// jumps. Called once per frame from update(dt).
+function updateHudAnim(dt) {
+  const targetBottomH = computeBottomH();
+
+  if (state._bottomHAnim == null) state._bottomHAnim = targetBottomH;
+
+  const speed = Math.min(1, dt * 12);
+  state._bottomHAnim += (targetBottomH - state._bottomHAnim) * speed;
+
+  if (Math.abs(targetBottomH - state._bottomHAnim) < 0.5) state._bottomHAnim = targetBottomH;
+
+  UI_BOTTOM_H = state._bottomHAnim;
+}
 
 // Pointer drag threshold
 const DRAG_THRESHOLD_PX = 8;
+// Vertical distance (px) a press has to travel inside the inventory bar
+// before it counts as a swipe (expand/collapse) instead of a slot tap.
+const INV_SWIPE_THRESHOLD_PX = 28;
+
+// ---- Radial (tap-and-hold) menu ----
+// Replaces the old "tap opens a list, tap again to choose" flow — a quick
+// tap now just performs the default (first enabled) action directly, and
+// holding reveals a ring of alternatives so a slightly-off tap can no
+// longer accidentally fire the wrong one.
+const RADIAL_HOLD_MS = 420;      // how long a press must hold before the ring appears
+const RADIAL_BTN_R = 26;         // resting radius of each ring button
+const RADIAL_HOVER_SCALE = 1.35; // how much the hovered button grows
+const RADIAL_HIT_SCALE = 1.6;    // hit-test radius vs resting radius — generous, this exists to reduce mis-taps
 
 // ---- Hunger ----
 const HUNGER_MAX = 100;
 const HUNGER_PER_SEC = 0.25; // hunger gained per second
 const STARVE_STAMINA_DRAIN_PER_SEC = 1.0;
+
+// Camera starts panning once the player is within this many tiles of the
+// edge of the visible viewport (was a hard 1-tile/edge trigger).
+const EDGE_SCROLL_MARGIN = 3;
 
 // Movement + stamina
 const MOVE_SPEED_TILES_PER_SEC = 6;
@@ -369,6 +467,25 @@ screenFade: null,
   actionLog: [],
   logScroll: 0,
   logExpanded: false,
+  logVisible: false,   // mobile HUD: log starts hidden behind its own icon button
+  logToastText: null,  // most recent entry, shown briefly even while the log is hidden
+  logToastUntil: 0,    // performance.now() timestamp the toast disappears at
+
+  // Mobile HUD: the inventory bar defaults to a collapsed peek row so the
+  // world gets more screen space; the left sidebar's icons (menu/log/chat)
+  // and avatars are always visible, each opening its own popup on tap.
+  invExpanded: false,
+  _invHandleUI: null,
+  _bottomHAnim: null,    // current animated height, see updateHudAnim()
+
+  // Chat lives behind its own button in the left sidebar instead of always
+  // being on screen — chatUnread badges the button until it's opened.
+  chatOpen: false,
+  chatUnread: 0,
+
+  // "Main menu" popup (compass/volume/settings/collectibles/edit), opened
+  // from the ☰ icon in the left sidebar.
+  mainMenuOpen: false,
 
   // Optional story cutscene (first-play; rewatchable via checkbox)
   wantCutscene: false,
@@ -431,7 +548,11 @@ screenFade: null,
     down: false,
     dragging: false,
     startX: 0, startY: 0,
-    lastX: 0, lastY: 0
+    lastX: 0, lastY: 0,
+    // Tap-and-hold radial menu gesture (see RADIAL_HOLD_MS / hasWorldMenuTarget()).
+    holdTimerId: null,
+    holdFired: false,
+    holdX: 0, holdY: 0
   },
 
   ui: {
@@ -644,6 +765,16 @@ function seedServerWithLocalLogIfNeeded(serverIncomingCount) {
   // console.log("[NET][LOG] seeded server log from host local history:", state.actionLog.length);
 }
 
+// Briefly surfaces the newest action-log line even while the log panel is
+// hidden — a toast/notification the player doesn't have to open the log to
+// see. Drawn by drawActivityLogOverlay(); fades on its own after a few
+// seconds (see LOG_TOAST_MS).
+const LOG_TOAST_MS = 3500;
+function showLogToast(line) {
+  state.logToastText = line;
+  state.logToastUntil = performance.now() + LOG_TOAST_MS;
+}
+
 // ---- Log Actions ----
 function logAction(text) {
   const line = String(text ?? "");
@@ -658,6 +789,7 @@ function logAction(text) {
   if (canSend && !state.net.suppressLogs) {
     state.actionLog.unshift(line);
     if (state.actionLog.length > 200) state.actionLog.pop();
+    showLogToast(line);
 
     state.net._pendingLogTexts.push(line);
     // console.log("[NET][LOG] send log ->", line);
@@ -673,6 +805,7 @@ function logAction(text) {
   // console.log("[LOG]", line);
   state.actionLog.unshift(line);
   if (state.actionLog.length > 200) state.actionLog.pop();
+  showLogToast(line);
 
   // If we're "online-enabled" but not connected yet (auth still resolving),
   // buffer it so it gets sent once connectOnline() finishes (keeps both clients in sync).
@@ -718,6 +851,7 @@ function applyNetLogEntry(entry) {
 
     state.actionLog.unshift(line);
     if (state.actionLog.length > 200) state.actionLog.pop();
+    showLogToast(line);
   } finally {
     state.net.suppressLogs = prev;
   }
@@ -751,7 +885,9 @@ function loadInventoriesForWorld(worldId) {
 
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length === 2) {
-      state.inventories = parsed;
+      // Drop any zero/negative-qty ghost stacks (e.g. from the drop-revert bug
+      // that used to leave qty:0 duplicates behind) so old saves self-heal.
+      state.inventories = parsed.map(inv => Array.isArray(inv) ? inv.filter(st => st && (st.qty ?? 0) > 0) : inv);
       return true;
     }
   } catch (e) {
@@ -927,8 +1063,12 @@ function overworldReady() {
 function resize() {
   const dpr = Math.max(1, window.devicePixelRatio || 1);
   // Narrow phone viewport: shrink the sidebar to claw back width for the
-  // inventory grid (see invGridMetrics()).
-  UI_LEFTBAR_W = window.innerWidth < 480 ? 44 : 64;
+  // inventory grid (see invGridMetrics()). The inventory bar's open/close
+  // still animates (see updateHudAnim()); a real viewport change snaps it
+  // instantly instead of animating from whatever it was mid-resize.
+  UI_LEFTBAR_W = computeLeftbarW();
+  UI_BOTTOM_H = computeBottomH();
+  state._bottomHAnim = UI_BOTTOM_H;
   canvas.width = Math.floor(window.innerWidth * dpr);
   canvas.height = Math.floor(window.innerHeight * dpr);
   canvas.style.width = `${window.innerWidth}px`;
@@ -1435,15 +1575,17 @@ function enableOverworldObjectsProxy() {
     if (typeof v !== "object") return String(v);
 
     const id = String(v.id ?? "");
+    const hp = (v.hp == null) ? "" : String(v.hp); // must be included: harvest hits only change hp
     const m = v.meta || {};
     const a = m.anchor;
     const anchor = a && typeof a.x === "number" && typeof a.y === "number" ? `${a.x},${a.y}` : "";
     const itemId = m.itemId ?? "";
     const qty = m.qty ?? "";
     const stage = m.stage ?? "";
+    const depleted = m.depleted ? "1" : "";
     const other = m.kind ?? ""; // harmless extra discriminator if you use it
 
-    return `${id}|${stage}|${itemId}|${qty}|${anchor}|${other}`;
+    return `${id}|${hp}|${stage}|${itemId}|${qty}|${anchor}|${depleted}|${other}`;
   }
 
   for (let y = 0; y < map.objects.length; y++) {
@@ -1610,11 +1752,11 @@ function ensureChatInput() {
   input.style.maxWidth = "70vw";
   input.style.padding = "6px 18px";
   input.style.borderRadius = "10px";
-  input.style.border = "1px solid rgba(255,255,255,0.18)";
-  input.style.background = "rgba(20,20,20,0.92)";
-  input.style.color = "rgba(255,255,255,0.92)";
+  input.style.border = "1px solid rgba(200,169,110,0.30)";
+  input.style.background = "rgba(35,24,21,0.92)";
+  input.style.color = "rgba(245,233,219,0.95)";
   input.style.outline = "none";
-  input.style.font = "10px system-ui";
+  input.style.font = "10px BaseFont, system-ui";
   input.style.lineHeight = "12px";
 
   // Prevent your global hotkeys from firing while typing
@@ -1645,9 +1787,10 @@ function ensureChatInput() {
 
 function setChatInputVisible(visible) {
   const wrap = document.getElementById("chatWrap");
-  if (wrap) wrap.style.display = visible ? "flex" : "none";
-  const indicator = document.getElementById("onlineIndicator");
-  if (indicator) indicator.style.display = visible ? "flex" : "none";
+  if (wrap) wrap.style.display = (visible && state.chatOpen) ? "flex" : "none";
+  // Force-hide the avatar panel while title/cutscene is up; drawLeftSidebar()
+  // re-shows it every frame once actually in-game.
+  if (!visible) setSidebarAvatarsVisible(false);
 }
 
 // Safe-area insets (notch/home-indicator) as pixel numbers, read once from the
@@ -1677,32 +1820,60 @@ function invGridMetrics() {
   const bottomMargin = 12;
 
   const availableW = window.innerWidth - UI_LEFTBAR_W - pad * 2 - safe.left - safe.right;
-  const availableH = UI_BOTTOM_H - headerH - bottomMargin;
+
+  // Collapsed and expanded use different bar heights (see
+  // INV_BOTTOM_H_COLLAPSED/EXPANDED), which independently constrain cell
+  // size — computed naively, that means icons visibly resize when you
+  // expand/collapse the bar. Compute what each mode's height would allow,
+  // then use the smaller of the two for BOTH, so only the row count
+  // changes, never the icon size.
+  const collapsedAvailableH = INV_BOTTOM_H_COLLAPSED - headerH - bottomMargin;
+  const collapsedCell = Math.max(20, Math.min(44, collapsedAvailableH));
 
   // Reflow to fewer, taller columns once 12-wide would need a sub-legible
   // cell to fit; recompute at each candidate column count until one fits
   // (or fall back to the narrowest option, INV_SLOTS-wide single column).
+  const expandedAvailableH = INV_BOTTOM_H_EXPANDED - headerH - bottomMargin;
   const candidateCols = [INV_COLS, 8, 6, 4];
-  let visualCols = INV_COLS;
-  let cell = 30;
+  let expandedCols = INV_COLS;
+  let expandedCell = 30;
   for (const cols of candidateCols) {
     const rows = Math.ceil(INV_SLOTS / cols);
     const rawCellW = Math.floor((availableW - (cols - 1) * gap) / cols);
-    const rawCellH = Math.floor((availableH - (rows - 1) * gap) / rows);
+    const rawCellH = Math.floor((expandedAvailableH - (rows - 1) * gap) / rows);
     const candidateCell = Math.max(0, Math.min(44, rawCellW, rawCellH));
     if (candidateCell >= 30 || cols === candidateCols[candidateCols.length - 1]) {
-      visualCols = cols;
-      cell = Math.max(20, candidateCell); // absolute floor even on the narrowest fallback
+      expandedCols = cols;
+      expandedCell = Math.max(20, candidateCell); // absolute floor even on the narrowest fallback
       break;
     }
   }
-  const visualRows = Math.ceil(INV_SLOTS / visualCols);
 
-  const gridX = UI_LEFTBAR_W + pad + safe.left;
+  const cell = Math.min(collapsedCell, expandedCell);
+
+  let visualCols, visualRows;
+  if (!state.invExpanded) {
+    // Collapsed: a single peek row sized to fill the available width. Only
+    // the first `visualCols` slots are reachable until expanded — that's
+    // the point (tap the handle or swipe up for the rest).
+    visualCols = Math.max(1, Math.min(INV_SLOTS, Math.floor((availableW + gap) / (cell + gap))));
+    visualRows = 1;
+  } else {
+    visualCols = Math.max(1, Math.min(expandedCols, Math.floor((availableW + gap) / (cell + gap))));
+    visualRows = Math.ceil(INV_SLOTS / visualCols);
+  }
+
   const baseY = window.innerHeight - UI_BOTTOM_H; // matches drawInventoryUI's bar background
   const gridY = baseY + headerH;
   const gridW = visualCols * cell + (visualCols - 1) * gap;
   const gridH = visualRows * cell + (visualRows - 1) * gap;
+
+  // Centered within the available width instead of flush against the
+  // sidebar — visualCols is often smaller than what the width could fit
+  // (INV_SLOTS caps it at 24, or a phone-narrow expanded reflow lands on a
+  // bigger cell than the row strictly needs), so a left-anchored grid left
+  // a lot of dead space on the right and read as off-center.
+  const gridX = UI_LEFTBAR_W + pad + safe.left + Math.max(0, availableW - gridW) / 2;
 
   // Below this width there's no room to the right of the inventory grid for
   // chat — stack it in a strip directly above the bottom bar instead of
@@ -1751,25 +1922,16 @@ function positionChatInput() {
 
   wrap.style.left = `${x}px`;
   wrap.style.top = `${y}px`;
-
-  const indicator = document.getElementById("onlineIndicator");
-  if (indicator) {
-    const indicatorH = 2 * 48 + 6; // two rows + gap = 102px
-    if (m.stacked) {
-      // No room beside the input on a narrow screen — top-right corner,
-      // clear of both the left sidebar and the stacked chat/inventory strip.
-      // NOT visually verified against the canvas-drawn sidebar/top HUD —
-      // check this first when testing on an actual phone.
-      indicator.style.left = `${window.innerWidth - 54 - m.safe.right}px`;
-      indicator.style.top = `${UI_TOP_H + m.safe.top + 4}px`;
-    } else {
-      // Position the indicator: to the right of the input, vertically centered in the bottom bar
-      indicator.style.left = `${x + w + 40}px`;
-      indicator.style.top = `${window.innerHeight - UI_BOTTOM_H + Math.round((UI_BOTTOM_H - indicatorH) / 2)}px`;
-    }
-    indicator.style.bottom = "auto";
-  }
 }
+
+// Avatars now live as rows inside the left panel (see drawLeftSidebar()) —
+// the DOM only supplies the photo + presence dot; the row background, name,
+// and coords are canvas-drawn like every other sidebar row so they stay in
+// one visual system. positionSidebarAvatars() aligns these to the row rects
+// drawLeftSidebar() just computed; the rows' Y never depends on the
+// sidebar's animated width, so this only needs to run when rows move
+// (mode change), not every frame of the open/close slide.
+let _sidebarAvatarEls = null;
 
 function ensureOnlineIndicator() {
   if (document.getElementById("onlineIndicator")) return;
@@ -1777,86 +1939,87 @@ function ensureOnlineIndicator() {
   const panel = document.createElement("div");
   panel.id = "onlineIndicator";
   panel.style.position = "absolute";
+  panel.style.left = "0px";
+  panel.style.top = "0px";
   panel.style.zIndex = "20";
-  panel.style.display = "none"; // hidden until in-game (setChatInputVisible controls this)
-  panel.style.flexDirection = "column";
-  panel.style.gap = "6px";
+  panel.style.display = "none"; // shown only while the side panel is open
   panel.style.pointerEvents = "none";
 
   const playerDefs = [
-    { idx: 0, name: "Scott",    src: "src/images/scott_thumbnail.jpg" },
-    { idx: 1, name: "Cristina", src: "src/images/cristina_thumbnail.jpg" }
+    { idx: 0, src: "src/images/scott_thumbnail.jpg" },
+    { idx: 1, src: "src/images/cristina_thumbnail.jpg" }
   ];
 
-  for (const p of playerDefs) {
-    const row = document.createElement("div");
-    row.id = `onlineRow${p.idx}`;
-    row.style.display = "flex";
-    row.style.alignItems = "center";
-    row.style.gap = "6px";
-    row.style.position = "relative";
+  _sidebarAvatarEls = [];
 
+  for (const p of playerDefs) {
     const img = document.createElement("img");
     img.src = p.src;
-    img.width = 48;
-    img.height = 48;
+    img.width = 32;
+    img.height = 32;
+    img.style.position = "absolute";
     img.style.borderRadius = "6px";
     img.style.display = "block";
     img.style.transition = "filter 0.3s, opacity 0.3s";
 
-    // Green presence dot (bottom-right of avatar)
+    // Presence dot (bottom-right of avatar)
     const dot = document.createElement("div");
-    dot.id = `onlineDot${p.idx}`;
     dot.style.position = "absolute";
-    dot.style.width = "11px";
-    dot.style.height = "11px";
+    dot.style.width = "9px";
+    dot.style.height = "9px";
     dot.style.borderRadius = "50%";
     dot.style.background = "#3ddc6e";
     dot.style.border = "2px solid #111";
-    dot.style.left = "34px";
-    dot.style.top = "34px";
     dot.style.transition = "opacity 0.3s";
 
-    const name = document.createElement("span");
-    name.textContent = p.name;
-    name.style.font = "11px system-ui";
-    name.style.color = "rgba(255,255,255,0.85)";
-    name.style.transition = "opacity 0.3s";
-    name.style.userSelect = "none";
-
-    row.appendChild(img);
-    row.appendChild(dot);
-    row.appendChild(name);
-    panel.appendChild(row);
-
-    // Store refs for fast updates
-    row._img = img;
-    row._dot = dot;
-    row._name = name;
+    panel.appendChild(img);
+    panel.appendChild(dot);
+    _sidebarAvatarEls[p.idx] = { img, dot };
   }
 
   document.body.appendChild(panel);
 }
 
+function positionSidebarAvatars(p1Row, p2Row, avatarSize = 32) {
+  if (!_sidebarAvatarEls) return;
+  const rows = [p1Row, p2Row];
+  for (let i = 0; i < 2; i++) {
+    const r = rows[i];
+    const el = _sidebarAvatarEls[i];
+    if (!r || !el) continue;
+    // Avatar sits at the TOP of the row, centered horizontally — the name
+    // and coords are canvas-drawn just below it (see drawLeftSidebar()).
+    const ax = r.x + (r.w - avatarSize) / 2, ay = r.y;
+    el.img.style.left = `${ax}px`;
+    el.img.style.top = `${ay}px`;
+    el.dot.style.left = `${ax + avatarSize - 10}px`;
+    el.dot.style.top = `${ay + avatarSize - 10}px`;
+  }
+}
+
+function setSidebarAvatarsVisible(visible) {
+  const panel = document.getElementById("onlineIndicator");
+  if (panel) panel.style.display = visible ? "block" : "none";
+}
+
 function updateOnlineIndicator() {
-  if (!document.getElementById("onlineIndicator")) return; // not yet created
+  if (!_sidebarAvatarEls) return;
 
   const presentUids = Array.isArray(state.net?.presenceUids) ? state.net.presenceUids : [];
   const connected = !!(state.net?.enabled && state.net?.uid);
   const myIdx = state.activePlayer | 0;
 
   for (let i = 0; i < 2; i++) {
-    const row = document.getElementById(`onlineRow${i}`);
-    if (!row) continue;
+    const el = _sidebarAvatarEls[i];
+    if (!el) continue;
 
     // me: online if we're signed in and subscribed; other: online if their
     // uid shows up in the presence list (RTDB onDisconnect keeps it honest).
     const isOnline = i === myIdx ? connected : (connected && presentUids.some((uid) => uid !== state.net.uid));
 
-    row._img.style.filter = isOnline ? "none" : "grayscale(1)";
-    row._img.style.opacity = isOnline ? "1" : "0.4";
-    row._dot.style.opacity = isOnline ? "1" : "0";
-    row._name.style.opacity = isOnline ? "0.85" : "0.35";
+    el.img.style.filter = isOnline ? "none" : "grayscale(1)";
+    el.img.style.opacity = isOnline ? "1" : "0.4";
+    el.dot.style.opacity = isOnline ? "1" : "0";
   }
 }
 
@@ -1881,6 +2044,12 @@ function applyChatMessage(fromIndex, text, opts = {}) {
 
   // Only play sound for messages that didn't originate on THIS client
   if (!opts.silent) playSound("message");
+
+  // Badge the chat button in the side panel unless the sender is us or the
+  // popup is already open (i.e. actually being read right now).
+  if (fromIndex !== state.activePlayer && !state.chatOpen) {
+    state.chatUnread = (state.chatUnread || 0) + 1;
+  }
 }
 
 function sendChatMessage(fromIndex, text) {
@@ -1932,17 +2101,16 @@ function drawChatLog() {
     boxH = 88;
   }
 
-  drawRect(x, y, boxW, boxH, "rgba(0,0,0,0.50)");
-  ctx.strokeStyle = "rgba(255,255,255,0.12)";
-  ctx.strokeRect(x, y, boxW, boxH);
+  drawHudPanel(x, y, boxW, boxH, 12, "rgba(35,24,21,0.72)", HUD.border);
 
-  // White text (no “maybe white”)
   const lines = state.chatMessages.slice(-4);
   let yy = y + 18;
 
   for (const msg of lines) {
     const name = state.players[msg.fromIndex]?.name ?? "???";
-    drawText(`${name}: ${msg.text}`, x + 10, yy, 11, "left", "#ffffff");
+    drawText(`${name}:`, x + 10, yy, 11, "left", HUD.goldText);
+    const nameW = ctx.measureText(`${name}: `).width;
+    drawText(msg.text, x + 10 + nameW, yy, 11, "left", HUD.text);
     yy += 16;
   }
 
@@ -2007,8 +2175,9 @@ function drawSpeechBubbles() {
 }
 
 function drawSpeechBubbleAt(centerX, topY, text) {
-  // Simple bubble sizing
-  ctx.font = "14px system-ui";
+  // Simple bubble sizing — match the font drawText() actually renders with
+  // below, otherwise the wrap width is measured against the wrong glyphs.
+  ctx.font = `12px ${BASE_FONT}`;
   const padX = 10;
   const padY = 6;
   const maxW = 220;
@@ -2037,18 +2206,19 @@ function drawSpeechBubbleAt(centerX, topY, text) {
   const x = centerX - boxW / 2;
   const y = topY - boxH - 10;
 
-  // bubble
-ctx.fillStyle = "#ffffff";
+  // bubble — warm paper tone (matches the app's "paper" background) instead
+  // of stark white, so it reads as the same world even floating over pixel art.
+ctx.fillStyle = "#fbf2e9";
 ctx.beginPath();
 ctx.roundRect(x, y, boxW, boxH, 10);
 ctx.fill();
 
-ctx.strokeStyle = "rgba(0,0,0,0.3)";
+ctx.strokeStyle = "rgba(54,37,33,0.35)";
 ctx.stroke();
 
   let yy = y + padY + 12;
   for (const l of lines) {
-    drawText(l, centerX, yy, 12, "center", "#000000");
+    drawText(l, centerX, yy, 12, "center", "#362521");
     yy += lineH;
   }
 }
@@ -2125,8 +2295,8 @@ function drawRuneComboLockModal() {
   ctx.save();
   drawRect(0, 0, W, H, "rgba(0,0,0,0.70)");
 
-  const boxW = 520;
-  const boxH = 320;
+  const boxW = Math.min(520, window.innerWidth - 20);
+  const boxH = Math.min(320, window.innerHeight - 40);
   const bx = Math.floor((W - boxW) / 2);
   const by = Math.floor((H - boxH) / 2);
 
@@ -2145,10 +2315,11 @@ function drawRuneComboLockModal() {
   ctx.strokeRect(closeBtn.x, closeBtn.y, closeBtn.w, closeBtn.h);
   drawText("✕", closeBtn.x + closeBtn.w / 2, closeBtn.y + 21, 16, "center", "rgba(255,255,255,0.85)");
 
-  // rune slots
-  const slotW = 90;
-  const slotH = 110;
-  const gap = 18;
+  // rune slots — sized to fit boxW (a fixed 90px slot only fits a desktop
+  // window; a phone-width panel needs these shrunk to actually fit).
+  const gap = 12;
+  const slotW = Math.max(50, Math.min(90, Math.floor((boxW - 20 - gap * (RUNE_COMBO_LEN - 1)) / RUNE_COMBO_LEN)));
+  const slotH = Math.round(slotW * (110 / 90));
   const totalW = (slotW * RUNE_COMBO_LEN) + (gap * (RUNE_COMBO_LEN - 1));
   const startX = bx + Math.floor((boxW - totalW) / 2);
   const slotY = by + 90;
@@ -2164,7 +2335,7 @@ function drawRuneComboLockModal() {
 
     // rune image
     const img = getRuneImg(cl.digits[i]);
-    const iw = 64, ih = 64;
+    const iw = Math.round(slotW * 0.7), ih = iw;
     const ix = r.x + (r.w - iw) / 2;
     const iy = r.y + 18;
     try { ctx.drawImage(img, ix, iy, iw, ih); } catch (_) {}
@@ -2310,6 +2481,19 @@ function getCurrentMap() {
 function activePlayer() { return state.players[state.activePlayer]; }
 function activeInv() { return state.inventories[state.activePlayer]; }
 function otherInvIndex() { return state.activePlayer === 0 ? 1 : 0; }
+
+// Interiors/dungeons are entered solo (tryEnterAt()/tryEnterDungeonAt() only
+// move the active player and explicitly clear holdingHands) — the partner's
+// player object still holds their real overworld coordinates. Rendering
+// state.players unfiltered on these maps draws the partner's icon whenever
+// their stale overworld (x,y) happens to land inside the sub-map's bounds
+// (near-guaranteed for the large dungeon grid, coincidental for tiny
+// interiors) — looking like both characters got placed there. Use this
+// wherever "which players are visually present on the current map" matters.
+function playersOnCurrentMap() {
+  if (state.mode === "overworld") return state.players;
+  return [activePlayer()];
+}
 
 function tileAt(x, y) {
   const map = getCurrentMap();
@@ -2613,92 +2797,150 @@ function setAmbientEnabled(v) {
 }
 
 function drawLeftSidebar() {
-  // Full-height sidebar
-  drawRect(0, 0, UI_LEFTBAR_W, window.innerHeight, "rgba(0,0,0,0.78)");
-  ctx.strokeStyle = "rgba(255,255,255,0.10)";
-  ctx.strokeRect(0, 0, UI_LEFTBAR_W, window.innerHeight);
-
   const pad = 10;
-  const gap = 10;
+  const gap = 8;
 
-  const mkBtn = (y) => ({
-    x: 8,
-    y,
-    w: UI_LEFTBAR_W - 16,
-    h: UI_LEFTBAR_W - 16
-  });
-
-  const compassBtn = mkBtn(UI_TOP_H + pad);
-const volBtn = mkBtn(compassBtn.y + compassBtn.h + gap);
-const settingsBtn = mkBtn(volBtn.y + volBtn.h + gap);
-const collectiblesBtn = mkBtn(settingsBtn.y + settingsBtn.h + gap);
-
-// Only show Edit Mode in interior
-const editBtn = (state.mode === "interior")
-  ? mkBtn(collectiblesBtn.y + collectiblesBtn.h + gap)
-  : null;
-
-
-  // Draw button helper
-const drawBtn = (b, icon, active = false) => {
-  if (!b) return;
-  drawRect(b.x, b.y, b.w, b.h, active ? "rgba(60,120,60,0.90)" : "rgba(20,20,20,0.92)");
-  ctx.strokeStyle = active ? "rgba(120,255,160,0.45)" : "rgba(255,255,255,0.16)";
-  ctx.strokeRect(b.x, b.y, b.w, b.h);
-  drawText(icon, b.x + b.w / 2, b.y + b.h / 2 + 8, 22, "center", "rgba(255,255,255,0.95)");
-};
-
-  drawBtn(compassBtn, "🧭");
-  drawBtn(volBtn, "🔊");
-  drawBtn(settingsBtn, "⚙️");
-  drawBtn(editBtn, "✏️", !!state.interiorEdit?.on);
-  drawBtn(collectiblesBtn, "📜", !!state.collectiblesOpen);
-
-  // Save hitboxes
-  state._leftbarUI = {
-    compassBtn,
-    volBtn,
-    settingsBtn,
-	collectiblesBtn,
-	editBtn,
-    sliderBox: null,
-    sliderTrack: null,
-    sliderKnob: null
+  // Square icon button — used for the always-visible menu/log/chat buttons.
+  // No box by default: the icon just sits on the sidebar's own background,
+  // and only gets a filled pill behind it once it's actually active/open —
+  // three permanently-boxed buttons stacked in a strip read as three
+  // separate panels; a plain icon rail with one highlighted state reads as
+  // one thing (same idea as a nav rail — VS Code's activity bar, etc).
+  const drawIconBtn = (b, icon, active = false, badgeCount = 0) => {
+    if (!b) return;
+    if (active) drawHudPanel(b.x, b.y, b.w, b.h, 10, HUD.activeFill, HUD.activeBorder);
+    drawText(icon, b.x + b.w / 2, b.y + b.h / 2, 19, "center", HUD.text);
+    if (badgeCount > 0) {
+      const bw = badgeCount > 9 ? 20 : 16;
+      const bx = b.x + b.w - bw - 2, by = b.y - 4;
+      drawHudPanel(bx, by, bw, 14, 7, HUD.roseSoft, null);
+      drawText(String(Math.min(99, badgeCount)), bx + bw / 2, by + 7, 10, "center", "#2b1613");
+    }
   };
 
-  // Slider popup (anchored to the volume button)
-  if (!state.ui.musicSliderOpen) return;
+  // Full-width row (icon + label + optional active tint) — used for the
+  // "main menu" popup's own list (coordinates/volume/settings/...). Same
+  // "no box unless active" idea as drawIconBtn, so the popup reads as one
+  // list in one card rather than a stack of separate mini-panels.
+  const drawRow = (r, icon, label, opts = {}) => {
+    if (!r) return;
+    const { active = false } = opts;
+    if (active) drawHudPanel(r.x, r.y, r.w, r.h, 10, HUD.activeFill, HUD.activeBorder);
+    drawText(icon, r.x + 20, r.y + r.h / 2, 17, "center", HUD.text);
+    drawText(label, r.x + 42, r.y + r.h / 2, 12, "left", HUD.text);
+  };
+
+  // Permanent full-height sidebar — no collapse/slide, each icon opens its
+  // own popup instead of one shared drawer (menu/log/chat are always
+  // reachable in one tap; a badge surfaces unread chat).
+  drawRect(0, 0, UI_LEFTBAR_W, window.innerHeight, HUD.panel);
+  ctx.strokeStyle = HUD.border;
+  ctx.beginPath();
+  ctx.moveTo(UI_LEFTBAR_W + 0.5, 0);
+  ctx.lineTo(UI_LEFTBAR_W + 0.5, window.innerHeight);
+  ctx.stroke();
+
+  const btnSize = UI_LEFTBAR_W - 16;
+  const mkBtn = (y) => ({ x: 8, y, w: btnSize, h: btnSize });
+
+  const menuBtn = mkBtn(UI_TOP_H + pad);
+  const logBtn = mkBtn(menuBtn.y + menuBtn.h + gap);
+  const chatBtn = mkBtn(logBtn.y + logBtn.h + gap);
+
+  drawIconBtn(menuBtn, "☰", state.mainMenuOpen);
+  drawIconBtn(logBtn, "📝", state.logVisible);
+  drawIconBtn(chatBtn, "💬", state.chatOpen, state.chatUnread || 0);
+
+  // Avatars below the icons: DOM photo + presence dot, canvas name + coords.
+  const avatarSize = 32;
+  const avatarBlockH = 60;
+  let ay = chatBtn.y + chatBtn.h + gap + 6;
+  const p1Row = { x: 4, y: ay, w: UI_LEFTBAR_W - 8, h: avatarBlockH }; ay += avatarBlockH + 6;
+  const p2Row = { x: 4, y: ay, w: UI_LEFTBAR_W - 8, h: avatarBlockH };
+
+  const p1 = state.players[0], p2 = state.players[1];
+  const presentUids = Array.isArray(state.net?.presenceUids) ? state.net.presenceUids : [];
+  const connected = !!(state.net?.enabled && state.net?.uid);
+  const myIdx = state.activePlayer | 0;
+  const isOnline = (i) => (i === myIdx ? connected : (connected && presentUids.some((uid) => uid !== state.net.uid)));
+
+  const drawAvatarCaption = (r, name, coordsText, dim) => {
+    const cx = r.x + r.w / 2;
+    const textColor = dim ? HUD.textMuted : HUD.text;
+    drawText(name, cx, r.y + avatarSize + 12, 11, "center", textColor);
+    drawText(coordsText, cx, r.y + avatarSize + 24, 10, "center", HUD.textMuted);
+  };
+
+  drawAvatarCaption(p1Row, p1?.name ?? "Scott", p1 ? `(${p1.x},${p1.y})` : "", !isOnline(0));
+  drawAvatarCaption(p2Row, p2?.name ?? "Cristina", p2 ? `(${p2.x},${p2.y})` : "", !isOnline(1));
+
+  positionSidebarAvatars(p1Row, p2Row, avatarSize);
+  setSidebarAvatarsVisible(true);
+
+  state._leftbarUI = {
+    menuBtn, logBtn, chatBtn,
+    // Populated below only while the main-menu popup is actually open.
+    coordsBtn: null, volBtn: null, settingsBtn: null, collectiblesBtn: null, editBtn: null,
+    sliderBox: null, sliderTrack: null, sliderKnob: null
+  };
+
+  // ---- "Main menu" popup: coordinates / volume / settings / collectibles / edit ----
+  if (!state.mainMenuOpen) return;
 
   const ui = state._leftbarUI;
-  const boxW = 220;
+  const rowH = 40;
+  const items = [
+    { key: "coordsBtn", icon: "🧭", label: "Coordinates" },
+    { key: "volBtn", icon: "🔊", label: "Volume", active: !!state.ui.musicSliderOpen },
+    { key: "settingsBtn", icon: "⚙️", label: "Settings" },
+    { key: "collectiblesBtn", icon: "📜", label: "Collectibles", active: !!state.collectiblesOpen },
+  ];
+  if (state.mode === "interior") {
+    items.push({ key: "editBtn", icon: "✏️", label: "Edit Room", active: !!state.interiorEdit?.on });
+  }
+
+  const popW = Math.min(200, window.innerWidth - UI_LEFTBAR_W - 20);
+  const popH = items.length * (rowH + 4) + 8;
+  const popX = UI_LEFTBAR_W + 8;
+  const popY = Math.max(UI_TOP_H + 4, Math.min(menuBtn.y, window.innerHeight - popH - 8));
+
+  drawHudPanel(popX, popY, popW, popH, 14, HUD.panel, HUD.borderStrong);
+
+  let ry = popY + 4;
+  for (const item of items) {
+    const r = { x: popX + 4, y: ry, w: popW - 8, h: rowH };
+    drawRow(r, item.icon, item.label, { active: !!item.active });
+    ui[item.key] = r;
+    ry += rowH + 4;
+  }
+
+  // Volume slider sub-popup, anchored beside the popup (clamped on-screen).
+  if (!state.ui.musicSliderOpen) return;
+
+  const volRow = ui.volBtn;
+  const boxW = Math.min(200, window.innerWidth - 20);
   const boxH = 58;
+  const bx = Math.min(popX + popW + 8, window.innerWidth - boxW - 8);
+  const by = volRow.y + (volRow.h / 2) - (boxH / 2);
 
-  // Pop to the RIGHT of the sidebar, aligned to the volume button
-  const bx = UI_LEFTBAR_W + 8;
-  const by = volBtn.y + (volBtn.h / 2) - (boxH / 2);
+  drawHudPanel(bx, by, boxW, boxH, 12, HUD.panel, HUD.borderStrong);
 
-  drawRect(bx, by, boxW, boxH, "rgba(10,10,10,0.92)");
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  ctx.strokeRect(bx, by, boxW, boxH);
-
-  drawText("Music Volume", bx + 10, by + 16, 13, "left", "rgba(255,255,255,0.9)");
+  drawText("Music Volume", bx + 10, by + 16, 13, "left", HUD.text);
 
   const track = { x: bx + 10, y: by + 30, w: boxW - 20, h: 10 };
   const vol = getMusicVolume();
 
-  drawRect(track.x, track.y, track.w, track.h, "rgba(255,255,255,0.10)");
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  drawRect(track.x, track.y, track.w, track.h, "rgba(245,233,219,0.10)");
+  ctx.strokeStyle = HUD.border;
   ctx.strokeRect(track.x, track.y, track.w, track.h);
 
-  drawRect(track.x, track.y, Math.max(2, track.w * vol), track.h, "rgba(255,255,255,0.22)");
+  drawRect(track.x, track.y, Math.max(2, track.w * vol), track.h, HUD.gold);
 
   const knobX = track.x + track.w * vol;
   const knob = { x: knobX - 6, y: track.y - 4, w: 12, h: 18 };
-  drawRect(knob.x, knob.y, knob.w, knob.h, "rgba(255,255,255,0.22)");
-  ctx.strokeStyle = "rgba(255,255,255,0.25)";
-  ctx.strokeRect(knob.x, knob.y, knob.w, knob.h);
+  drawHudPanel(knob.x, knob.y, knob.w, knob.h, 4, HUD.goldText, HUD.borderStrong);
 
-  drawText(`${Math.round(vol * 100)}%`, bx + boxW - 10, by + 16, 13, "right", "rgba(255,255,255,0.75)");
+  drawText(`${Math.round(vol * 100)}%`, bx + boxW - 10, by + 16, 13, "right", HUD.textDim);
 
   ui.sliderBox = { x: bx, y: by, w: boxW, h: boxH };
   ui.sliderTrack = track;
@@ -2873,15 +3115,42 @@ function handleLeftSidebarTap(px, py) {
   const ui = state._leftbarUI;
   if (!ui) return false;
 
-  // Compass
-  if (ui.compassBtn && hitRect(px, py, ui.compassBtn)) {
+  // Each icon opens its own thing — no shared slide-out drawer.
+  if (ui.menuBtn && hitRect(px, py, ui.menuBtn)) {
     playSound("click");
-    state.coordsOpen = true;
-    closeMenu();
+    state.mainMenuOpen = !state.mainMenuOpen;
+    if (!state.mainMenuOpen) {
+      state.ui.musicSliderOpen = false;
+      state.ui.musicDragging = false;
+    }
     return true;
   }
 
-  // Volume button toggles slider
+  if (ui.logBtn && hitRect(px, py, ui.logBtn)) {
+    playSound("click");
+    state.logVisible = !state.logVisible;
+    return true;
+  }
+
+  if (ui.chatBtn && hitRect(px, py, ui.chatBtn)) {
+    playSound("click");
+    state.chatOpen = !state.chatOpen;
+    if (state.chatOpen) state.chatUnread = 0;
+    return true;
+  }
+
+  // Everything below only exists while the "main menu" popup is open.
+  if (!state.mainMenuOpen) return false;
+
+  if (ui.coordsBtn && hitRect(px, py, ui.coordsBtn)) {
+    playSound("click");
+    state.coordsOpen = true;
+    closeMenu();
+    state.mainMenuOpen = false;
+    return true;
+  }
+
+  // Volume row toggles the slider sub-popup without closing the main menu.
   if (ui.volBtn && hitRect(px, py, ui.volBtn)) {
     playSound("click");
     state.ui.musicSliderOpen = !state.ui.musicSliderOpen;
@@ -2889,30 +3158,29 @@ function handleLeftSidebarTap(px, py) {
     return true;
   }
 
-  // Settings button opens the global Settings modal
-if (ui.settingsBtn && hitRect(px, py, ui.settingsBtn)) {
-  playSound("click");
-  openSettingsDialog("audio"); // default tab
-  return true;
-}
+  if (ui.settingsBtn && hitRect(px, py, ui.settingsBtn)) {
+    playSound("click");
+    openSettingsDialog("audio"); // default tab
+    state.mainMenuOpen = false;
+    return true;
+  }
 
-// Collectibles archive
-if (ui.collectiblesBtn && hitRect(px, py, ui.collectiblesBtn)) {
-  playSound("click");
-  state.collectiblesOpen = !state.collectiblesOpen;
-  state.collectiblesView = "list";
-  state.collectiblesSelected = null;
-  state.collectiblesScroll = 0;
+  if (ui.collectiblesBtn && hitRect(px, py, ui.collectiblesBtn)) {
+    playSound("click");
+    state.collectiblesOpen = !state.collectiblesOpen;
+    state.collectiblesView = "list";
+    state.collectiblesSelected = null;
+    state.collectiblesScroll = 0;
 
-  // Don’t let other UI overlap
-  closeMenu();
-  state.coordsOpen = false;
-  state.stockpileOpen = null;
+    // Don’t let other UI overlap
+    closeMenu();
+    state.coordsOpen = false;
+    state.stockpileOpen = null;
+    state.mainMenuOpen = false;
 
-  return true;
-}
+    return true;
+  }
 
-  // Interior Edit Mode toggle
   if (ui.editBtn && hitRect(px, py, ui.editBtn)) {
     playSound("click");
     state.interiorEdit.on = !state.interiorEdit.on;
@@ -2921,29 +3189,28 @@ if (ui.collectiblesBtn && hitRect(px, py, ui.collectiblesBtn)) {
     closeMenu();
     state.coordsOpen = false;
     state.stockpileOpen = null;
+    state.mainMenuOpen = false;
 
     return true;
   }
 
-  // If slider is open, allow clicking the track to set volume or clicking outside to close.
-  if (state.ui.musicSliderOpen) {
-    if (ui.sliderBox && hitRect(px, py, ui.sliderBox)) {
-      if (ui.sliderTrack && hitRect(px, py, ui.sliderTrack)) {
-        const t = ui.sliderTrack;
-        const v = (px - t.x) / t.w;
-        setMusicVolume(v);
-        state.ui.musicDragging = true;
-      }
-      return true;
+  // Volume slider sub-popup: click its track to set volume, click elsewhere
+  // in its box to just consume the tap.
+  if (state.ui.musicSliderOpen && ui.sliderBox && hitRect(px, py, ui.sliderBox)) {
+    if (ui.sliderTrack && hitRect(px, py, ui.sliderTrack)) {
+      const t = ui.sliderTrack;
+      const v = (px - t.x) / t.w;
+      setMusicVolume(v);
+      state.ui.musicDragging = true;
     }
-
-    // click outside closes it
-    state.ui.musicSliderOpen = false;
-    state.ui.musicDragging = false;
     return true;
   }
 
-  return false;
+  // Tap outside the popup (and outside the slider) closes both.
+  state.mainMenuOpen = false;
+  state.ui.musicSliderOpen = false;
+  state.ui.musicDragging = false;
+  return true;
 }
 
 function handleLeftSidebarDrag(px, py) {
@@ -3348,13 +3615,25 @@ function handleSettingsPointerUp() {
 }
 
 // ---- Camera math ----------------------------------------------------------------------------------------
-function viewTiles() {
-  // World should fill the screen width (minus the left sidebar).
-  // No reserved right panel anymore.
-  const SAFE_PAD = 16;
+// Pixel-exact usable world rect (everything to the right of the sidebar,
+// between the top bar and the inventory bar, minus device safe-area insets).
+// This is the single source of truth for both the "how many whole tiles
+// fit" number (viewTiles(), used for camera/scroll logic) and the exact
+// clip rect drawWorld() fills so there's no dead strip of unrendered space
+// on the right/bottom when the screen size isn't a clean multiple of
+// TILE_SIZE.
+function worldViewportRect() {
+  const safe = safeAreaInsets();
+  return {
+    x: UI_LEFTBAR_W,
+    y: UI_TOP_H,
+    w: window.innerWidth - UI_LEFTBAR_W - safe.right,
+    h: window.innerHeight - UI_TOP_H - UI_BOTTOM_H,
+  };
+}
 
-  const usableW = window.innerWidth - UI_LEFTBAR_W - SAFE_PAD;
-  const usableH = window.innerHeight - UI_TOP_H - UI_BOTTOM_H;
+function viewTiles() {
+  const { w: usableW, h: usableH } = worldViewportRect();
 
   const viewW = Math.floor(usableW / TILE_SIZE);
   const viewH = Math.floor(usableH / TILE_SIZE);
@@ -3383,11 +3662,23 @@ function ensureCameraEdgeScroll() {
   const right = state.cam.x + viewW - 1;
   const bottom = state.cam.y + viewH - 1;
 
+  // Cap the margin so the left/right (and top/bottom) edge zones can never
+  // touch or overlap — on a narrow phone viewW floors to 6 tiles, and a
+  // flat 3-tile margin from both edges leaves no stable middle tile: the
+  // camera scrolls left, which pushes the player back into the right-edge
+  // zone, which scrolls right, forever, every frame (visible as rapid
+  // flashing/duplicated rendering). At least one dead-zone tile must
+  // remain between the two edge zones.
+  const marginX = Math.max(1, Math.min(EDGE_SCROLL_MARGIN, Math.floor((viewW - 1) / 2)));
+  const marginY = Math.max(1, Math.min(EDGE_SCROLL_MARGIN, Math.floor((viewH - 1) / 2)));
+  const mx = marginX - 1;
+  const my = marginY - 1;
+
   let moved = false;
-  if (p.x <= left && left > 0) { state.cam.x -= 1; moved = true; }
-  if (p.x >= right && right < w - 1) { state.cam.x += 1; moved = true; }
-  if (p.y <= top && top > 0) { state.cam.y -= 1; moved = true; }
-  if (p.y >= bottom && bottom < h - 1) { state.cam.y += 1; moved = true; }
+  if (p.x <= left + mx && left > 0) { state.cam.x -= 1; moved = true; }
+  if (p.x >= right - mx && right < w - 1) { state.cam.x += 1; moved = true; }
+  if (p.y <= top + my && top > 0) { state.cam.y -= 1; moved = true; }
+  if (p.y >= bottom - my && bottom < h - 1) { state.cam.y += 1; moved = true; }
 
   if (moved) clampCamera();
 }
@@ -4650,7 +4941,7 @@ function playFootstep() {
   playSound(steps[Math.floor(Math.random() * steps.length)]);
 }
 
-loadSound("chop", "chop_wood.MP3", 0.25);
+loadSound("chop", "chop_wood.mp3", 0.25);
 loadSound("chest", "chest.mp3", 0.5);
 loadSound("pickup", "collect.mp3", 0.6);
 loadSound("cook", "cook.mp3", 0.4);
@@ -5187,11 +5478,13 @@ function drawBuiltInteriorWallsPass(pass) {
   const capHi   = "rgba(255,255,255,0.16)";
   const capSh   = "rgba(0,0,0,0.28)";
 
-  for (let y = camY; y < camY + viewH; y++) {
+  // +1: matches drawWorld()'s render viewport extension (see
+  // worldViewportRect()) so wall bands still cover the last partial column.
+  for (let y = camY; y < camY + viewH + 1; y++) {
     const row = walls.h[y];
     if (!row) continue;
 
-    for (let x = camX; x < camX + viewW; x++) {
+    for (let x = camX; x < camX + viewW + 1; x++) {
       if (!row[x]) continue;
 
       const sx = UI_LEFTBAR_W + (x - camX) * TILE_SIZE;
@@ -6480,7 +6773,8 @@ const payload = {
   tiles: map.tiles,
   objects: anchors,
   entrance: map.entrance ?? null,
-  explored: map.explored ?? null
+  explored: map.explored ?? null,
+  spawn: map.spawn ?? null
 };
 
   state.dungeons[dungeonId] = payload;
@@ -6506,6 +6800,21 @@ function loadDungeonLayout(dungeonId) {
     console.warn("loadDungeonLayout failed:", e);
     return null;
   }
+}
+
+// Shared "open this gate tile" used by every non-key gate puzzle (levers,
+// torches, boulder) so they all persist/sound/render the same way the
+// key-based unlock already did.
+function openDungeonGateAt(x, y) {
+  if (state.mode !== "dungeon" || !state.dungeon) return;
+  if (typeof x !== "number" || typeof y !== "number") return;
+
+  const map = state.dungeon;
+  if (!map.objects?.[y]) return;
+
+  map.objects[y][x] = { id: "dungeon_gate_open", hp: 999, meta: {} };
+  saveDungeonLayout(state.dungeonId);
+  playSound("unlock");
 }
 
 function dungeonIdForEntrance(type, x, y) {
@@ -6617,6 +6926,25 @@ function buildDungeonFromPayload(payload) {
       const { x, y, id, meta } = o;
       if (!inBounds(x, y, w, h)) continue;
       map.objects[y][x] = { id, hp: objDef(id)?.hp ?? 1, meta: meta ?? {} };
+    }
+  }
+
+  // ---- restore spawn point ----
+  // Older saved layouts (from before spawn was persisted) won't have this —
+  // recover it from the dungeon_exit object, which generateDungeon() always
+  // places on the same guaranteed-walkable tile as the original spawn.
+  // Without this, re-entering a saved dungeon fell back to a hardcoded (2,2),
+  // which is almost always still solid "wall" — trapping the player.
+  map.spawn = payload.spawn ?? null;
+  if (!map.spawn) {
+    outer:
+    for (let yy = 0; yy < h; yy++) {
+      for (let xx = 0; xx < w; xx++) {
+        if (map.objects[yy][xx]?.id === "dungeon_exit") {
+          map.spawn = { x: xx, y: yy };
+          break outer;
+        }
+      }
     }
   }
   return map;
@@ -7035,31 +7363,47 @@ function rollRuneCombo(len = 4, maxRune = 13) {
   return combo;
 }
 
-function placePuzzleChestInDungeon(map, chambers) {
-  if (!chambers?.length) return;
+// ----------------------------------------------------
+// Gate puzzles: each locked gate (gates connect chambers[i] <-> chambers[i+1],
+// see the corridor loop in generateDungeon()) is assigned one of these types.
+// pickGatePuzzleTypes() uses a shuffle-bag so a single dungeon never repeats
+// a type until every other type has had a turn — with 2-4 gates per dungeon
+// and 5 types, most dungeons see zero repeats at all.
+//
+// Each gate's puzzle content is placed in chambers[i] — the chamber BEFORE
+// that gate — which is always reachable by the time the player needs it:
+// chamber 0 is the spawn chamber, and chamber i for i>0 is only reachable
+// once gates 0..i-1 are already open. ("rubble" is the exception: it has no
+// separate gate object or chamber content at all — see below.)
+// ----------------------------------------------------
+// NOTE: types are added here incrementally as each is implemented — see the
+// switch in placeGatePuzzles() below for what's currently wired up.
+const GATE_PUZZLE_TYPES = ["rune_chest", "rubble", "lever", "torches", "boulder"];
 
-  // pick a chamber (avoid spawn chamber if you track that; otherwise random)
-  const chamber = chambers[randInt(0, chambers.length - 1)];
+function pickGatePuzzleTypes(n) {
+  const types = [];
+  let pool = [];
+  for (let i = 0; i < n; i++) {
+    if (pool.length === 0) pool = shuffleArray([...GATE_PUZZLE_TYPES]);
+    types.push(pool.pop());
+  }
+  return types;
+}
 
-  // find a floor spot in that chamber
+function placeRuneChestPuzzle(map, chamber, gateIndex) {
   const spot = randomEmptyFloorInRect(map, chamber, 500);
-  if (!spot) return;
+  if (!spot) return false;
 
-  // roll combo (whatever your existing generator is)
-  const combo = rollRuneCombo(); // <-- keep YOUR existing combo generator name if different
+  const combo = rollRuneCombo();
 
-// generate a 4-digit rune combo (values 1–13)
-const puzzleCombo = [];
-for (let i = 0; i < 4; i++) puzzleCombo.push(randInt(1, 13));
-
-  // place chest
   if (!map.objects[spot.y]) map.objects[spot.y] = [];
   map.objects[spot.y][spot.x] = {
     id: "dungeon_chest",
     hp: 999,
     meta: {
       isRunePuzzle: true,
-      combo: combo,
+      combo,
+      gateIndex,
       // stash coords for debugging
       chestX: spot.x,
       chestY: spot.y
@@ -7074,6 +7418,225 @@ for (let i = 0; i < 4; i++) puzzleCombo.push(randInt(1, 13));
     chestX: spot.x,
     chestY: spot.y
   });
+
+  return true;
+}
+
+// Finds a small (VAULT_SIZE square) spot fully inside the chamber's interior,
+// clear of the corridor-connection point near its center and of any
+// previously-carved vaults in this same chamber (`avoid`). Returns the vault
+// rect, or null if no spot could be found after a bounded number of tries.
+const VAULT_SIZE = 4;
+function carveVaultInChamber(map, chamber, avoid) {
+  const edgeMargin = 2;
+  const centerMargin = 3; // stay clear of the corridor connection near chamber center
+  const cx = chamber.x + chamber.w / 2;
+  const cy = chamber.y + chamber.h / 2;
+
+  const minX = chamber.x + edgeMargin;
+  const maxX = chamber.x + chamber.w - VAULT_SIZE - edgeMargin;
+  const minY = chamber.y + edgeMargin;
+  const maxY = chamber.y + chamber.h - VAULT_SIZE - edgeMargin;
+  if (minX > maxX || minY > maxY) return null; // chamber too small for a vault
+
+  for (let tries = 0; tries < 60; tries++) {
+    const vx = randInt(minX, maxX);
+    const vy = randInt(minY, maxY);
+
+    if (Math.abs(vx + VAULT_SIZE / 2 - cx) < centerMargin && Math.abs(vy + VAULT_SIZE / 2 - cy) < centerMargin) continue;
+
+    const overlapsAvoid = (avoid ?? []).some(r =>
+      vx < r.x + r.w + 1 && vx + VAULT_SIZE + 1 > r.x &&
+      vy < r.y + r.h + 1 && vy + VAULT_SIZE + 1 > r.y
+    );
+    if (overlapsAvoid) continue;
+
+    // Hard safety net (the center-margin check above is a soft preference):
+    // never claim a footprint that already has something on it — the
+    // chamber-0 dungeon_exit, in particular, sits exactly at chamber center.
+    let occupied = false;
+    for (let yy = vy; yy < vy + VAULT_SIZE && !occupied; yy++) {
+      for (let xx = vx; xx < vx + VAULT_SIZE; xx++) {
+        if (map.objects?.[yy]?.[xx]) { occupied = true; break; }
+      }
+    }
+    if (occupied) continue;
+
+    return { x: vx, y: vy, w: VAULT_SIZE, h: VAULT_SIZE };
+  }
+
+  return null;
+}
+
+// Walls off a vault's perimeter (already-floor tiles from the parent
+// chamber), leaving exactly one doorway tile open on a random side. Returns
+// the doorway's map coordinates so the caller can place a gate there.
+function wallOffVaultPerimeter(map, rect) {
+  const side = ["N", "S", "E", "W"][randInt(0, 3)];
+  const midX = rect.x + Math.floor(rect.w / 2);
+  const midY = rect.y + Math.floor(rect.h / 2);
+
+  const door =
+    side === "N" ? { x: midX, y: rect.y } :
+    side === "S" ? { x: midX, y: rect.y + rect.h - 1 } :
+    side === "W" ? { x: rect.x, y: midY } :
+                   { x: rect.x + rect.w - 1, y: midY };
+
+  for (let y = rect.y; y < rect.y + rect.h; y++) {
+    for (let x = rect.x; x < rect.x + rect.w; x++) {
+      const isPerimeter = (x === rect.x || x === rect.x + rect.w - 1 || y === rect.y || y === rect.y + rect.h - 1);
+      if (!isPerimeter) continue;
+      if (x === door.x && y === door.y) continue; // leave the doorway open
+
+      map.tiles[y][x] = "wall";
+      map.objects[y][x] = null;
+    }
+  }
+
+  return door;
+}
+
+// Lever puzzle: difficulty 1 is a single lever in the open chamber that
+// directly opens the real gate. Difficulty 2-3 chains that many small
+// walled-off vaults inside the chamber — the first vault's doorway starts
+// open, each vault's lever opens the NEXT vault's door, and the last vault's
+// lever opens the real gate. So higher difficulty means more rooms to find
+// and unlock in sequence before you reach the lever that actually matters.
+function placeLeverPuzzle(map, chamber, gateIndex) {
+  const targetGate = map._gateCoords?.[gateIndex];
+  if (!targetGate) return false;
+
+  const stageCount = randInt(1, 3);
+
+  if (stageCount === 1) {
+    const spot = randomEmptyFloorInRect(map, chamber, 300);
+    if (!spot) return false;
+
+    map.objects[spot.y][spot.x] = {
+      id: "lever",
+      hp: 999,
+      meta: { linkGateX: targetGate.x, linkGateY: targetGate.y, pulled: false }
+    };
+    return true;
+  }
+
+  const vaultCount = stageCount - 1;
+  const vaults = [];
+  for (let s = 0; s < vaultCount; s++) {
+    const rect = carveVaultInChamber(map, chamber, vaults);
+    if (!rect) return false;
+    vaults.push(rect);
+  }
+
+  const doors = vaults.map(v => wallOffVaultPerimeter(map, v));
+
+  for (let s = 0; s < vaults.length; s++) {
+    // Vault 0's doorway starts open (that's the entry point); every later
+    // vault's doorway is a gate the previous vault's lever has to open.
+    if (s > 0) {
+      const door = doors[s];
+      map.objects[door.y][door.x] = { id: "dungeon_gate", hp: 999, meta: { locked: true, vaultGate: true } };
+    }
+
+    const inner = { x: vaults[s].x + 1, y: vaults[s].y + 1, w: vaults[s].w - 2, h: vaults[s].h - 2 };
+    const leverSpot = randomEmptyFloorInRect(map, inner, 100) ?? { x: inner.x, y: inner.y };
+
+    const nextTarget = (s === vaults.length - 1) ? targetGate : doors[s + 1];
+
+    map.objects[leverSpot.y][leverSpot.x] = {
+      id: "lever",
+      hp: 999,
+      meta: { linkGateX: nextTarget.x, linkGateY: nextTarget.y, pulled: false }
+    };
+  }
+
+  return true;
+}
+
+// Torch puzzle: 3-5 unlit torches scattered in the chamber, each lit with a
+// match. Once every torch sharing this gate's groupId is lit, the gate opens
+// automatically (checked from the "Light" action itself, see
+// allTorchesLitForGroup() and the openMenuForTile "torch_unlit" handler).
+function placeTorchPuzzle(map, chamber, gateIndex) {
+  const targetGate = map._gateCoords?.[gateIndex];
+  if (!targetGate) return false;
+
+  const torchCount = randInt(3, 5);
+  for (let i = 0; i < torchCount; i++) {
+    const spot = randomEmptyFloorInRect(map, chamber, 200);
+    if (!spot) return false;
+
+    map.objects[spot.y][spot.x] = {
+      id: "torch_unlit",
+      hp: 999,
+      meta: { groupId: gateIndex, linkGateX: targetGate.x, linkGateY: targetGate.y }
+    };
+  }
+
+  return true;
+}
+
+function allTorchesLitForGroup(map, groupId) {
+  for (const row of map.objects ?? []) {
+    if (!row) continue;
+    for (const o of row) {
+      if (o?.id === "torch_unlit" && o.meta?.groupId === groupId) return false;
+    }
+  }
+  return true;
+}
+
+// Boulder puzzle: push a boulder (via the "Push" menu action, same
+// tap-to-interact model as everything else — see the openMenuForTile
+// "boulder" handler) onto its linked pressure plate to open the gate.
+function placeBoulderPuzzle(map, chamber, gateIndex) {
+  const targetGate = map._gateCoords?.[gateIndex];
+  if (!targetGate) return false;
+
+  const plateSpot = randomEmptyFloorInRect(map, chamber, 300);
+  if (!plateSpot) return false;
+  map.objects[plateSpot.y][plateSpot.x] = { id: "pressure_plate", hp: 999, meta: {} };
+
+  // Placing the plate first means this second search naturally avoids its tile.
+  const boulderSpot = randomEmptyFloorInRect(map, chamber, 300);
+  if (!boulderSpot) return false;
+
+  map.objects[boulderSpot.y][boulderSpot.x] = {
+    id: "boulder",
+    hp: 999,
+    meta: {
+      plateX: plateSpot.x, plateY: plateSpot.y,
+      linkGateX: targetGate.x, linkGateY: targetGate.y
+    }
+  };
+
+  return true;
+}
+
+// Dispatches to each gate's assigned puzzle type. Returns false if any gate
+// couldn't get its content placed, so the caller can reject and regenerate
+// rather than hand out a dungeon with an unsolvable gate.
+function placeGatePuzzles(map, chambers) {
+  if (!chambers || chambers.length < 2) return true; // no gates, nothing to gate
+
+  const types = map._gatePuzzleTypes ?? [];
+
+  for (let i = 0; i < chambers.length - 1; i++) {
+    const type = types[i] ?? "rune_chest";
+    if (type === "rubble") continue; // self-contained at the choke point, nothing to place
+
+    const chamber = chambers[i];
+    let ok;
+    switch (type) {
+      case "lever": ok = placeLeverPuzzle(map, chamber, i); break;
+      case "torches": ok = placeTorchPuzzle(map, chamber, i); break;
+      case "boulder": ok = placeBoulderPuzzle(map, chamber, i); break;
+      default: ok = placeRuneChestPuzzle(map, chamber, i); break;
+    }
+    if (!ok) return false;
+  }
+
+  return true;
 }
 
 function isProtectedDungeonObject(o) {
@@ -7183,6 +7746,10 @@ function generateDungeon(dungeonId, entrance) {
     return generateDungeon(dungeonId, entrance);
   }
 
+  // Assign each gate a puzzle type up front (shuffle-bag: no repeats within
+  // a dungeon until every type has had a turn — see pickGatePuzzleTypes()).
+  map._gatePuzzleTypes = pickGatePuzzleTypes(chambers.length - 1);
+
   // Connect chambers with twisty corridors + locked gates
   for (let i = 0; i < chambers.length - 1; i++) {
     const a = chambers[i];
@@ -7243,14 +7810,29 @@ if (pointNearRect(gx, gy, a, 2) || pointNearRect(gx, gy, b, 2)) continue;
       const prev = path[gateK - 1];
       const next = path[gateK + 1];
 
-      // Force a 1-tile choke point so the gate can't be bypassed
+      // Force a 1-tile choke point so the gate/rubble can't be bypassed
       enforceGateChoke(map, gate.x, gate.y, prev, next);
 
-      map.objects[gate.y][gate.x] = {
-        id: "dungeon_gate",
-        hp: 999,
-        meta: { locked: true, gateIndex: i }
-      };
+      // "rubble" blocks the choke point directly (mine it with a pickaxe,
+      // same as any other rock) instead of a lockable dungeon_gate — no
+      // separate chamber puzzle needed, see placeGatePuzzles().
+      if (map._gatePuzzleTypes[i] === "rubble") {
+        map.objects[gate.y][gate.x] = {
+          id: "rubble",
+          hp: objDef("rubble")?.hp ?? 3,
+          meta: {}
+        };
+      } else {
+        map.objects[gate.y][gate.x] = {
+          id: "dungeon_gate",
+          hp: 999,
+          meta: { locked: true, gateIndex: i }
+        };
+        // Stash the real gate's coords so placeGatePuzzles() can link a
+        // lever/torches/boulder puzzle to it without re-scanning the map.
+        if (!map._gateCoords) map._gateCoords = {};
+        map._gateCoords[i] = { x: gate.x, y: gate.y };
+      }
     }
   }
 
@@ -7280,12 +7862,13 @@ if (pointNearRect(gx, gy, a, 2) || pointNearRect(gx, gy, b, 2)) continue;
     return generateDungeon(dungeonId, entrance);
   }
 
-  // --- HARD REQUIREMENT: chambers must be separated by locked gates ---
-  // We connect chambers sequentially, so minimum gates should be chambers.length - 1.
+  // --- HARD REQUIREMENT: chambers must be separated by a locked gate OR rubble ---
+  // We connect chambers sequentially, so minimum chokes should be chambers.length - 1.
   let gateCountNow = 0;
   for (let yy = 0; yy < DUNGEON_H; yy++) {
     for (let xx = 0; xx < DUNGEON_W; xx++) {
-      if (map.objects?.[yy]?.[xx]?.id === "dungeon_gate") gateCountNow++;
+      const id = map.objects?.[yy]?.[xx]?.id;
+      if (id === "dungeon_gate" || id === "rubble") gateCountNow++;
     }
   }
 
@@ -7300,7 +7883,15 @@ clearAllRuneClues(map);
 
   // Runestones: max 1 per chamber, max 2 per dungeon
 placeRunestonesInDungeon(map, chambers);
-placePuzzleChestInDungeon(map, chambers); 
+
+  // HARD REQUIREMENT: every locked gate must get its reachable puzzle content
+  // (one per gate, see placeGatePuzzles). If a chamber was too cluttered to
+  // fit it, don't hand out a dungeon with an unsolvable gate.
+  if (!placeGatePuzzles(map, chambers)) {
+    console.warn("[DUNGEON] rejected: couldn't place puzzle content for every gate");
+    return generateDungeon(dungeonId, entrance);
+  }
+
 placeChestsInDungeon(map, chambers);
 
   // Dungeon contents (only if they exist)
@@ -7814,6 +8405,18 @@ if (state.music.ambienceAudio) {
     });
   }, 300);
 
+  // Last-resort fallback if spawn is still missing (e.g. a corrupt/ancient
+  // save with no recoverable dungeon_exit either): find any floor tile
+  // rather than hardcoding a corner that's almost always solid wall.
+  if (!map.spawn) {
+    outer:
+    for (let yy = 0; yy < map.tiles.length; yy++) {
+      for (let xx = 0; xx < map.tiles[yy].length; xx++) {
+        if (map.tiles[yy][xx] === "floor") { map.spawn = { x: xx, y: yy }; break outer; }
+      }
+    }
+  }
+
   const sx = map.spawn?.x ?? 2;
 const sy = map.spawn?.y ?? 2;
 
@@ -7972,6 +8575,122 @@ function openMenu(opts) {
 }
 
 function closeMenu() { state.menu = null; }
+
+// Pure predicate mirroring openWorldMenuAt()'s conditions, with no side
+// effects — used by pointerdown to decide whether to arm the tap-and-hold
+// timer at all (an empty walkable tile should behave exactly like a normal
+// tap-to-move, never arming a hold gesture). Keep these two functions'
+// conditions in sync.
+function hasWorldMenuTarget(x, y) {
+  if (state.holdingHands) {
+    const hh = state.holdingHands;
+    const a = state.players[hh.a], b = state.players[hh.b];
+    if ((x === a.x && y === a.y) || (x === b.x && y === b.y)) return true;
+  }
+
+  if (state.players.some(pl => pl.x === x && pl.y === y)) return true;
+
+  const obj = objectAt(x, y);
+  if (obj) {
+    const def = objDef(obj.id);
+    const pl = activePlayer();
+    const dist = manhattan(pl.x, pl.y, x, y);
+    const canShoot = isHuntableDef(def) && dist <= 3 && getQty(activeInv(), "bow_and_arrow") > 0;
+    if (canShoot || isAdjacentOrSame(pl.x, pl.y, x, y)) return true;
+  }
+
+  if (tileAt(x, y) === "water") {
+    const pl = activePlayer();
+    if (isAdjacentOrSame(pl.x, pl.y, x, y)) return true;
+  }
+
+  if (state.mode === "interior") {
+    const pl = activePlayer();
+    const idef = state.data.interiors?.[state.interiorId];
+    const doorTile = idef?.doorTile;
+    if (doorTile && tileAt(x, y) === doorTile && isAdjacentOrSame(pl.x, pl.y, x, y)) return true;
+  }
+
+  return false;
+}
+
+// Opens whatever menu belongs at map tile (x, y) — holding-hands pair,
+// player, adjacent/huntable object, adjacent water, or an interior door —
+// anchored at screen point (ax, ay). Returns true if a menu was opened,
+// false if (x, y) isn't a recognized target (caller should fall through to
+// movement). This is the single place both the tap-and-hold radial menu and
+// the plain-tap "just do the default action" path resolve a target, so the
+// two interaction modes can never disagree about what's tappable.
+function openWorldMenuAt(x, y, ax, ay) {
+  // Opens whichever menu applies, then stamps the tapped tile onto it so
+  // the radial menu's icon lookup (iconForMenuOption()) can look up the
+  // actual object/tool involved instead of guessing from the label alone.
+  const opened = () => { if (state.menu) { state.menu.targetX = x; state.menu.targetY = y; } return true; };
+
+  if (state.holdingHands) {
+    const hh = state.holdingHands;
+    const a = state.players[hh.a], b = state.players[hh.b];
+    if ((x === a.x && y === a.y) || (x === b.x && y === b.y)) {
+      openMenuForHoldingHands(ax, ay);
+      return opened();
+    }
+  }
+
+  const clickedPlayerIndex = state.players.findIndex(pl => pl.x === x && pl.y === y);
+  if (clickedPlayerIndex !== -1) {
+    if (clickedPlayerIndex === state.activePlayer) {
+      openMenuForPlayer(clickedPlayerIndex, ax, ay);
+    } else {
+      openMenuForOtherPlayer(clickedPlayerIndex, ax, ay);
+    }
+    return opened();
+  }
+
+  const obj = objectAt(x, y);
+  if (obj) {
+    const def = objDef(obj.id);
+    const pl = activePlayer();
+    const dist = manhattan(pl.x, pl.y, x, y);
+    const canShoot = isHuntableDef(def) && dist <= 3 && getQty(activeInv(), "bow_and_arrow") > 0;
+    if (canShoot || isAdjacentOrSame(pl.x, pl.y, x, y)) {
+      openMenuForTile(x, y, ax, ay);
+      return opened();
+    }
+  }
+
+  if (tileAt(x, y) === "water") {
+    const pl = activePlayer();
+    if (isAdjacentOrSame(pl.x, pl.y, x, y)) {
+      openMenuForWaterTile(x, y, ax, ay);
+      return opened();
+    }
+  }
+
+  if (state.mode === "interior") {
+    const pl = activePlayer();
+    const idef = state.data.interiors?.[state.interiorId];
+    const doorTile = idef?.doorTile;
+    if (doorTile && tileAt(x, y) === doorTile && isAdjacentOrSame(pl.x, pl.y, x, y)) {
+      openMenu({
+        screenX: ax,
+        screenY: ay,
+        title: "Door",
+        options: [
+          {
+            label: "Exit",
+            action: withSfx("door_open", () => {
+              tryExitInterior();
+              closeMenu();
+            })
+          }
+        ]
+      });
+      return opened();
+    }
+  }
+
+  return false;
+}
 
 function openMenuForPlayer(plIndex, screenX, screenY) {
   const pl = state.players[plIndex];
@@ -8260,8 +8979,13 @@ function drawTradeUI() {
   const t = state.trade;
   if (!t?.open) return;
 
-  const W = 900;
-  const H = 460;
+  // Below this width, two 12-column inventory grids side by side simply
+  // don't fit — stack the two players' halves vertically instead, each
+  // using the full panel width, like a mobile-friendly two-pane layout.
+  const stacked = window.innerWidth < 700;
+  const W = stacked ? Math.max(300, Math.min(420, window.innerWidth - 20)) : 900;
+  const HALF_H = 240; // content height one player's half needs, see drawHalf()
+  const H = stacked ? Math.min(window.innerHeight - 30, HALF_H * 2 + 60) : 460;
   const panX = Math.floor((window.innerWidth  - W) / 2);
   const panY = Math.floor((window.innerHeight - H) / 2);
 
@@ -8280,37 +9004,46 @@ function drawTradeUI() {
   // Title
   drawText("Trade", panX + W / 2, panY + 22, 17, "center", "rgba(255,255,255,0.95)");
 
-  // Divider down the middle
+  // Divider between the two halves (vertical side-by-side, or horizontal
+  // between the stacked halves on a phone).
   ctx.strokeStyle = "rgba(255,255,255,0.08)";
   ctx.beginPath();
-  ctx.moveTo(panX + W / 2, panY + 36);
-  ctx.lineTo(panX + W / 2, panY + H - 12);
+  if (stacked) {
+    const midY = panY + 36 + HALF_H;
+    ctx.moveTo(panX + 12, midY);
+    ctx.lineTo(panX + W - 12, midY);
+  } else {
+    ctx.moveTo(panX + W / 2, panY + 36);
+    ctx.lineTo(panX + W / 2, panY + H - 12);
+  }
   ctx.stroke();
 
   const _ui = {};
 
   // --- Draw one player half ---
-  function drawHalf(playerIdx, side) {
-    const isLeft = side === "left";
-    const halfX = panX + (isLeft ? 10 : W / 2 + 10);
-    const halfW = W / 2 - 20;
+  function drawHalf(playerIdx, slot) {
+    // slot 0 = first half (left, or top when stacked); slot 1 = second half.
+    const halfX = stacked ? panX + 10 : panX + (slot === 0 ? 10 : W / 2 + 10);
+    const halfW = stacked ? W - 20 : W / 2 - 20;
     const isActive = ap === playerIdx;
     const inv = state.inventories[playerIdx];
     const p = state.players[playerIdx];
     const offer = playerIdx === t.p0idx ? t.p0offer : t.p1offer;
     const confirmed = playerIdx === t.p0idx ? t.confirm0 : t.confirm1;
 
-    let yy = panY + 42;
+    let yy = panY + 42 + (stacked ? slot * (HALF_H + 8) : 0);
 
     // Player name
     const nameCol = isActive ? "rgba(255,255,180,0.95)" : "rgba(255,255,255,0.55)";
     drawText(`${p.name}'s Inventory` + (isActive ? "" : " (switch to interact)"), halfX, yy, 13, "left", nameCol);
     yy += 18;
 
-    // Inventory grid (12×2, smaller cells)
-    const ic = TRADE_INV_CELL, ig = TRADE_INV_GAP;
+    // Inventory grid (12×2). Cell size shrinks to whatever actually fits
+    // halfW — a fixed 28px cell only fits a wide desktop half.
     const invCols = INV_COLS; // 12
     const invRows = INV_ROWS; // 2
+    const ig = TRADE_INV_GAP;
+    const ic = Math.max(16, Math.min(TRADE_INV_CELL, Math.floor((halfW - (invCols - 1) * ig) / invCols)));
 
     // Is this player's inventory slot currently being dragged?
     const draggingInvSlot = (t.drag?.srcKind === "inv" && t.drag?.srcPlayer === playerIdx)
@@ -8353,8 +9086,9 @@ function drawTradeUI() {
     drawText(confirmed ? `${p.name} offers: ✓ CONFIRMED` : `${p.name} offers:`, halfX, yy, 13, "left", offerLabelCol);
     yy += 18;
 
-    // Offer grid (TRADE_OFFER_SLOTS × 1)
-    const oc = TRADE_CELL, og = TRADE_GAP;
+    // Offer grid (TRADE_OFFER_SLOTS × 1) — same shrink-to-fit treatment.
+    const og = TRADE_GAP;
+    const oc = Math.max(24, Math.min(TRADE_CELL, Math.floor((halfW - (TRADE_OFFER_SLOTS - 1) * og) / TRADE_OFFER_SLOTS)));
     const draggingOfferSlot = (t.drag?.srcKind === "offer" && t.drag?.srcPlayer === playerIdx)
       ? t.drag.srcSlot : -1;
     const offerSlots = [];
@@ -8413,8 +9147,8 @@ function drawTradeUI() {
     return { invSlots, offerSlots, confirmBtn };
   }
 
-  const left  = drawHalf(t.p0idx, "left");
-  const right = drawHalf(t.p1idx, "right");
+  const left  = drawHalf(t.p0idx, 0);
+  const right = drawHalf(t.p1idx, 1);
 
   // Cancel button
   const cW = 110, cH = 30;
@@ -8732,11 +9466,119 @@ if (state.mode === "dungeon" && obj.id === "dungeon_gate") {
       action: withSfx("click", () => {
         if (tooFar || needKey) return;
         removeItem(inv, "dungeon_key", 1);
-        getCurrentMap().objects[mapY][mapX] = { id: "dungeon_gate_open", hp: 999, meta: {} };
-        saveDungeonLayout(state.dungeonId);
-		playSound("unlock");
+        openDungeonGateAt(mapX, mapY);
         logAction(`${p.name} unlocked a gate.`);
         closeMenu();
+      })
+    }]
+  });
+  return;
+}
+
+// ---- Lever behavior (opens whichever gate/vault door it's linked to) ----
+if (state.mode === "dungeon" && obj.id === "lever") {
+  const tooFar = !isAdjacentOrSame(p.x, p.y, mapX, mapY);
+  const already = !!obj.meta?.pulled;
+
+  openMenu({
+    screenX, screenY,
+    title: "Lever",
+    options: [{
+      label: "Pull",
+      disabledReason: tooFar ? "Too far" : (already ? "Already pulled" : null),
+      action: withSfx("click", () => {
+        if (tooFar || already) return;
+        obj.meta = obj.meta || {};
+        obj.meta.pulled = true;
+        openDungeonGateAt(obj.meta.linkGateX, obj.meta.linkGateY);
+        logAction(`${p.name} pulled a lever.`);
+        closeMenu();
+      })
+    }]
+  });
+  return;
+}
+
+// ---- Torch behavior (light with a match; last one lights the linked gate) ----
+if (state.mode === "dungeon" && obj.id === "torch_unlit") {
+  const tooFar = !isAdjacentOrSame(p.x, p.y, mapX, mapY);
+  const noMatches = getQty(inv, "matches") < 1;
+
+  openMenu({
+    screenX, screenY,
+    title: "Unlit Torch",
+    options: [{
+      label: "Light (1 Match)",
+      disabledReason: tooFar ? "Too far" : (noMatches ? "Needs matches" : null),
+      action: withSfx("lightfire", () => {
+        if (tooFar || noMatches) return false;
+        removeItem(inv, "matches", 1);
+        obj.id = "torch_lit";
+        logAction(`${p.name} lit a torch.`);
+
+        if (allTorchesLitForGroup(state.dungeon, obj.meta?.groupId)) {
+          openDungeonGateAt(obj.meta.linkGateX, obj.meta.linkGateY);
+          logAction(`The last torch catches — a gate rumbles open somewhere nearby!`);
+        }
+        closeMenu();
+        return true;
+      })
+    }]
+  });
+  return;
+}
+
+if (state.mode === "dungeon" && obj.id === "torch_lit") {
+  openMenu({
+    screenX, screenY,
+    title: "Torch",
+    options: [{
+      label: "It's already lit.",
+      disabledReason: "Nothing to do",
+      action: () => closeMenu()
+    }]
+  });
+  return;
+}
+
+// ---- Boulder behavior (push it directly away from the player) ----
+if (state.mode === "dungeon" && obj.id === "boulder") {
+  const tooFar = !isAdjacentOrSame(p.x, p.y, mapX, mapY);
+
+  // Already adjacent-only (Manhattan distance 1), so this is always a clean
+  // orthogonal unit vector — never diagonal.
+  const dx = Math.sign(mapX - p.x);
+  const dy = Math.sign(mapY - p.y);
+  const nx = mapX + dx, ny = mapY + dy;
+
+  const canPush = !tooFar && isPassable(nx, ny);
+
+  openMenu({
+    screenX, screenY,
+    title: "Boulder",
+    options: [{
+      label: "Push",
+      disabledReason: tooFar ? "Too far" : (canPush ? null : "Nothing to push it into"),
+      action: withSfx("click", () => {
+        if (tooFar || !canPush) return false;
+
+        const dmap = state.dungeon;
+        dmap.objects[mapY][mapX] = null;
+        dmap.objects[ny][nx] = obj; // same reference — keeps its meta intact
+
+        // Push-and-follow: the player steps into the space the boulder left.
+        p.x = mapX; p.y = mapY; p.fx = mapX; p.fy = mapY; p.path = [];
+        revealAroundPlayers();
+
+        logAction(`${p.name} pushed a boulder.`);
+
+        if (nx === obj.meta?.plateX && ny === obj.meta?.plateY) {
+          openDungeonGateAt(obj.meta.linkGateX, obj.meta.linkGateY);
+          logAction(`The boulder settles onto the plate — a gate rumbles open somewhere nearby!`);
+        }
+
+        closeMenu();
+        return true;
       })
     }]
   });
@@ -10076,6 +10918,13 @@ function learnRecipe(recipeId, silent = false) {
 // ---- Drawing ----
 function drawRect(x, y, w, h, fill) { ctx.fillStyle = fill; ctx.fillRect(x, y, w, h); }
 
+function drawCircle(cx, cy, r, fill) {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawText(text, x, y, size, align, color, font = BASE_FONT) {
   // Backward compat: some calls pass (color, align) instead of (align, color).
   // Detect and swap if align looks like a color and color looks like an alignment.
@@ -10328,72 +11177,78 @@ function drawAvatarTall(icon, tileX, tileY, scaleY = 1) {
 }
 
 
+// Shared pill-shaped meter — both stamina and hunger use this now (they
+// used to have two different fill treatments: one flush, one inset, which
+// read as two different widgets even though they're the same kind of thing).
+function drawMeterBar(x, y, w, h, pct, fillColor) {
+  drawHudPanel(x, y, w, h, h / 2, "rgba(245,233,219,0.10)", HUD.border);
+  const fillW = Math.max(0, (w - 4) * clamp(pct, 0, 1));
+  if (fillW <= 0) return;
+  ctx.save();
+  ctx.beginPath();
+  const r = Math.min((h - 4) / 2, fillW / 2);
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x + 2, y + 2, fillW, h - 4, r);
+  else ctx.rect(x + 2, y + 2, fillW, h - 4);
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  ctx.restore();
+}
+
 function staminaBar(pl, x, y, w, h) {
-  // background
-  drawRect(x, y, w, h, "rgba(255,255,255,0.10)");
-  // fill
-  const pct = pl.stamina / STAMINA_MAX;
-  drawRect(x, y, w * pct, h, "rgba(40,220,80,0.85)");
-  ctx.strokeStyle = "rgba(255,255,255,0.18)";
-  ctx.strokeRect(x, y, w, h);
+  // green stays green — it's a status color players already read at a glance
+  drawMeterBar(x, y, w, h, pl.stamina / STAMINA_MAX, "rgba(90,190,110,0.9)");
 }
 
 function drawHungerBar(x, y, w, h, hunger) {
-  drawRect(x, y, w, h, "rgba(0,0,0,0.55)");
-  const pct = clamp(hunger / HUNGER_MAX, 0, 1);
-  drawRect(x + 2, y + 2, (w - 4) * pct, h - 4, "#c96c2c");
-  ctx.strokeStyle = "rgba(255,255,255,0.15)";
-  ctx.strokeRect(x, y, w, h);
+  drawMeterBar(x, y, w, h, hunger / HUNGER_MAX, "#c96c2c");
 }
 
 function drawTopBar() {
-  drawRect(0, 0, window.innerWidth, UI_TOP_H, "rgba(0,0,0,0.74)");
+  drawRect(0, 0, window.innerWidth, UI_TOP_H, HUD.panel);
+  // Border starts at the sidebar's edge, not x=0 — the sidebar draws its
+  // own full-height border that already covers x=0..UI_TOP_H, so starting
+  // this one there too would cross it and read as a "+" seam instead of a
+  // single clean frame around the world.
+  ctx.strokeStyle = HUD.border;
+  ctx.beginPath();
+  ctx.moveTo(UI_LEFTBAR_W, UI_TOP_H + 0.5);
+  ctx.lineTo(window.innerWidth, UI_TOP_H + 0.5);
+  ctx.stroke();
 
   const p = activePlayer();
-  const inv = activeInv();
-  const pieces = getQty(inv, "blueprint_piece");
-  const hasBP = getQty(inv, "blueprint_house") > 0;
-
-drawText(
-  `Mode: ${state.mode} | Active: ${p.name}`,
-  UI_LEFTBAR_W + 10, 16, 13
-);
 
   // ---- Day/Night indicator (top-center) ----
   const isDay = state.time?.isDay ?? true;
   const icon = isDay ? "☀️" : "🌙";
   const label = isDay ? "Daytime" : "Nighttime";
   const dayNum = state.time?.day ?? 1;
-  drawText(`${icon} ${label}  (Day ${dayNum})`, window.innerWidth / 2, 16, 13, "center", "#fff", BASE_FONT);
+  drawText(`${icon} ${label}  (Day ${dayNum})`, window.innerWidth / 2, 16, 13, "center", HUD.goldText, BASE_FONT);
 
-  // coords on top-right (requested)
-if (state.mode === "overworld" || state.mode === "dungeon") {
-    const p1 = state.players[0], p2 = state.players[1];
-    const rightText = `P1 (${p1.x},${p1.y})  P2 (${p2.x},${p2.y})`;
-    drawText(rightText, window.innerWidth - 10, 16, 13, "right");
-  }
-
-  // stamina + hunger HUD should start after the left sidebar
+  // ---- Stamina + Hunger, side by side. Sized from whatever width remains
+  // after the (possibly still-animating) left sidebar, so both always fit
+  // on screen together instead of the hunger bar running off a narrow phone. ----
   const hudX = UI_LEFTBAR_W + 10;
+  const available = Math.max(0, (window.innerWidth - 10) - hudX);
 
-  // stamina bar
-  drawText("Stamina", hudX, 40, 12, "left", "rgba(255,255,255,0.85)");
-  staminaBar(p, hudX + 60, 34, 160, 12);
+  const labelW = 42;
+  const gap = 14;
+  const barH = 12;
+  const barW = Math.max(36, Math.floor((available - labelW * 2 - gap) / 2));
+  const barsY = 32;
 
-  // hunger bar (to the right of stamina)
-  const staminaX = hudX + 60, staminaY = 34, staminaW = 160, staminaH = 12;
+  const staminaLabelX = hudX;
+  const staminaBarX = staminaLabelX + labelW;
+  const hungerLabelX = staminaBarX + barW + gap;
+  const hungerBarX = hungerLabelX + labelW;
 
-  const hungerX = staminaX + staminaW + 150; // spacing between bars
-  const hungerY = staminaY;
-  const hungerW = 150;
-  const hungerH = staminaH;
+  drawText("Stamina", staminaLabelX, barsY + 6, 11, "left", HUD.textDim);
+  staminaBar(p, staminaBarX, barsY, barW, barH);
 
-  drawText("Hunger", hungerX - 60, 40, 12, "left", "rgba(255,255,255,0.85)");
-  drawHungerBar(hungerX, hungerY, hungerW, hungerH, p.hunger);
+  drawText("Hunger", hungerLabelX, barsY + 6, 11, "left", HUD.textDim);
+  drawHungerBar(hungerBarX, barsY, barW, barH, p.hunger);
 
-  // status text stays by stamina (as you wanted)
   const restTxt = p.resting ? "Resting…" : (p.stamina <= 0 ? "Exhausted" : "");
-  if (restTxt) drawText(restTxt, staminaX + staminaW + 12, 40, 12, "left", "rgba(255,255,255,0.75)");
+  if (restTxt) drawText(restTxt, staminaLabelX, barsY + 22, 10, "left", HUD.textMuted);
 }
 
 // -------------------------------------------------------- DROPPING ITEMS ----
@@ -10464,6 +11319,21 @@ function drawWorld() {
   const { viewW, viewH } = viewTiles();
   const camX = state.cam.x;
   const camY = state.cam.y;
+
+  // Render one extra partial row/column beyond the whole-tile viewport and
+  // clip to the exact pixel rect, so a screen size that isn't a clean
+  // multiple of TILE_SIZE doesn't leave a dead strip of unrendered space at
+  // the right/bottom edge. viewW/viewH themselves (used for camera
+  // clamp/edge-scroll elsewhere) stay whole-tile — this only affects what
+  // gets drawn.
+  const renderViewW = viewW + 1;
+  const renderViewH = viewH + 1;
+  const clipRect = worldViewportRect();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(clipRect.x, clipRect.y, clipRect.w, clipRect.h);
+  ctx.clip();
+
   const deferredBuildIcons = [];
   const deferredWindowBeams = [];
   const deferredLargeObjects = []; // overworld "large" objects for proper occlusion
@@ -10483,14 +11353,14 @@ let _largeFront = null;
       const lead = state.players[leadIndex];
       playerTileSet.add(`${Math.floor(lead.fx + 0.5)},${Math.floor(lead.fy + 0.5)}`);
     } else {
-      for (const pl of state.players) {
+      for (const pl of playersOnCurrentMap()) {
         playerTileSet.add(`${Math.floor(pl.fx + 0.5)},${Math.floor(pl.fy + 0.5)}`);
       }
     }
   }
 
-for (let y = Math.max(0, camY); y < Math.min(h, camY + viewH); y++) {
-  for (let x = Math.max(0, camX); x < Math.min(w, camX + viewW); x++) {
+for (let y = Math.max(0, camY); y < Math.min(h, camY + renderViewH); y++) {
+  for (let x = Math.max(0, camX); x < Math.min(w, camX + renderViewW); x++) {
       const { sx, sy } = mapToScreen(x, y);
 
 const tileId = map.tiles?.[y]?.[x];
@@ -11021,8 +11891,7 @@ if (state.mode === "interior") {
       drawCenteredEmoji(HOLDING_HANDS_ICON, psx + TILE_SIZE / 2, psy + TILE_SIZE / 2, 34);
     }
   } else {
-    for (let i = 0; i < state.players.length; i++) {
-      const pl = state.players[i];
+    for (const pl of playersOnCurrentMap()) {
       const tx = Math.floor(pl.fx + 0.5);
       const ty = Math.floor(pl.fy + 0.5);
       if (tx !== x || ty !== y) continue;
@@ -11315,7 +12184,7 @@ if (hh) {
   const px = lead.fx;
   const py = lead.fy;
 
-  if (px >= camX && px < camX + viewW && py >= camY && py < camY + viewH) {
+  if (px >= camX && px < camX + renderViewW && py >= camY && py < camY + renderViewH) {
     const sx = UI_LEFTBAR_W + (px - camX) * TILE_SIZE;
     const sy = UI_TOP_H + (py - camY) * TILE_SIZE;
 
@@ -11330,7 +12199,7 @@ if (hh) {
     const px = pl.fx;
     const py = pl.fy;
 
-    if (px < camX || px >= camX + viewW || py < camY || py >= camY + viewH) continue;
+    if (px < camX || px >= camX + renderViewW || py < camY || py >= camY + renderViewH) continue;
 
     const sx = UI_LEFTBAR_W + (px - camX) * TILE_SIZE;
     const sy = UI_TOP_H + (py - camY) * TILE_SIZE;
@@ -11342,7 +12211,7 @@ if (hh) {
 
 // --- Dungeon players (simple draw, no overworld depth sorting junk) ---
 if (state.mode === "dungeon") {
-  for (const pl of state.players) {
+  for (const pl of playersOnCurrentMap()) {
     const { sx, sy } = mapToScreen(pl.fx ?? pl.x, pl.fy ?? pl.y);
     drawAvatarTall(pl.icon, sx, sy, 1.25);
   }
@@ -11355,9 +12224,53 @@ if (state.mode === "overworld" && _largeFront && _largeFront.length) {
   }
 }
 
+ctx.restore(); // matches the clip established at the top of drawWorld()
+
+}
+
+// Right-anchored toast for the newest log line, shown briefly even while
+// the log panel itself is hidden (see showLogToast()/LOG_TOAST_MS).
+function drawLogToast() {
+  if (!state.logToastText) return;
+
+  const remaining = state.logToastUntil - performance.now();
+  if (remaining <= 0) { state.logToastText = null; return; }
+
+  const pad = 10;
+  const worldLeft = UI_LEFTBAR_W + pad;
+  const worldTop = UI_TOP_H + pad;
+  const worldW = (viewTiles().viewW * TILE_SIZE) - pad * 2;
+  if (worldW <= 0) return;
+
+  const fadeMs = 500;
+  const alpha = remaining < fadeMs ? Math.max(0, remaining / fadeMs) : 1;
+
+  const boxW = Math.min(worldW, 260);
+  const boxH = 34;
+  const x = worldLeft + worldW - boxW; // right-anchored, same spot the full panel opens from
+  const y = worldTop;
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  drawHudPanel(x, y, boxW, boxH, 12, "rgba(35,24,21,0.80)", HUD.border);
+
+  const maxChars = Math.max(8, Math.floor((boxW - 16) / 7));
+  const text = "> " + state.logToastText;
+  const out = text.length > maxChars ? (text.slice(0, maxChars - 1) + "…") : text;
+  drawText(out, x + 8, y + boxH / 2 + 5, 13, "left", HUD.text);
+  ctx.restore();
 }
 
 function drawActivityLogOverlay() {
+  // Hidden by default (mobile HUD) — revealed via the "Log" row in the left
+  // panel instead of a separate floating button. Still flash the newest
+  // line as a toast so hiding the log doesn't mean missing things.
+  if (!state.logVisible) {
+    state._logUI = null;
+    drawLogToast();
+    return;
+  }
+
   // No logs, no overlay.
   if (!Array.isArray(state.actionLog) || state.actionLog.length === 0) {
     state._logUI = null;
@@ -11392,23 +12305,34 @@ const ly = worldTop;
     ? Math.max(120, maxExpandedH)
     : (pad + maxCollapsedLines * lineH + pad);
 
-  state._logUI = { x: lx, y: ly, w: logW, h: logH };
+  // Close button (top-right corner of the panel) hides it back to the
+  // reveal-button-only state.
+  const closeBtn = { x: lx + logW - 22, y: ly + 2, w: 18, h: 18 };
+
+  state._logUI = { x: lx, y: ly, w: logW, h: logH, closeBtn };
 
   // Background: semi-transparent at top, fades to transparent at bottom.
   const g = ctx.createLinearGradient(0, ly, 0, ly + logH);
-  g.addColorStop(0.0, "rgba(0,0,0,0.55)");
-  g.addColorStop(0.55, "rgba(0,0,0,0.25)");
-  g.addColorStop(1.0, "rgba(0,0,0,0.00)");
+  g.addColorStop(0.0, "rgba(35,24,21,0.62)");
+  g.addColorStop(0.55, "rgba(35,24,21,0.28)");
+  g.addColorStop(1.0, "rgba(35,24,21,0.00)");
 
+  ctx.save();
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(lx, ly, logW, logH, [0, 0, 14, 14]);
+  else ctx.rect(lx, ly, logW, logH);
   ctx.fillStyle = g;
-  ctx.fillRect(lx, ly, logW, logH);
+  ctx.fill();
+  ctx.restore();
 
   // Subtle top border so it reads like a panel without screaming.
-  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.strokeStyle = HUD.border;
   ctx.beginPath();
   ctx.moveTo(lx, ly + 0.5);
   ctx.lineTo(lx + logW, ly + 0.5);
   ctx.stroke();
+
+  drawText("✕", closeBtn.x + closeBtn.w / 2, closeBtn.y + closeBtn.h / 2 + 5, 12, "center", HUD.textDim);
 
   // Decide how many lines to show based on height.
   const usableH = logH - pad * 2;
@@ -11455,10 +12379,10 @@ const ly = worldTop;
     ctx.rect(lx + pad, ly + pad, logW - pad * 2, logH - pad * 2);
     ctx.clip();
 
-    ctx.font = "14px system-ui";
+    ctx.font = `14px ${BASE_FONT}`;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillStyle = subjectColor || "rgba(255,255,255,0.92)";
+    ctx.fillStyle = subjectColor || HUD.text;
 
     // Simple truncation so it doesn't spill off-screen.
     const maxChars = Math.max(8, Math.floor((logW - pad * 2) / 7));
@@ -11474,13 +12398,32 @@ const ly = worldTop;
 
 function drawInventoryUI() {
   const baseY = window.innerHeight - UI_BOTTOM_H;
-  drawRect(0, baseY, window.innerWidth, UI_BOTTOM_H, "rgba(0,0,0,0.78)");
+  drawRect(0, baseY, window.innerWidth, UI_BOTTOM_H, HUD.panel);
+  // Same reasoning as drawTopBar()'s border: start at the sidebar's edge so
+  // this line doesn't cross the sidebar's own full-height border.
+  ctx.strokeStyle = HUD.border;
+  ctx.beginPath();
+  ctx.moveTo(UI_LEFTBAR_W, baseY + 0.5);
+  ctx.lineTo(window.innerWidth, baseY + 0.5);
+  ctx.stroke();
 
-  // --- Header text ---
-  const leftX = UI_LEFTBAR_W
-  const line1Y = baseY + 16;
-  const line2Y = baseY + 34;
-  const line3Y = baseY + 52;
+  // --- Expand/collapse handle: a tappable pull-tab, doubling as a visual
+  // affordance for the swipe-up/down gesture handled in the pointerup
+  // listener (see INV_SWIPE_THRESHOLD_PX). ---
+  const handleW = 72, handleH = 22;
+  const handleRect = {
+    x: Math.floor((window.innerWidth - handleW) / 2),
+    y: baseY + 3,
+    w: handleW,
+    h: handleH
+  };
+  drawHudPanel(handleRect.x, handleRect.y, handleRect.w, handleRect.h, 11, "rgba(245,233,219,0.08)", HUD.border);
+  drawText(
+    state.invExpanded ? "▼ less" : "▲ more",
+    handleRect.x + handleRect.w / 2, handleRect.y + handleRect.h / 2, 11,
+    "center", HUD.textDim
+  );
+  state._invHandleUI = handleRect;
 
   const inv = activeInv();
 
@@ -11497,12 +12440,17 @@ const selectedNames = sel ? (itemDef(sel.id)?.name ?? sel.id) : "";
   const UI_COLS = gm.visualCols;
   const UI_ROWS = gm.visualRows;
 
-  drawText(`Inventory (${inv.length}/${INV_SLOTS})`, gridX, gridY - 10, 13);
-  drawText(
-  `Selected: ${selectedNames || "(none)"}`,
-  gridX + 240, gridY - 10, 13,
-  "left", "rgba(255,255,255,0.88)"
-);
+  if (state.invExpanded) {
+    // Stacked on two lines (not side-by-side) so "Selected: ..." can't run
+    // off the right edge on a narrow phone — it used to be a fixed +240px
+    // offset that assumed desktop-width screens.
+    drawText(`Inventory (${inv.length}/${INV_SLOTS})`, gridX, gridY - 24, 13, "left", HUD.textDim);
+    drawText(
+    `Selected: ${selectedNames || "(none)"}`,
+    gridX, gridY - 10, 13,
+    "left", HUD.text
+  );
+  }
 
   const slots = Array.from({ length: INV_SLOTS }, (_, i) => inv[i] ?? null);
 
@@ -11514,15 +12462,16 @@ const selectedNames = sel ? (itemDef(sel.id)?.name ?? sel.id) : "";
     const x = gridX + c * (cell + gap);
     const y = gridY + r * (cell + gap);
 
-    drawRect(x, y, cell, cell, "rgba(255,255,255,0.06)");
-    ctx.strokeStyle = "rgba(255,255,255,0.10)";
-    ctx.strokeRect(x, y, cell, cell);
+    drawHudPanel(x, y, cell, cell, 6, "rgba(245,233,219,0.08)", HUD.border);
 
-// Selected inventory slot highlight (normal gameplay)
+// Selected inventory slot highlight (normal gameplay) — gold ring
 if (!state.craftingOpen && i === state.selectedInvIdx) {
-  ctx.strokeStyle = "rgba(255,255,255,0.9)";
+  ctx.strokeStyle = HUD.gold;
   ctx.lineWidth = 2;
-  ctx.strokeRect(x + 1, y + 1, cell - 2, cell - 2);
+  ctx.beginPath();
+  if (typeof ctx.roundRect === "function") ctx.roundRect(x + 1, y + 1, cell - 2, cell - 2, 5);
+  else ctx.rect(x + 1, y + 1, cell - 2, cell - 2);
+  ctx.stroke();
   ctx.lineWidth = 1;
 }
 
@@ -11533,16 +12482,19 @@ if (!state.craftingOpen && i === state.selectedInvIdx) {
     const icon = def?.icon ?? "❓";
     drawCenteredEmoji(icon, x + cell / 2, y + cell / 2 - 2, 20);
 
-    ctx.fillStyle = "rgba(255,255,255,0.9)";
-    ctx.font = "12px system-ui";
+    ctx.fillStyle = HUD.text;
+    ctx.font = `12px ${BASE_FONT}`;
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
     ctx.fillText(String(stack.qty), x + cell - 4, y + cell - 3);
 
     if (state.selectedForCraft.has(stack.id)) {
-      ctx.strokeStyle = "rgba(255,255,255,0.7)";
+      ctx.strokeStyle = "rgba(111,184,181,0.85)"; // teal — distinct from the gold "selected" ring
       ctx.lineWidth = 2;
-      ctx.strokeRect(x + 2, y + 2, cell - 4, cell - 4);
+      ctx.beginPath();
+      if (typeof ctx.roundRect === "function") ctx.roundRect(x + 2, y + 2, cell - 4, cell - 4, 4);
+      else ctx.rect(x + 2, y + 2, cell - 4, cell - 4);
+      ctx.stroke();
       ctx.lineWidth = 1;
     }
   }
@@ -11582,8 +12534,8 @@ const inv = (activeInv() || [])
 
   const learned = recipes.filter(r => state.learnedRecipes.has(r.id));
 
-  const W = 700;
-  const H = 420;
+  const W = Math.min(700, window.innerWidth - 20);
+  const H = Math.min(420, window.innerHeight - 40);
   const x = (window.innerWidth - W) / 2;
   const y = (window.innerHeight - H) / 2;
 
@@ -11707,8 +12659,8 @@ drawText(
 }
 
 function handleCraftingClick(px, py) {
-  const W = 700;
-  const H = 420;
+  const W = Math.min(700, window.innerWidth - 20);
+  const H = Math.min(420, window.innerHeight - 40);
   const x = (window.innerWidth - W) / 2;
   const y = (window.innerHeight - H) / 2;
 
@@ -11788,7 +12740,7 @@ function updateCraftingSliderFromPx(px) {
 }
 
 function handleCraftingPointerDown(px, py) {
-  const W = 700, H = 420;
+  const W = Math.min(700, window.innerWidth - 20), H = Math.min(420, window.innerHeight - 40);
   const x = (window.innerWidth - W) / 2;
   const y = (window.innerHeight - H) / 2;
 
@@ -12037,40 +12989,44 @@ function openMenuForInventoryItem(invIdx, screenX, screenY) {
   const emptyBucketId = firstExistingItemId(["bucket", "empty_bucket"]);
   const filledBucketId = firstExistingItemId(["bucket_water", "water_bucket", "bucket_of_water"]);
 
-    // NOTE: drop sometimes failed because p.x/p.y can be non-integers (movement smoothing).
-  // That made dropItemOnTile() return false, and the revert addItem() shoved the stack to the last slot.
+  // NOTE: drop sometimes failed because p.x/p.y can be non-integers (movement smoothing),
+  // or because the tile already held a dropped item of a DIFFERENT type (isTileOccupiedForDrop
+  // alone doesn't know about itemId, so it read the tile as free when dropItemOnTile would
+  // still reject it — see _canStackDroppedItemAt below). On failure, the revert used to splice
+  // a raw object back in using `st.qty` captured once at menu-open time; since removeItem()
+  // mutates that same stack object's qty in place before splicing it out of the array, `st`
+  // went stale after the first failed attempt. Because failure also never closed the menu, every
+  // extra tap re-read that stale (already-zeroed) qty and spliced in ANOTHER qty:0 ghost stack.
+  // Reading the quantity fresh from the inventory (not the closed-over `st`) and always closing
+  // the menu once a drop is attempted avoids both problems.
   const drop = (qty) => {
     // Lock to a real tile coordinate
     const tx = Math.round(p.x);
     const ty = Math.round(p.y);
 
     // Re-check occupancy at the moment of dropping (player may have moved since menu opened)
-    const blocked = isTileOccupiedForDrop(tx, ty);
-    if (blocked) return;
+    const blocked = isTileOccupiedForDrop(tx, ty) && !_canStackDroppedItemAt(tx, ty, itemId);
+    if (blocked) { closeMenu(); return; }
 
-    // Snapshot for a clean revert that preserves the slot
-    const beforeQty = st.qty;
+    const beforeQty = getQty(inv, itemId);
+    const takeQty = Math.min(qty, beforeQty);
+    if (takeQty <= 0) { closeMenu(); return; }
 
-    if (!removeItem(inv, itemId, qty)) return;
+    if (!removeItem(inv, itemId, takeQty)) { closeMenu(); return; }
 
-    const ok = dropItemOnTile(itemId, qty, tx, ty);
+    const ok = dropItemOnTile(itemId, takeQty, tx, ty);
     if (!ok) {
-      // Revert WITHOUT reordering inventory
-      if (beforeQty <= qty) {
-        // We removed the whole stack, so put it back in the same slot
-        inv.splice(invIdx, 0, { id: itemId, qty: beforeQty });
-      } else {
-        // We reduced qty on the existing stack, restore it
-        st.qty = beforeQty;
-      }
+      // Revert via the normal stacking logic instead of a raw splice.
+      addItem(inv, itemId, takeQty);
+      closeMenu();
       return;
     }
 
-    logAction(`${p.name} dropped ${qty} ${itemName}${qty === 1 ? "" : "s"} at (${tx},${ty}).`);
+    logAction(`${p.name} dropped ${takeQty} ${itemName}${takeQty === 1 ? "" : "s"} at (${tx},${ty}).`);
     closeMenu();
   };
 
-  const dropBlocked = isTileOccupiedForDrop(Math.round(p.x), Math.round(p.y));
+  const dropBlocked = isTileOccupiedForDrop(Math.round(p.x), Math.round(p.y)) && !_canStackDroppedItemAt(Math.round(p.x), Math.round(p.y), itemId);
 
   const canDump = filledBucketId && emptyBucketId && itemId === filledBucketId;
 
@@ -12168,7 +13124,7 @@ function drawInteractionRequestDialog() {
   const fromName = state.players[req.fromIndex].name;
   const type = req.type;
 
-  const W = 420;
+  const W = Math.min(420, window.innerWidth - 20);
   const H = 170;
   const x = (window.innerWidth - W) / 2;
   const y = UI_TOP_H + 40;
@@ -12185,9 +13141,9 @@ function drawInteractionRequestDialog() {
   drawText(`${fromName} would like to: ${type}`, x + 14, y + 52, 14);
 
   // Buttons
-  const btnW = 150;
-  const btnH = 34;
   const gap = 16;
+  const btnW = Math.min(150, Math.floor((W - 28 - gap) / 2));
+  const btnH = 34;
 
   const bx1 = x + W/2 - btnW - gap/2;
   const bx2 = x + W/2 + gap/2;
@@ -12212,8 +13168,188 @@ function drawInteractionRequestDialog() {
   drawText("Decline", bx2 + btnW/2, by + 22, 14, "center", "rgba(255,255,255,0.85)");
 }
 
+// Best-effort icon for a menu option, matched by keyword against its label.
+// Menu options never carry their own icon field (they're built by ~10
+// different openMenuFor*() functions across the file), so rather than
+// thread an icon through every one of them, the radial menu derives one
+// here purely from the label text at draw time — zero risk to the option
+// lists themselves, easy to extend if a new action needs a better icon.
+// Best-effort icon for a menu option. Prefers a REAL tool/item icon derived
+// from the actual object this menu belongs to — openWorldMenuAt() stamps
+// state.menu.targetX/targetY on open so harvesting a tree can show the axe
+// you'd need (not a generic wheat icon), digging shows the shovel, and
+// picking up a dropped item shows that item itself. Falls back to a
+// keyword-matched generic icon (from the label text) for menus with no
+// associated tile — player/holding-hands/door — or when the object has no
+// tool/gives data to point at. Returns either a plain emoji string or an
+// `{type:"image", src}` icon (itemDef()/objDef() both use both shapes) —
+// callers must draw it with drawCenteredEmoji(), which supports both.
+function iconForMenuOption(opt) {
+  const label = opt?.label || "";
+  const l = String(label).toLowerCase();
+
+  const tx = state.menu?.targetX, ty = state.menu?.targetY;
+  if (typeof tx === "number" && typeof ty === "number") {
+    const obj = objectAt(tx, ty);
+    const def = obj ? objDef(obj.id) : null;
+
+    if (def && (l.includes("harvest") || l.includes("hunt"))) {
+      const interact = def.hunt || def.harvest;
+      const toolIcon = interact?.requiresTool ? itemDef(interact.requiresTool)?.icon : null;
+      if (toolIcon) return toolIcon;
+
+      const firstItemId = interact?.gives ? Object.keys(interact.gives)[0] : null;
+      const itemIcon = firstItemId ? itemDef(firstItemId)?.icon : null;
+      if (itemIcon) return itemIcon;
+
+      if (def.icon) return def.icon;
+    }
+
+    if (obj && l.includes("pick up")) {
+      const itemId = obj.meta?.itemId;
+      const icon = (itemId ? itemDef(itemId)?.icon : null) ?? def?.icon;
+      if (icon) return icon;
+    }
+  }
+
+  if (l.includes("dig")) return itemDef("shovel")?.icon ?? "🪏";
+  if (l.includes("harvest")) return "🌾";
+  if (l.includes("hunt")) return "🏹";
+  if (l.includes("pick up") || l.includes("pickup")) return "✋";
+  if (l.includes("chop")) return itemDef("axe")?.icon ?? "🪓";
+  if (l.includes("water")) return "💧";
+  if (l.includes("fill bucket") || l.includes("bucket")) return itemDef("bucket")?.icon ?? "🪣";
+  if (l.includes("plant")) return "🌱";
+  if (l.includes("cook")) return "🍳";
+  if (l.includes("add wood")) return "🪵";
+  if (l.includes("extinguish")) return "🧯";
+  if (l.includes("sleep") || l.includes("bed")) return "😴";
+  if (l.includes("rest")) return "💤";
+  if (l.includes("open")) return "📦";
+  if (l.includes("exit") || l.includes("door")) return "🚪";
+  if (l.includes("hold hands")) return "🤝";
+  if (l.includes("kiss")) return "💋";
+  if (l.includes("hug")) return "🤗";
+  if (l.includes("trade")) return "🔄";
+  if (l.includes("construction") || l.includes("build")) return itemDef("hammer")?.icon ?? "🔨";
+  if (l.includes("stockpile")) return "📥";
+  if (l.includes("eat")) return "🍽️";
+  if (l.includes("examine")) return "🔍";
+  if (l.includes("drop")) return "🗑️";
+  if (l.includes("dump")) return "🚰";
+  if (l.includes("remove")) return "❌";
+  if (l.includes("pet")) return "🐾";
+  if (l.includes("contribute")) return "📦";
+  if (l.includes("dungeon")) return "🕳️";
+  if (l.includes("rune")) return "🔮";
+  if (l.includes("pull")) return "🎚️";
+  if (l.includes("light")) return "🕯️";
+  if (l.includes("push")) return "🪨";
+  return "✳️";
+}
+
+// Lays out the ring of buttons around the menu's anchor point, sized so
+// neighboring buttons (even at hover scale) don't overlap, and clamped so
+// the whole ring stays fully on-screen regardless of where the anchor is.
+function radialLayout(m) {
+  const n = m.options.length;
+  const btnR = RADIAL_BTN_R;
+  const gap = 10;
+  const arcPerBtn = btnR * 2 * RADIAL_HOVER_SCALE + gap;
+  const ringR = Math.max(64, (n * arcPerBtn) / (2 * Math.PI));
+
+  const outer = ringR + btnR * RADIAL_HOVER_SCALE + 12;
+  const minX = UI_LEFTBAR_W + outer, maxX = window.innerWidth - outer;
+  const minY = UI_TOP_H + outer, maxY = window.innerHeight - UI_BOTTOM_H - outer;
+
+  const cx = minX <= maxX ? Math.max(minX, Math.min(maxX, m.screenX)) : window.innerWidth / 2;
+  const cy = minY <= maxY ? Math.max(minY, Math.min(maxY, m.screenY)) : window.innerHeight / 2;
+
+  const buttons = [];
+  for (let i = 0; i < n; i++) {
+    const angle = -Math.PI / 2 + (2 * Math.PI * i) / n; // first button straight up, clockwise
+    buttons.push({
+      x: cx + Math.cos(angle) * ringR,
+      y: cy + Math.sin(angle) * ringR,
+      r: btnR,
+      opt: m.options[i],
+      index: i
+    });
+  }
+
+  return { cx, cy, ringR, buttons, cancelR: btnR * 0.7 };
+}
+
+function radialHitIndex(m, px, py) {
+  if (!m._radialButtons) return -1;
+  let best = -1, bestDist = Infinity;
+  for (const b of m._radialButtons) {
+    const dx = px - b.x, dy = py - b.y;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    if (d <= b.r * RADIAL_HIT_SCALE && d < bestDist) { best = b.index; bestDist = d; }
+  }
+  return best;
+}
+
+function drawRadialMenu() {
+  const m = state.menu;
+  const layout = radialLayout(m);
+  m._radialButtons = layout.buttons;
+
+  // Dim the world so the ring reads clearly without fully hiding what's
+  // being interacted with (unlike a modal, this stays anchored in place).
+  drawRect(0, 0, window.innerWidth, window.innerHeight, "rgba(20,14,12,0.32)");
+
+  ctx.strokeStyle = HUD.border;
+  ctx.lineWidth = 1;
+  for (const b of layout.buttons) {
+    ctx.beginPath();
+    ctx.moveTo(layout.cx, layout.cy);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  drawCircle(layout.cx, layout.cy, layout.cancelR, "rgba(245,233,219,0.22)");
+
+  for (const b of layout.buttons) {
+    const disabled = !!b.opt.disabledReason;
+    const hovered = !disabled && m.hoverIndex === b.index;
+    const r = hovered ? b.r * RADIAL_HOVER_SCALE : b.r;
+
+    drawCircle(b.x, b.y, r, disabled ? "rgba(45,32,28,0.85)" : (hovered ? HUD.activeFill : HUD.panel));
+    ctx.strokeStyle = hovered ? HUD.borderStrong : HUD.border;
+    ctx.lineWidth = hovered ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+
+    const icon = iconForMenuOption(b.opt);
+    ctx.save();
+    if (disabled) ctx.globalAlpha = 0.4;
+    drawCenteredEmoji(icon, b.x, b.y, hovered ? 26 : 20);
+    ctx.restore();
+  }
+
+  // Whatever's currently hovered gets its full label spelled out above the
+  // ring — the icon alone isn't always enough to be sure before releasing.
+  if (m.hoverIndex >= 0) {
+    const opt = m.options[m.hoverIndex];
+    const label = opt.disabledReason ? `${opt.label} (${opt.disabledReason})` : opt.label;
+    const labelY = Math.max(UI_TOP_H + 14, layout.cy - layout.ringR - RADIAL_BTN_R * RADIAL_HOVER_SCALE - 10);
+
+    ctx.font = `13px ${BASE_FONT}`;
+    const labelW = ctx.measureText(label).width + 24;
+    const labelBoxH = 26;
+    drawHudPanel(layout.cx - labelW / 2, labelY - labelBoxH / 2, labelW, labelBoxH, 13, HUD.panel, HUD.borderStrong);
+    drawText(label, layout.cx, labelY, 13, "center", HUD.text);
+  }
+}
+
 function drawMenu() {
   if (!state.menu) return;
+
+  if (state.menu.isRadial) { drawRadialMenu(); return; }
 
   const m = state.menu;
   const pad = 10;
@@ -12266,8 +13402,8 @@ function closeRunestoneReader() {
 }
 
 function drawCoordsModal() {
-  const w = 520;
-  const h = 360;
+  const w = Math.min(520, window.innerWidth - 20);
+  const h = Math.min(360, window.innerHeight - 40);
   const x = Math.floor((window.innerWidth - w) / 2);
   const y = Math.floor((window.innerHeight - h) / 2);
 
@@ -12280,11 +13416,17 @@ function drawCoordsModal() {
   const p = activePlayer();
   drawText(`Current: (${p.x},${p.y})`, x + w - 12, y + 18, 13, "right", "rgba(255,255,255,0.85)");
 
-  // Buttons
+  // Buttons — laid out right-to-left from the panel's actual (possibly
+  // phone-narrow) width so close/travel/mark never overlap regardless of w.
+  const btnY = y + h - 40, btnH = 28, btnGap = 8;
+  const closeBtn = { x: x + w - 80 - 12, y: btnY, w: 80, h: btnH };
+  const travelBtn = { x: closeBtn.x - btnGap - 110, y: btnY, w: 110, h: btnH };
+  const markBtn = { x: x + 12, y: btnY, w: Math.max(100, travelBtn.x - btnGap - (x + 12)), h: btnH };
+
   state._coordsUI = {
-    close:  { x: x + w - 90, y: y + h - 40, w: 80, h: 28 },
-    mark:   { x: x + 12,      y: y + h - 40, w: 200, h: 28 },
-    travel: { x: x + 230,     y: y + h - 40, w: 120, h: 28 },
+    close: closeBtn,
+    mark: markBtn,
+    travel: travelBtn,
     list: []
   };
 
@@ -12319,7 +13461,7 @@ function drawCoordsModal() {
   drawRect(b.mark.x, b.mark.y, b.mark.w, b.mark.h, "rgba(255,255,255,0.10)");
   ctx.strokeStyle = "rgba(255,255,255,0.18)";
   ctx.strokeRect(b.mark.x, b.mark.y, b.mark.w, b.mark.h);
-  drawText("Mark current location", b.mark.x + 10, b.mark.y + b.mark.h / 2, 13);
+  drawText("Mark Here", b.mark.x + 10, b.mark.y + b.mark.h / 2, 13);
 
   // Travel There (only if selected)
   const travelEnabled = !!state.coordsSelected && state.markers.some(m => markerKey(m) === state.coordsSelected);
@@ -12363,8 +13505,8 @@ function drawCollectiblesModal() {
   const found = state.collectiblesFound || {};
 
   // Modal box
-  const W = 640;
-  const H = 420;
+  const W = Math.min(640, window.innerWidth - 20);
+  const H = Math.min(420, window.innerHeight - 40);
   const x = Math.floor((window.innerWidth - W) / 2);
   const y = Math.floor((window.innerHeight - H) / 2);
 
@@ -12585,7 +13727,7 @@ function drawTreasureModal() {
   const by = t?.by ? ` (by ${t.by})` : "";
   const coord = t ? `(${t.x}, ${t.y})` : "(?, ?)";
 
-  const W = 360;
+  const W = Math.min(360, window.innerWidth - 20);
   const H = 160;
   const x = Math.floor((window.innerWidth - W) / 2);
   const y = Math.floor((window.innerHeight - H) / 2);
@@ -12863,7 +14005,14 @@ function stopLoopSound(name) {
 
 // ---- Input handling ----
 function handleMenuHover(px, py) {
-  if (!state.menu || !state.menu._hit) return;
+  if (!state.menu) return;
+
+  if (state.menu.isRadial) {
+    state.menu.hoverIndex = radialHitIndex(state.menu, px, py);
+    return;
+  }
+
+  if (!state.menu._hit) return;
   let idx = -1;
   for (const h of state.menu._hit) {
     if (hitRect(px, py, h)) { idx = h.index; break; }
@@ -12872,7 +14021,20 @@ function handleMenuHover(px, py) {
 }
 
 function handleMenuTap(px, py) {
-  if (!state.menu || !state.menu._hit) return false;
+  if (!state.menu) return false;
+
+  // Radial menu: release finalizes whatever's hovered (or cancels — no
+  // action — if the finger moved off every button, e.g. back toward the
+  // center or away from the ring entirely).
+  if (state.menu.isRadial) {
+    const idx = state.menu.hoverIndex;
+    const opt = (idx >= 0 && idx < state.menu.options.length) ? state.menu.options[idx] : null;
+    closeMenu();
+    if (opt && !opt.disabledReason) opt.action();
+    return true;
+  }
+
+  if (!state.menu._hit) return false;
   for (const h of state.menu._hit) {
     if (hitRect(px, py, h)) {
       if (h.opt.disabledReason) return true;
@@ -13142,13 +14304,16 @@ function pointerPos(e) {
 }
 
 function isInWorldBounds(px, py) {
-  const worldPxW = viewTiles().viewW * TILE_SIZE;
+  // Matches the pixel-exact rect drawWorld() actually fills (see
+  // worldViewportRect()), not the floored viewW*TILE_SIZE — otherwise taps
+  // in the last partial-tile strip (now rendered) wouldn't register.
+  const rect = worldViewportRect();
 
-  const left = UI_LEFTBAR_W;
-  const right = UI_LEFTBAR_W + worldPxW;
+  const left = rect.x;
+  const right = rect.x + rect.w;
 
-  const top = UI_TOP_H;
-  const bottom = window.innerHeight - UI_BOTTOM_H; // CSS pixels, not canvas.height
+  const top = rect.y;
+  const bottom = rect.y + rect.h; // CSS pixels, not canvas.height
 
   return px >= left && px < right && py >= top && py < bottom;
 }
@@ -13179,6 +14344,9 @@ function escapeHtml(s) {
 }
 
 function isInActivityLog(px, py) {
+  // Hidden: reveal happens via the sidebar's "Log" row, not a tap here.
+  if (!state.logVisible) return false;
+
   // Prefer the real rect if it exists
   if (state._logUI) return hitRect(px, py, state._logUI);
 
@@ -13303,8 +14471,17 @@ function cursorFromIcon(icon, hotX = 0, hotY = 0, fallback = "pointer") {
   return `url("./src/icons/${icon}") ${hotX} ${hotY}, ${fallback}`;
 }
 
+function clearHoldTimer() {
+  if (state.pointer.holdTimerId) {
+    clearTimeout(state.pointer.holdTimerId);
+    state.pointer.holdTimerId = null;
+  }
+}
+
 canvas.addEventListener("pointerdown", (e) => {
   const { px, py } = pointerPos(e);
+  clearHoldTimer();
+  state.pointer.holdFired = false;
 
   // TITLE MENU ALWAYS EATS INPUT
   if (state.title?.open) {
@@ -13394,15 +14571,48 @@ if (state.placement?.active && isInWorldBounds(px, py)) {
   // Keep getting move/up events even if pointer slips outside canvas while dragging.
   try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
 
+  // Tap-and-hold radial menu: only arm the timer over an actual target
+  // (player/object/water/door) — an empty tile must keep behaving like a
+  // plain tap-to-move, hold or not. Placement modes are left untouched too.
+  if (!state.pointer.blocked && !state.placinghouse && !state.placingStockpile) {
+    const { x, y } = screenToMap(px, py);
+    if (hasWorldMenuTarget(x, y)) {
+      state.pointer.holdX = x;
+      state.pointer.holdY = y;
+      state.pointer.holdTimerId = setTimeout(() => {
+        state.pointer.holdTimerId = null;
+        if (!state.pointer.down || state.pointer.dragging) return;
+
+        const { sx, sy } = mapToScreen(state.pointer.holdX, state.pointer.holdY);
+        const ax = sx + TILE_SIZE / 2, ay = sy + TILE_SIZE / 2;
+        if (openWorldMenuAt(state.pointer.holdX, state.pointer.holdY, ax, ay)) {
+          state.menu.isRadial = true;
+          state.menu._justOpened = false; // this pointerup is a deliberate release-to-select, not an accidental re-tap
+          state.pointer.holdFired = true;
+          playSound("click");
+        }
+      }, RADIAL_HOLD_MS);
+    }
+  }
+
   updateMapCursor(px, py);
 });
 
 canvas.addEventListener("pointermove", (e) => {
   const { px, py } = pointerPos(e);
-  
+
     // keep a live cursor position for placement highlight
   state.pointer.x = px;
   state.pointer.y = py;
+
+  // Radial menu is active: this gesture owns hover-tracking exclusively —
+  // skip camera-pan/drag entirely below. The ring's radius is well past the
+  // normal drag threshold, so without this early return, moving a finger
+  // around the ring would be read as a map drag and close the menu.
+  if (state.pointer.holdFired && state.menu?.isRadial) {
+    handleMenuHover(px, py);
+    return;
+  }
 
 // dragging the left-sidebar slider
 if (handleLeftSidebarDrag(px, py)) return;
@@ -13450,6 +14660,7 @@ if (state.craftingOpen && state.craftingDrag) {
 
   if (!state.pointer.dragging && (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX)) {
     state.pointer.dragging = true;
+    clearHoldTimer(); // moved before the hold fired — this is a drag/pan, not a long-press
     closeMenu();
     updateMapCursor(px, py);
   }
@@ -13478,6 +14689,9 @@ canvas.addEventListener("pointerup", (e) => {
 
   state.pointer.down = false;
   state.pointer.dragging = false;
+  // Release before RADIAL_HOLD_MS elapsed — this is a plain tap, not a
+  // long-press; don't let the timer fire late on an already-lifted finger.
+  clearHoldTimer();
 
   const { px, py } = pointerPos(e);
 
@@ -13573,9 +14787,15 @@ if (state.title?.open) {
   return;
 }
 
-// Activity log overlay: tap to toggle expanded/collapsed, and eat the click.
+// Activity log overlay (only reachable while visible — reveal/hide is the
+// sidebar's "Log" row): the close corner hides it; anywhere else toggles
+// compact/full.
 if (isInActivityLog(px, py)) {
-  state.logExpanded = !state.logExpanded;
+  if (state._logUI?.closeBtn && hitRect(px, py, state._logUI.closeBtn)) {
+    state.logVisible = false;
+  } else {
+    state.logExpanded = !state.logExpanded;
+  }
   if (typeof playSound === "function") playSound("click");
   state.pointer.blocked = false;
   return;
@@ -13653,8 +14873,28 @@ state.ui.musicDragging = false;
 }
 
 
-  if (isInInventoryArea(py)) {
-    handleInventoryTap(px, py);
+  if (isInInventoryArea(state.pointer.startY)) {
+    // Explicit handle tap (both press and release on the pull-tab) toggles
+    // regardless of distance moved.
+    const handle = state._invHandleUI;
+    if (handle && hitRect(px, py, handle) && hitRect(state.pointer.startX, state.pointer.startY, handle)) {
+      state.invExpanded = !state.invExpanded;
+      playSound("click");
+      state.pointer.blocked = false;
+      return;
+    }
+
+    // Vertical swipe (mostly-vertical, past the threshold) expands/collapses
+    // the bar instead of being read as a slot tap. Height animates via
+    // updateHudAnim(); no need to snap it here.
+    const dx = px - state.pointer.startX;
+    const dy = state.pointer.startY - py; // positive = swiped up
+    if (Math.abs(dy) > INV_SWIPE_THRESHOLD_PX && Math.abs(dy) > Math.abs(dx)) {
+      state.invExpanded = dy > 0;
+      playSound("click");
+    } else if (isInInventoryArea(py)) {
+      handleInventoryTap(px, py);
+    }
     state.pointer.blocked = false;
     return;
   }
@@ -13684,85 +14924,20 @@ state.ui.musicDragging = false;
     return;
   }
 
-  // Holding hands visual merge: clicking either person opens the holding-hands menu
-  if (state.holdingHands) {
-    const hh = state.holdingHands;
-    const a = state.players[hh.a];
-    const b = state.players[hh.b];
-
-    if ((x === a.x && y === a.y) || (x === b.x && y === b.y)) {
-      openMenuForHoldingHands(px, py);
+  // Holding hands / player / adjacent object / adjacent water / interior
+  // door: a quick tap (hold never fired for this gesture, or wouldn't have
+  // — same resolver either way) just performs the default (first enabled)
+  // action immediately, no menu shown. Holding this same target instead
+  // pops the radial menu via the hold-timer armed in pointerdown.
+  if (!state.pointer.holdFired) {
+    if (openWorldMenuAt(x, y, px, py)) {
+      const opt = state.menu.options.find(o => !o.disabledReason);
+      closeMenu();
+      if (opt) opt.action();
       return;
     }
   }
 
-
-// clicking a player => open menu (no more switching active player by clicking)
-const clickedPlayerIndex = state.players.findIndex(pl => pl.x === x && pl.y === y);
-if (clickedPlayerIndex !== -1) {
-  if (clickedPlayerIndex === state.activePlayer) {
-    // clicking yourself keeps the existing self menu
-    openMenuForPlayer(clickedPlayerIndex, px, py);
-  } else {
-    // clicking the other player will become the interaction menu (next step)
-    openMenuForOtherPlayer(clickedPlayerIndex, px, py);
-  }
-  return;
-}
-
-  // adjacent object => context menu (FIRST)
-  const obj = objectAt(x, y);
-  if (obj) {
-    const def = objDef(obj.id);
-    const pl = activePlayer();
-    const dist = manhattan(pl.x, pl.y, x, y);
-
-    const canShoot =
-      isHuntableDef(def) &&
-      dist <= 3 &&
-      getQty(activeInv(), "bow_and_arrow") > 0;
-
-    if (canShoot || isAdjacentOrSame(pl.x, pl.y, x, y)) {
-      openMenuForTile(x, y, e.clientX, e.clientY);
-      return;
-    }
-  }
-
-  // water tile interaction (fill bucket) (ONLY if no object handled it)
-  const t = tileAt(x, y);
-  if (t === "water") {
-    const pl = activePlayer();
-    if (isAdjacentOrSame(pl.x, pl.y, x, y)) {
-      openMenuForWaterTile(x, y, e.clientX, e.clientY);
-      return;
-    }
-  }
-  
-// --- Interior door tile: context menu to Exit ---
-if (state.mode === "interior") {
-  const pl = activePlayer();
-  const idef = state.data.interiors?.[state.interiorId];
-  const doorTile = idef?.doorTile;
-  const t2 = tileAt(x, y);
-
-  if (doorTile && t2 === doorTile && isAdjacentOrSame(pl.x, pl.y, x, y)) {
-    openMenu({
-      screenX: e.clientX,
-      screenY: e.clientY,
-      title: "Door",
-      options: [
-        {
-          label: "Exit",
-          action: withSfx("door_open", () => {
-            tryExitInterior();
-            closeMenu();
-          })
-        }
-      ]
-    });
-    return;
-  }
-}
   // DEV: Ctrl+Click to teleport active player to the clicked tile
   if (e.ctrlKey) {
     const p = activePlayer();
@@ -13791,6 +14966,13 @@ if (state.mode === "interior") {
 // Right click: inventory context menu OR quick-harvest on map
 canvas.addEventListener("contextmenu", (e) => {
   e.preventDefault();
+
+  // On touch devices, a long-press fires the browser's native "contextmenu"
+  // event on top of whatever gesture is already happening — including our
+  // own tap-and-hold radial menu. Without this guard, the radial menu opens
+  // and then this handler's own `closeMenu()` below kills it a moment
+  // later, which is why it was flashing shut while still held.
+  if (state.pointer.holdFired) return;
 
   const { px, py } = pointerPos(e);
 
@@ -14578,6 +15760,8 @@ if (state.mode === "interior") return;
 
 // ------------------------------------------------------------------------ Main loop & Render ----
 function update(dt) {
+  updateHudAnim(dt);
+
   netTick();
 
   // Always update title/menu/cutscene stuff first so clicks work even before world arrives.
@@ -14614,7 +15798,11 @@ function update(dt) {
 function render() {
   ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
+  // UI_LEFTBAR_W/UI_BOTTOM_H are kept in sync (animated toward their target)
+  // by updateHudAnim(), called once per frame from update().
+
   setChatInputVisible(!state.title?.open);
+  positionChatInput();
 
 if (state.cutscene?.open) drawCutscene();
 
@@ -14642,7 +15830,7 @@ if (state.cutscene?.open) {
   drawNightOverlay();
   drawActivityLogOverlay();
   drawInventoryUI();
-  drawChatLog();
+  if (state.chatOpen) drawChatLog();
   drawMenu();
   drawRunestoneReader();
   drawRuneComboLockModal();
@@ -14652,6 +15840,8 @@ if (state.cutscene?.open) {
   drawSettingsModal();
     if (state.coordsOpen) drawCoordsModal();
   if (state.collectiblesOpen) drawCollectiblesModal();
+  if (state.treasureOpen) drawTreasureModal();
+  if (state.stockpileOpen) drawStockpileModal();
   drawConstructionUI();
   drawScreenFadeOverlay();
 }

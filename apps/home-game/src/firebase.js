@@ -24,8 +24,3 @@ export { app }
 export const auth = app ? getAuth(app) : null
 export const db = app ? getFirestore(app) : null
 export const rtdb = app ? getDatabase(app) : null
-
-// Temporary debug hook — check window.__debugAuth.currentUser in devtools
-// console to see Firebase Auth's live state directly, independent of any
-// app-level logic. Remove once the cross-device world-sync bug is found.
-if (typeof window !== "undefined") window.__debugAuth = auth;
