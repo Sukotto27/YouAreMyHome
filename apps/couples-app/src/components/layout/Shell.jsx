@@ -11,7 +11,7 @@ import { useThumbkissGesture } from '../../hooks/useThumbkissGesture'
 import CompactCounter from '../counter/CompactCounter'
 import NamePrompt from '../NamePrompt'
 import CheckInReminder from '../CheckInReminder'
-import DrawInvitePopup from '../DrawInvitePopup'
+import GameInvitePopup from '../GameInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
 import SendLoveMenu from '../SendLoveMenu'
 import IncomingLoveNotePopup from '../IncomingLoveNotePopup'
@@ -77,7 +77,7 @@ export default function Shell() {
     <div className="flex h-svh flex-col overflow-hidden bg-paper text-ink">
       <NamePrompt />
       <CheckInReminder />
-      <DrawInvitePopup />
+      <GameInvitePopup />
       <IncomingLoveNotePopup />
       <SendLoveMenu
         open={sendLoveOpen}

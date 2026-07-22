@@ -4,7 +4,7 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import { rtdb, db, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { readDemoList, writeDemoList } from '../../lib/demoStore'
-import { useDrawInvite } from '../../hooks/useDrawInvite'
+import { useGameInvite } from '../../hooks/useGameInvite'
 import Toolbar from '../canvas/Toolbar'
 import BottomActions from '../canvas/BottomActions'
 import DrawingCanvas from '../canvas/DrawingCanvas'
@@ -29,7 +29,7 @@ export default function DrawGame({ onBack }) {
   const [inviting, setInviting] = useState(false)
   const [inviteMessage, setInviteMessage] = useState('')
   const canvasRef = useRef(null)
-  const { sendInvite } = useDrawInvite()
+  const { sendInvite } = useGameInvite('draw', 'Draw')
 
   useEffect(() => {
     if (!firebaseReady) return

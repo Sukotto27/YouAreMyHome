@@ -3,16 +3,32 @@ import { useAuth } from '../../context/AuthContext'
 import { usePartnerUid } from '../../hooks/usePartnerUid'
 import { useChatSettings } from '../../hooks/useChatSettings'
 import { useMadLibs, DEMO_PARTNER_UID } from '../../hooks/useMadLibs'
+import { useGameInvite } from '../../hooks/useGameInvite'
 import { firebaseReady } from '../../firebase'
-import { MAD_LIBS_LIBRARY, madLibById } from '../../lib/madLibs'
+import { MAD_LIBS_LIBRARY, madLibById, renderMadLibText } from '../../lib/madLibs'
 import AnswerAvatar from '../AnswerAvatar'
 
 export default function MadLibsGame({ onBack }) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
   const [chatSettings] = useChatSettings()
-  const { stories, submitAnswers, playAgain } = useMadLibs()
+  const { stories, customStories, createCustomMadLib, submitAnswers, playAgain } = useMadLibs()
   const [activeStoryId, setActiveStoryId] = useState(null)
+  const [creating, setCreating] = useState(false)
+  const { sendInvite } = useGameInvite('madlibs', 'Mad Libs')
+  const [inviting, setInviting] = useState(false)
+  const [inviteMessage, setInviteMessage] = useState('')
+
+  async function handleInvite() {
+    setInviting(true)
+    try {
+      await sendInvite()
+      setInviteMessage("Invite sent — they'll get a notification!")
+      setTimeout(() => setInviteMessage(''), 2500)
+    } finally {
+      setInviting(false)
+    }
+  }
 
   // Same normalization as Q&A — avatars are keyed by the exact 'Scott'/
   // 'Cristina' strings used everywhere else, so both labels must always
@@ -21,8 +37,21 @@ export default function MadLibsGame({ onBack }) {
   const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
 
+  async function handleCreate(title, text) {
+    const result = await createCustomMadLib(title, text)
+    if (result.ok) {
+      setCreating(false)
+      setActiveStoryId(result.id)
+    }
+    return result
+  }
+
+  if (creating) {
+    return <CreateMadLibForm onSubmit={handleCreate} onBack={() => setCreating(false)} />
+  }
+
   if (activeStoryId) {
-    const story = madLibById(activeStoryId)
+    const story = madLibById(activeStoryId) || customStories.find((s) => s.id === activeStoryId)
     return (
       <MadLibDetail
         story={story}
@@ -37,6 +66,8 @@ export default function MadLibsGame({ onBack }) {
     )
   }
 
+  const allStories = [...MAD_LIBS_LIBRARY, ...customStories]
+
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
       <button
@@ -46,13 +77,32 @@ export default function MadLibsGame({ onBack }) {
       >
         ← Games
       </button>
-      <div>
-        <h1 className="font-display text-2xl italic text-ink">Mad Libs</h1>
-        <p className="font-hand text-lg text-ink-soft">fill in the blanks separately, then compare</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl italic text-ink">Mad Libs</h1>
+          <p className="font-hand text-lg text-ink-soft">fill in the blanks separately, then compare</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleInvite}
+          disabled={inviting}
+          className="shrink-0 rounded-full border border-rose/40 px-4 py-1.5 font-body text-xs font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {inviting ? 'Inviting…' : '📝 Invite partner'}
+        </button>
       </div>
+      {inviteMessage && <p className="text-center font-hand text-sm text-rose">{inviteMessage}</p>}
+
+      <button
+        type="button"
+        onClick={() => setCreating(true)}
+        className="flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-rose/40 px-4 py-3 font-body text-sm font-medium text-rose transition-colors hover:bg-blush-soft"
+      >
+        ✏️ Create your own
+      </button>
 
       <div className="space-y-2">
-        {MAD_LIBS_LIBRARY.map((story) => {
+        {allStories.map((story) => {
           const round = stories[story.id]
           const myDone = !!round?.answers?.[user.uid]
           const partnerDone = !!round?.answers?.[effectivePartnerUid]
@@ -65,7 +115,9 @@ export default function MadLibsGame({ onBack }) {
             >
               <div className="min-w-0 flex-1">
                 <p className="font-body text-sm text-ink">{story.title}</p>
-                <p className="mt-0.5 font-body text-xs text-ink-soft">{story.blanks.length} blanks</p>
+                <p className="mt-0.5 font-body text-xs text-ink-soft">
+                  {story.blanks.length} blanks{story.authorName ? ` · by ${story.authorName}` : ''}
+                </p>
               </div>
               <div className="flex shrink-0 gap-1.5">
                 <AnswerAvatar name={mineLabel} avatars={chatSettings.avatars} answered={myDone} />
@@ -75,6 +127,79 @@ export default function MadLibsGame({ onBack }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// `[bracketed]` segments become blanks, hinted by whatever's inside the
+// brackets — parseCustomMadLibText (via createCustomMadLib) does the actual
+// parsing; this just collects the title + text and surfaces a parse error
+// inline if there were no blanks to find.
+function CreateMadLibForm({ onSubmit, onBack }) {
+  const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function handleSubmit(event) {
+    event.preventDefault()
+    if (!text.trim()) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const result = await onSubmit(title, text)
+      if (!result.ok) setError(result.reason)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
+      <button
+        type="button"
+        onClick={onBack}
+        className="self-start font-body text-sm text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
+      >
+        ← Back
+      </button>
+      <h1 className="font-display text-2xl italic text-ink">Create your own</h1>
+      <p className="font-body text-sm text-ink-soft">
+        Write your story, wrapping each blank in <span className="font-medium text-ink">[brackets]</span> with a
+        hint — like "We went to <span className="font-medium text-ink">[a city]</span> and ate{' '}
+        <span className="font-medium text-ink">[a food]</span>." Each bracketed hint becomes its own blank for both
+        of you to fill in separately.
+      </p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <label className="block">
+          <span className="mb-1 block font-body text-sm font-medium text-ink">Title</span>
+          <input
+            type="text"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Our Silly Story"
+            className="w-full rounded-xl border border-ink/15 bg-white/70 px-3 py-2 font-body text-sm text-ink outline-none focus:border-rose"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block font-body text-sm font-medium text-ink">Story</span>
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            rows={8}
+            placeholder="Once upon a time, we went to [a place] and found a [an adjective] [a noun]..."
+            className="w-full rounded-xl border border-ink/15 bg-white/70 px-3 py-2 font-body text-sm text-ink outline-none focus:border-rose"
+          />
+        </label>
+        {error && <p className="font-body text-xs text-rose">{error}</p>}
+        <button
+          type="submit"
+          disabled={submitting || !text.trim()}
+          className="w-full rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {submitting ? 'Saving…' : 'Save & fill in'}
+        </button>
+      </form>
     </div>
   )
 }
@@ -109,8 +234,8 @@ function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmi
         </button>
         <h1 className="font-display text-2xl italic text-ink">{story.title}</h1>
         <div className="space-y-4">
-          <StoryCard label="Yours" text={story.template(myAnswers)} />
-          <StoryCard label={`${partnerLabel}'s`} text={story.template(partnerAnswers)} />
+          <StoryCard label="Yours" text={renderMadLibText(story, myAnswers)} />
+          <StoryCard label={`${partnerLabel}'s`} text={renderMadLibText(story, partnerAnswers)} />
         </div>
         <button
           type="button"

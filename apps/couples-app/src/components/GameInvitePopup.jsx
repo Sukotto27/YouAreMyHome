@@ -1,10 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { useDrawInvite } from '../hooks/useDrawInvite'
+import { useGameInvite } from '../hooks/useGameInvite'
 
-const DISMISS_KEY_PREFIX = 'you-are-my-home:draw-invite-dismissed:'
+const DISMISS_KEY_PREFIX = 'you-are-my-home:game-invite-dismissed:'
 const STALE_MS = 5 * 60 * 1000
+
+const GAME_EMOJI = {
+  draw: '🎨',
+  madlibs: '📝',
+  story: '📖',
+  farkle: '🎲',
+  obstacleDrop: '⚽',
+}
 
 function toMillis(value) {
   if (!value) return null
@@ -13,15 +21,18 @@ function toMillis(value) {
   return Number.isNaN(parsed) ? null : parsed
 }
 
-// Live counterpart to the push notification sent by notifyOnDrawInvite —
+// Live counterpart to the push notification sent by notifyOnGameInvite —
 // shown to whoever already has the app open when their partner taps
-// "Invite to draw." Same fixed inset-0 z-30 overlay template as NamePrompt/
-// CheckInReminder; dismissing is per-invite (sessionStorage keyed by invite
-// id) so a later, separate invite still gets its own popup.
-export default function DrawInvitePopup() {
+// "Invite partner" on any game screen. Same fixed inset-0 z-30 overlay
+// template as NamePrompt/CheckInReminder; dismissing is per-invite
+// (sessionStorage keyed by invite id) so a later, separate invite still
+// gets its own popup. Unlike a per-game hook instance, this one watches for
+// an invite to ANY game (no gameKey passed to useGameInvite) since it's
+// mounted once, globally, at the Shell level.
+export default function GameInvitePopup() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const { incoming } = useDrawInvite()
+  const { incoming } = useGameInvite()
   const [dismissedId, setDismissedId] = useState(null)
 
   if (!user || !incoming) return null
@@ -38,21 +49,26 @@ export default function DrawInvitePopup() {
 
   function acceptInvite() {
     dismiss()
-    navigate('/games', { state: { view: 'draw' } })
+    navigate('/games', { state: { view: incoming.game } })
   }
+
+  const emoji = GAME_EMOJI[incoming.game] || '🎮'
+  const label = incoming.gameLabel || 'a game'
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 px-6">
       <div className="w-full max-w-sm rounded-2xl bg-paper p-6 text-center shadow-xl">
-        <h2 className="font-display text-2xl italic text-ink">🎨 Draw together?</h2>
-        <p className="mt-1 font-body text-sm text-ink-soft">{incoming.fromName} wants to draw with you right now.</p>
+        <h2 className="font-display text-2xl italic text-ink">
+          {emoji} {label} together?
+        </h2>
+        <p className="mt-1 font-body text-sm text-ink-soft">{incoming.fromName} wants to play {label} with you!</p>
         <div className="mt-5 flex justify-center gap-3">
           <button
             type="button"
             onClick={acceptInvite}
             className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
           >
-            Let's draw
+            Let's play
           </button>
           <button
             type="button"

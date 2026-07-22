@@ -329,16 +329,19 @@ exports.sendDateNightReminders = onSchedule('every 15 minutes', async () => {
   }
 })
 
-// Unlike every other trigger here, this doc exists purely to cause a
-// notification — the client's useDrawInvite hook also listens to this same
-// collection live, so the write does double duty as the push (this) and the
-// in-app popup (client-side onSnapshot), the same way Thumbkiss's RTDB write
-// drives its overlay but without needing a push.
-exports.notifyOnDrawInvite = onDocumentCreated('drawInvites/{id}', async (event) => {
+// Shared by every game's "Invite partner" button (Draw, Mad Libs,
+// Never-Ending Story, Farkle, Obstacle Drop) rather than each having its own
+// invite collection/trigger — see the client's useGameInvite hook. Like the
+// old per-game invite docs, this one exists purely to cause a notification:
+// useGameInvite's onSnapshot listener on the same collection does double
+// duty as the in-app popup (GameInvitePopup), the same way Thumbkiss's RTDB
+// write drives its overlay but without needing a push.
+exports.notifyOnGameInvite = onDocumentCreated('gameInvites/{id}', async (event) => {
   const data = event.data.data()
+  const label = data.gameLabel || 'a game'
   await notifyPartner(data.fromUid, {
-    title: 'Draw with me?',
-    body: `${data.fromName || 'They'} wants to draw together right now`,
+    title: `${label} together?`,
+    body: `${data.fromName || 'They'} wants to play ${label} with you!`,
     url: '/YouAreMyHome/#/games',
   })
 })
@@ -376,7 +379,7 @@ exports.notifyOnFarkleTurn = onDocumentUpdated('farkleGame/{id}', async (event) 
   })
 })
 
-// A kiss or love note from the SendLoveMenu — like notifyOnDrawInvite, this
+// A kiss or love note from the SendLoveMenu — like notifyOnGameInvite, this
 // doc exists purely to cause a notification; the client's useLoveNotes hook
 // listens to the same collection live for the in-app popup.
 exports.notifyOnLoveNote = onDocumentCreated('loveNotes/{id}', async (event) => {

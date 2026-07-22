@@ -17,9 +17,9 @@ export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory
         href="/YouAreMyHome/game/"
         className="rounded-2xl border border-gold/40 bg-gold/10 px-4 py-4 text-left transition-colors hover:border-rose"
       >
-        <p className="font-body font-medium text-ink">The Home Game</p>
+        <p className="font-body font-medium text-ink">Our Little Paradise</p>
         <p className="mt-1 font-body text-xs text-ink-soft">
-          Our cozy co-op world — farm, build, and explore dungeons together
+          A place just for us
         </p>
       </a>
 
@@ -63,7 +63,12 @@ export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory
           onClick={onSelectObstacleDrop}
           className="rounded-2xl border border-teal/30 bg-white/60 px-4 py-4 text-left transition-colors hover:border-rose"
         >
-          <p className="font-body font-medium text-ink">Obstacle Drop</p>
+          <div className="flex items-center gap-2">
+            <p className="font-body font-medium text-ink">Obstacle Drop</p>
+            <span className="rounded-full bg-gold/20 px-2 py-0.5 font-body text-[10px] font-medium uppercase tracking-wide text-gold">
+              Work in progress
+            </span>
+          </div>
           <p className="mt-1 font-body text-xs text-ink-soft">
             Draw obstacles to steer the falling ball into your hole, not theirs
           </p>

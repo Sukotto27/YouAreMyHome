@@ -15,7 +15,7 @@ function toMillis(value) {
 // Live counterpart to the push notification sent by notifyOnLoveNote —
 // shown to whoever already has the app open when their partner sends a kiss
 // or love note from the SendLoveMenu. Same fixed inset-0 z-30 overlay
-// template as DrawInvitePopup, dismissed per-note (sessionStorage keyed by
+// template as GameInvitePopup, dismissed per-note (sessionStorage keyed by
 // note id) so a later, separate note still gets its own popup.
 export default function IncomingLoveNotePopup() {
   const { user } = useAuth()

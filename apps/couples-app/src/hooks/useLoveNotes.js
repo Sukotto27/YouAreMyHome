@@ -15,7 +15,7 @@ function readDemoUsedToday(key) {
   return Array.isArray(raw) ? {} : raw
 }
 
-// A kiss/love note ping — same double-duty write as useDrawInvite: a Cloud
+// A kiss/love note ping — same double-duty write as useGameInvite: a Cloud
 // Function trigger (notifyOnLoveNote) turns it into a push notification,
 // while this hook's live onSnapshot is what drives the in-app popup for
 // whoever's already got the app open. "Thinking of you"/"Wish you were
@@ -32,7 +32,7 @@ export function useLoveNotes() {
     if (!firebaseReady) {
       // Preview mode has no shared Firestore between the sender and the
       // simulated partner reply — a window event stands in, same trick
-      // useDrawInvite uses, so the incoming popup is still testable.
+      // useGameInvite uses, so the incoming popup is still testable.
       function handleDemoNote(event) {
         setNotes((prev) => [event.detail, ...prev])
       }

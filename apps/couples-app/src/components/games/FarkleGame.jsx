@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { usePartnerUid } from '../../hooks/usePartnerUid'
 import { useFarkle, DEMO_PARTNER_UID } from '../../hooks/useFarkle'
+import { useGameInvite } from '../../hooks/useGameInvite'
 import { firebaseReady } from '../../firebase'
 import { scoreSelection } from '../../lib/farkle'
 import { playSound } from '../../lib/sounds'
@@ -13,8 +14,12 @@ import { playSound } from '../../lib/sounds'
 export default function FarkleGame({ onBack }) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
-  const { game, myTurn, onBoardMin, targetScore, startGame, roll, keepSelected, bank } = useFarkle()
+  const { game, myTurn, onBoardMin, targetScore, startGame, cancelGame, roll, keepSelected, bank } = useFarkle()
   const [selected, setSelected] = useState([])
+  const [confirmAction, setConfirmAction] = useState(null) // null | 'restart' | 'cancel'
+  const { sendInvite } = useGameInvite('farkle', 'Farkle')
+  const [inviting, setInviting] = useState(false)
+  const [inviteMessage, setInviteMessage] = useState('')
 
   const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
   const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
@@ -24,6 +29,36 @@ export default function FarkleGame({ onBack }) {
   useEffect(() => {
     setSelected([])
   }, [game?.lastRoll, game?.awaitingKeep])
+
+  // Arming "Start over"/"Cancel game" requires a second tap within a few
+  // seconds — cheap insurance against a stray tap discarding a match that
+  // both of you are still in, without needing a whole confirm modal.
+  useEffect(() => {
+    if (!confirmAction) return
+    const timer = setTimeout(() => setConfirmAction(null), 4000)
+    return () => clearTimeout(timer)
+  }, [confirmAction])
+
+  function handleResetClick(action) {
+    if (confirmAction === action) {
+      setConfirmAction(null)
+      if (action === 'restart') startGame()
+      else cancelGame()
+      return
+    }
+    setConfirmAction(action)
+  }
+
+  async function handleInvite() {
+    setInviting(true)
+    try {
+      await sendInvite()
+      setInviteMessage("Invite sent — they'll get a notification!")
+      setTimeout(() => setInviteMessage(''), 2500)
+    } finally {
+      setInviting(false)
+    }
+  }
 
   async function handleRoll() {
     playSound('dice_roll')
@@ -58,13 +93,24 @@ export default function FarkleGame({ onBack }) {
           roll — but a roll with nothing scoring wipes out everything you haven't banked yet. First to{' '}
           {targetScore.toLocaleString()} wins, though the other person always gets one last turn to catch up.
         </p>
-        <button
-          type="button"
-          onClick={startGame}
-          className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-        >
-          {game ? 'New game' : 'Start Farkle'}
-        </button>
+        <div className="flex flex-wrap justify-center gap-3">
+          <button
+            type="button"
+            onClick={startGame}
+            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
+          >
+            {game ? 'New game' : 'Start Farkle'}
+          </button>
+          <button
+            type="button"
+            onClick={handleInvite}
+            disabled={inviting}
+            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {inviting ? 'Inviting…' : '🎲 Invite partner'}
+          </button>
+        </div>
+        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
       </div>
     )
   }
@@ -83,13 +129,31 @@ export default function FarkleGame({ onBack }) {
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
-      <button
-        type="button"
-        onClick={onBack}
-        className="self-start font-body text-sm text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
-      >
-        ← Games
-      </button>
+      <div className="flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="font-body text-sm text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
+        >
+          ← Games
+        </button>
+        <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={() => handleResetClick('restart')}
+            className="font-body text-xs text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
+          >
+            {confirmAction === 'restart' ? 'Tap again to start over' : 'Start over'}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleResetClick('cancel')}
+            className="font-body text-xs text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
+          >
+            {confirmAction === 'cancel' ? 'Tap again to cancel' : 'Cancel game'}
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <ScoreCard label={mineLabel} score={myScore} active={game.currentTurnUid === user.uid} />

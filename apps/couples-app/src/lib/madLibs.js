@@ -93,3 +93,47 @@ export const MAD_LIBS_LIBRARY = [
 export function madLibById(id) {
   return MAD_LIBS_LIBRARY.find((story) => story.id === id) || null
 }
+
+// Built-in stories carry a `template` function (baked in at build time, so it
+// can't be stored in Firestore); custom stories instead carry a plain
+// `parts`/`blanks` pair (see parseCustomMadLibText) that this stitches back
+// together the same way `template` would. Either shape renders through here.
+export function renderMadLibText(story, answers = {}) {
+  if (typeof story.template === 'function') return story.template(answers)
+
+  const parts = story.parts || []
+  const blanks = story.blanks || []
+  let out = parts[0] || ''
+  blanks.forEach((blank, i) => {
+    out += answers[blank.id] ?? '___'
+    out += parts[i + 1] || ''
+  })
+  return out
+}
+
+// Parses "create your own" input: anything in [brackets] becomes a blank,
+// hinted by whatever's inside the brackets — e.g. "We went to [a city] and
+// ate [a food]." becomes two blanks labeled "a city" and "a food", with the
+// surrounding text preserved as `parts` for renderMadLibText to reassemble.
+// Returns null if the text has no blanks at all (nothing to fill in).
+export function parseCustomMadLibText(text) {
+  const regex = /\[([^\]]+)\]/g
+  const parts = []
+  const blanks = []
+  let lastIndex = 0
+  let match
+  let i = 0
+
+  while ((match = regex.exec(text))) {
+    const label = match[1].trim()
+    if (!label) continue
+    parts.push(text.slice(lastIndex, match.index))
+    blanks.push({ id: `blank${i}`, label })
+    lastIndex = regex.lastIndex
+    i++
+  }
+  parts.push(text.slice(lastIndex))
+
+  if (blanks.length === 0) return null
+  return { parts, blanks }
+}

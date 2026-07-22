@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
+import { deleteDoc, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
@@ -78,6 +78,21 @@ export function useFarkle() {
   async function startGame() {
     if (!user) return
     await write(freshGame(user.uid))
+  }
+
+  // Two different escapes from a stuck/unwanted match: startGame (above)
+  // immediately begins a fresh one, while this one just ends the current
+  // match with nobody's turn pending, dropping both of you back to the
+  // "Start Farkle" screen — the only way out used to be finishing a match
+  // normally, which left no exit if you were mid-game and just wanted out
+  // (e.g. genuinely stuck waiting on a turn that isn't coming).
+  async function cancelGame() {
+    if (!firebaseReady) {
+      setGame(null)
+      writeDemoList(DEMO_KEY, [])
+      return
+    }
+    await deleteDoc(gameDocRef())
   }
 
   async function roll() {
@@ -211,6 +226,7 @@ export function useFarkle() {
     onBoardMin: ON_BOARD_MIN,
     targetScore: TARGET_SCORE,
     startGame,
+    cancelGame,
     roll,
     keepSelected,
     bank,

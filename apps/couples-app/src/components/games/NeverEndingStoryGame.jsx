@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useNeverEndingStory } from '../../hooks/useNeverEndingStory'
+import { useGameInvite } from '../../hooks/useGameInvite'
 
 // A single ever-growing story the two of you build one blank at a time —
 // whoever's turn it is fills in the blank left by the other, then
@@ -10,6 +11,20 @@ export default function NeverEndingStoryGame({ onBack }) {
   const { user } = useAuth()
   const { turns, pendingTurn, loading, startStory, fillAndContinue } = useNeverEndingStory()
   const partnerLabel = user.displayName === 'Cristina' ? 'Scott' : 'Cristina'
+  const { sendInvite } = useGameInvite('story', 'Never-Ending Story')
+  const [inviting, setInviting] = useState(false)
+  const [inviteMessage, setInviteMessage] = useState('')
+
+  async function handleInvite() {
+    setInviting(true)
+    try {
+      await sendInvite()
+      setInviteMessage("Invite sent — they'll get a notification!")
+      setTimeout(() => setInviteMessage(''), 2500)
+    } finally {
+      setInviting(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -31,10 +46,21 @@ export default function NeverEndingStoryGame({ onBack }) {
       >
         ← Games
       </button>
-      <div>
-        <h1 className="font-display text-2xl italic text-ink">Never-Ending Story</h1>
-        <p className="font-hand text-lg text-ink-soft">one blank at a time, forever in progress</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl italic text-ink">Never-Ending Story</h1>
+          <p className="font-hand text-lg text-ink-soft">one blank at a time, forever in progress</p>
+        </div>
+        <button
+          type="button"
+          onClick={handleInvite}
+          disabled={inviting}
+          className="shrink-0 rounded-full border border-rose/40 px-4 py-1.5 font-body text-xs font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {inviting ? 'Inviting…' : '📖 Invite partner'}
+        </button>
       </div>
+      {inviteMessage && <p className="text-center font-hand text-sm text-rose">{inviteMessage}</p>}
 
       {turns.length > 0 && (
         <div className="rounded-2xl border border-ink/10 bg-white/50 p-4">

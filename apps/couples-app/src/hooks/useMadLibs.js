@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { addDoc, collection, doc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
+import { addDoc, collection, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
+import { parseCustomMadLibText } from '../lib/madLibs'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
 
@@ -15,10 +16,13 @@ function readDemoMap(key) {
 // blank answers under `answers.{uid}` — same "hidden until both are in"
 // shape as Q&A rounds, but a single deterministic doc per story rather than
 // arbitrary rounds, since there's no need to browse a history here — just
-// "have we both filled this one in yet."
+// "have we both filled this one in yet." Works the same whether storyId
+// points at a built-in story (lib/madLibs.js) or a custom one either of you
+// wrote (customMadLibs/{storyId}, see createCustomMadLib).
 export function useMadLibs() {
   const { user } = useAuth()
   const [stories, setStories] = useState(firebaseReady ? {} : readDemoMap('madLibs'))
+  const [customStories, setCustomStories] = useState(firebaseReady ? [] : readDemoList('customMadLibs'))
 
   useEffect(() => {
     if (!firebaseReady) return
@@ -30,6 +34,46 @@ export function useMadLibs() {
       setStories(next)
     })
   }, [])
+
+  useEffect(() => {
+    if (!firebaseReady) return
+    const customQuery = query(collection(db, 'customMadLibs'), orderBy('createdAt', 'asc'))
+    return onSnapshot(customQuery, (snapshot) => {
+      setCustomStories(snapshot.docs.map((storyDoc) => ({ id: storyDoc.id, ...storyDoc.data() })))
+    })
+  }, [])
+
+  // `text` uses [bracket] blanks — see parseCustomMadLibText. Returns
+  // { ok, id } on success (id so the caller can jump straight into filling
+  // it out) or { ok: false, reason } if the text had no blanks to find.
+  async function createCustomMadLib(title, text) {
+    if (!user) return { ok: false, reason: 'Not signed in.' }
+    const parsed = parseCustomMadLibText(text)
+    if (!parsed) {
+      return { ok: false, reason: 'No blanks found — wrap each one in [brackets], like [a food].' }
+    }
+
+    const id = crypto.randomUUID()
+    const authorName = user.displayName || user.email
+    const story = {
+      id,
+      title: title.trim() || 'Untitled Story',
+      parts: parsed.parts,
+      blanks: parsed.blanks,
+      authorUid: user.uid,
+      authorName,
+    }
+
+    if (!firebaseReady) {
+      const next = [...customStories, { ...story, createdAt: new Date().toISOString() }]
+      setCustomStories(next)
+      writeDemoList('customMadLibs', next)
+      return { ok: true, id }
+    }
+
+    await setDoc(doc(db, 'customMadLibs', id), { ...story, createdAt: serverTimestamp() })
+    return { ok: true, id }
+  }
 
   async function submitAnswers(storyId, storyTitle, answers) {
     if (!user) return
@@ -100,5 +144,5 @@ export function useMadLibs() {
     await setDoc(doc(db, 'madLibs', storyId), { answers: {}, updatedAt: serverTimestamp() })
   }
 
-  return { stories, submitAnswers, playAgain }
+  return { stories, customStories, createCustomMadLib, submitAnswers, playAgain }
 }
