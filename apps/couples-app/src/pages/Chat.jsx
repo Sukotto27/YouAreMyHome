@@ -12,6 +12,7 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore'
+import { useNavigate } from 'react-router-dom'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { buildTimeline, toDate } from '../lib/chatGrouping'
@@ -22,6 +23,9 @@ import { chatFontClassName } from '../lib/chatFonts'
 import { textColorFor } from '../lib/bubbleColors'
 import { avatarFor } from '../lib/avatars'
 import { playSound } from '../lib/sounds'
+import { decryptJson, encryptJson } from '../lib/e2ee'
+import { useEncryptionKey } from '../hooks/useEncryptionKey'
+import EncryptionGate from '../components/EncryptionGate'
 import ChatMenu from '../components/chat/ChatMenu'
 import EmojiPicker from '../components/chat/EmojiPicker'
 import MessageActionMenu from '../components/chat/MessageActionMenu'
@@ -62,8 +66,32 @@ function renderMessageText(text) {
   )
 }
 
+// Messages/photos store their real content (text, image, link preview, and
+// the quoted-reply snippet) as one `encryptedContent` blob — everything else
+// on the doc (type, sender, timestamps, reactions, replyTo.{id,senderName})
+// is plaintext structural metadata. Docs without `encryptedContent` are
+// legacy pre-migration plaintext and pass through unchanged. `_locked` marks
+// a doc that has encryptedContent but couldn't be decrypted (no key, or a
+// key that doesn't match) — MessageBubble shows a placeholder for those.
+async function decryptMessage(message, cryptoKey) {
+  if (!message.encryptedContent) return message
+  if (!cryptoKey) return { ...message, _locked: true }
+  try {
+    const content = await decryptJson(message.encryptedContent, cryptoKey)
+    return {
+      ...message,
+      ...content,
+      replyTo: message.replyTo ? { ...message.replyTo, text: content.replyText } : null,
+    }
+  } catch {
+    return { ...message, _locked: true }
+  }
+}
+
 export default function Chat() {
+  const navigate = useNavigate()
   const { user } = useAuth()
+  const { hasKey, cryptoKey, saveKey } = useEncryptionKey()
   useMarkSeen('chat')
   const partnerSeenAt = usePartnerSeenAt('chat')
   const { partnerTyping, notifyTyping, stopTyping } = useTypingIndicator()
@@ -130,12 +158,17 @@ export default function Chat() {
       orderBy('createdAt', 'desc'),
       limit(RECENT_LIMIT),
     )
-    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-      setMessages(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).reverse())
+    // Keyed on cryptoKey so the moment a key becomes available (first setup,
+    // or switching from none to one), this re-subscribes and redecrypts
+    // everything currently in view instead of leaving it stuck as-loaded.
+    const unsubscribe = onSnapshot(messagesQuery, async (snapshot) => {
+      const raw = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).reverse()
+      const decrypted = await Promise.all(raw.map((message) => decryptMessage(message, cryptoKey)))
+      setMessages(decrypted)
       setMessagesLoaded(true)
     })
     return unsubscribe
-  }, [])
+  }, [cryptoKey])
 
   // Tracks whether the bottom sentinel is currently in view within the
   // scrolling message list — drives both the "jump to bottom" button and
@@ -245,13 +278,19 @@ export default function Chat() {
     setActiveMenu(null)
   }
 
+  // Split in two: `replyTo` is plain structural metadata (kept outside the
+  // encrypted blob so a bubble can render "replying to X" and jump-to-message
+  // before anything is decrypted); `buildReplyText()` is the actual quoted
+  // snippet, which now lives inside the new message's own encryptedContent
+  // as `replyText` instead of being duplicated in plaintext on `replyTo`.
   function buildReplySnapshot() {
     if (!replyingTo) return null
-    return {
-      id: replyingTo.id,
-      senderName: replyingTo.senderName,
-      text: replyingTo.type === 'image' ? '📷 Photo' : replyingTo.text,
-    }
+    return { id: replyingTo.id, senderName: replyingTo.senderName }
+  }
+
+  function buildReplyText() {
+    if (!replyingTo) return undefined
+    return replyingTo.type === 'image' ? '📷 Photo' : replyingTo.text
   }
 
   function startEditing(message) {
@@ -279,9 +318,15 @@ export default function Chat() {
           ),
         )
       } else {
+        // Preserve the existing quoted-reply snippet (if any) across the
+        // edit — it lives inside encryptedContent now, not on a plain
+        // `text` field, so it must be re-supplied on every re-encryption.
+        const replyText = editingMessage.replyTo?.text
+        const encryptedContent = await encryptJson({ text, replyText }, cryptoKey)
         await updateDoc(doc(db, 'messages', editingMessage.id), {
-          text,
+          encryptedContent,
           editedAt: serverTimestamp(),
+          text: deleteField(),
         })
       }
       setEditingMessage(null)
@@ -305,6 +350,7 @@ export default function Chat() {
     setDraft('')
     stopTyping()
     const replyTo = buildReplySnapshot()
+    const replyText = buildReplyText()
     setReplyingTo(null)
 
     if (!firebaseReady) {
@@ -314,7 +360,7 @@ export default function Chat() {
           id: crypto.randomUUID(),
           type: 'text',
           text,
-          replyTo,
+          replyTo: replyTo ? { ...replyTo, text: replyText } : null,
           senderUid: user.uid,
           senderName: user.displayName || user.email,
           createdAt: { toDate: () => new Date() },
@@ -327,9 +373,10 @@ export default function Chat() {
     }
 
     try {
+      const encryptedContent = await encryptJson({ text, replyText }, cryptoKey)
       await addDoc(collection(db, 'messages'), {
         type: 'text',
-        text,
+        encryptedContent,
         replyTo,
         senderUid: user.uid,
         senderName: user.displayName || user.email,
@@ -349,6 +396,7 @@ export default function Chat() {
 
     setUploadingImage(true)
     const replyTo = buildReplySnapshot()
+    const replyText = buildReplyText()
     setReplyingTo(null)
     try {
       const imageDataUrl = await resizeImageFile(file)
@@ -361,7 +409,7 @@ export default function Chat() {
             id: crypto.randomUUID(),
             type: 'image',
             imageDataUrl,
-            replyTo,
+            replyTo: replyTo ? { ...replyTo, text: replyText } : null,
             senderUid: user.uid,
             senderName,
             createdAt: { toDate: () => new Date() },
@@ -377,9 +425,11 @@ export default function Chat() {
         return
       }
 
+      const encryptedContent = await encryptJson({ imageDataUrl, replyText }, cryptoKey)
+      const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
       await addDoc(collection(db, 'messages'), {
         type: 'image',
-        imageDataUrl,
+        encryptedContent,
         replyTo,
         senderUid: user.uid,
         senderName,
@@ -388,7 +438,7 @@ export default function Chat() {
         lastActivityByUid: user.uid,
       })
       await addDoc(collection(db, 'gallery'), {
-        imageDataUrl,
+        encryptedImage,
         uploadedBy: user.uid,
         uploadedByName: senderName,
         createdAt: serverTimestamp(),
@@ -405,7 +455,8 @@ export default function Chat() {
     let all = messages
     if (firebaseReady) {
       const snapshot = await getDocs(query(collection(db, 'messages'), orderBy('createdAt', 'asc')))
-      all = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      const raw = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      all = await Promise.all(raw.map((message) => decryptMessage(message, cryptoKey)))
     }
 
     const lines = all.map((message) => {
@@ -413,7 +464,7 @@ export default function Chat() {
         dateStyle: 'medium',
         timeStyle: 'short',
       })
-      const body = message.type === 'image' ? '[photo]' : message.text
+      const body = message._locked ? '[encrypted message — key unavailable]' : message.type === 'image' ? '[photo]' : message.text
       const replyNote = message.replyTo ? ` (replying to ${message.replyTo.senderName}: "${message.replyTo.text}")` : ''
       return `[${stamp}] ${message.senderName}: ${body}${replyNote}`
     })
@@ -430,8 +481,22 @@ export default function Chat() {
   const backgroundStyle = backgroundStyleFor(chatSettings.background)
   const timeline = buildTimeline(messages)
 
+  if (!hasKey) {
+    return <EncryptionGate saveKey={saveKey} />
+  }
+
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
+      <div className="absolute left-4 top-3 z-10 sm:left-6">
+        <button
+          type="button"
+          onClick={() => navigate('/profile')}
+          aria-label="Your profile"
+          className="block h-9 w-9 overflow-hidden rounded-full ring-2 ring-offset-2 ring-offset-paper ring-rose transition-transform hover:scale-105"
+        >
+          <img src={avatarFor(user.displayName, chatSettings.avatars)} alt="" className="h-full w-full object-cover" />
+        </button>
+      </div>
       <div className="absolute right-4 top-3 z-10 flex items-center gap-2 sm:right-6">
         <button
           type="button"
@@ -452,6 +517,7 @@ export default function Chat() {
           onUpdateSettings={updateChatSettings}
           onExportHistory={handleExportHistory}
           onClose={() => setPickingMenu(false)}
+          cryptoKey={cryptoKey}
         />
       )}
 
@@ -698,7 +764,9 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegi
                 <p className="truncate">{message.replyTo.text}</p>
               </button>
             )}
-            {message.type === 'image' ? (
+            {message._locked ? (
+              <p className="italic text-inherit opacity-80">🔒 Encrypted — couldn't unlock with this device's key</p>
+            ) : message.type === 'image' ? (
               <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
             ) : message.type === 'link' ? (
               <a href={message.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-white">

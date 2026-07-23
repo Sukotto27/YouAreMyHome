@@ -5,10 +5,28 @@ import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
 import { resizeImageFile } from '../lib/image'
 import { useMarkSeen } from '../hooks/useMarkSeen'
+import { decryptJson, encryptJson } from '../lib/e2ee'
+import { useEncryptionKey } from '../hooks/useEncryptionKey'
+import EncryptionGate from '../components/EncryptionGate'
 import CommentThread from '../components/CommentThread'
+
+// A doc without encryptedImage is legacy pre-migration plaintext and passes
+// through unchanged. One that has it but can't be decrypted (no/wrong key)
+// is marked _locked rather than shown broken.
+async function decryptPhoto(photo, cryptoKey) {
+  if (!photo.encryptedImage) return photo
+  if (!cryptoKey) return { ...photo, _locked: true }
+  try {
+    const { imageDataUrl } = await decryptJson(photo.encryptedImage, cryptoKey)
+    return { ...photo, imageDataUrl }
+  } catch {
+    return { ...photo, _locked: true }
+  }
+}
 
 export default function Gallery() {
   const { user } = useAuth()
+  const { hasKey, cryptoKey, saveKey } = useEncryptionKey()
   useMarkSeen('gallery')
   const [photos, setPhotos] = useState(firebaseReady ? [] : readDemoList('gallery'))
   const [selected, setSelected] = useState(null)
@@ -18,11 +36,12 @@ export default function Gallery() {
   useEffect(() => {
     if (!firebaseReady) return
     const photosQuery = query(collection(db, 'gallery'), orderBy('createdAt', 'desc'))
-    const unsubscribe = onSnapshot(photosQuery, (snapshot) => {
-      setPhotos(snapshot.docs.map((photoDoc) => ({ id: photoDoc.id, ...photoDoc.data() })))
+    const unsubscribe = onSnapshot(photosQuery, async (snapshot) => {
+      const raw = snapshot.docs.map((photoDoc) => ({ id: photoDoc.id, ...photoDoc.data() }))
+      setPhotos(await Promise.all(raw.map((photo) => decryptPhoto(photo, cryptoKey))))
     })
     return unsubscribe
-  }, [])
+  }, [cryptoKey])
 
   async function handleFileChange(event) {
     const file = event.target.files?.[0]
@@ -48,8 +67,9 @@ export default function Gallery() {
         return
       }
 
+      const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
       await addDoc(collection(db, 'gallery'), {
-        imageDataUrl,
+        encryptedImage,
         uploadedBy: user.uid,
         uploadedByName: user.displayName || user.email,
         createdAt: serverTimestamp(),
@@ -62,6 +82,10 @@ export default function Gallery() {
     }
   }
 
+  if (!hasKey) {
+    return <EncryptionGate saveKey={saveKey} />
+  }
+
   if (selected) {
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
@@ -72,12 +96,23 @@ export default function Gallery() {
         >
           ← Back to gallery
         </button>
-        <img src={selected.imageDataUrl} alt="" className="w-full rounded-3xl border border-ink/10" />
+        {selected._locked ? (
+          <div className="flex aspect-square w-full items-center justify-center rounded-3xl border border-ink/10 bg-white/40">
+            <p className="font-hand text-lg text-ink-soft">🔒 Encrypted — couldn't unlock with this device's key</p>
+          </div>
+        ) : (
+          <img src={selected.imageDataUrl} alt="" className="w-full rounded-3xl border border-ink/10" />
+        )}
         <p className="text-center font-hand text-lg text-ink-soft">
           from {selected.uploadedByName} · {formatDate(selected.createdAt)}
         </p>
         <div className="rounded-2xl border border-ink/10 bg-white/40 p-4">
-          <CommentThread collectionName="gallery" parentId={selected.id} />
+          <CommentThread
+            collectionName="gallery"
+            parentId={selected.id}
+            encrypt={(fields) => encryptJson(fields, cryptoKey)}
+            decrypt={(blob) => decryptJson(blob, cryptoKey)}
+          />
         </div>
       </div>
     )
@@ -117,7 +152,11 @@ export default function Gallery() {
               onClick={() => setSelected(photo)}
               className="overflow-hidden rounded-2xl border border-ink/10 transition-transform hover:-translate-y-0.5"
             >
-              <img src={photo.imageDataUrl} alt="" className="aspect-square w-full object-cover" />
+              {photo._locked ? (
+                <div className="flex aspect-square w-full items-center justify-center bg-white/60 text-2xl">🔒</div>
+              ) : (
+                <img src={photo.imageDataUrl} alt="" className="aspect-square w-full object-cover" />
+              )}
             </button>
           ))}
         </div>

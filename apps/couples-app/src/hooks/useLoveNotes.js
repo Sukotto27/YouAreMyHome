@@ -58,11 +58,19 @@ export function useLoveNotes() {
 
   const incoming = notes.find((note) => note.fromUid !== user.uid) || null
 
-  async function send(category, kind) {
+  async function send(category, kind, replyToId) {
     if (!user) return
     const fromName = user.displayName || user.email
     const def = kindDef(category, kind)
-    const note = { fromUid: user.uid, fromName, category, kind, emoji: def.emoji, message: def.message(fromName) }
+    const note = {
+      fromUid: user.uid,
+      fromName,
+      category,
+      kind,
+      emoji: def.emoji,
+      message: def.message(fromName),
+      ...(replyToId ? { replyToId } : {}),
+    }
 
     if (!firebaseReady) {
       const withId = { ...note, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
@@ -73,7 +81,9 @@ export function useLoveNotes() {
         setUsedToday(next)
       }
       // Simulate the partner sending one back a moment later, purely so the
-      // reply flow is visible to test without a second device.
+      // reply flow is visible to test without a second device. Marked as a
+      // reply to withId so the popup on this side doesn't loop into another
+      // "send one back" prompt.
       setTimeout(() => {
         window.dispatchEvent(
           new CustomEvent(DEMO_EVENT, {
@@ -85,6 +95,7 @@ export function useLoveNotes() {
               kind,
               emoji: def.emoji,
               message: def.message('Your partner'),
+              replyToId: withId.id,
               createdAt: new Date(),
             },
           }),
@@ -108,7 +119,7 @@ export function useLoveNotes() {
   }
 
   function sendReply(note) {
-    return send(note.category, note.kind)
+    return send(note.category, note.kind, note.id)
   }
 
   return { incoming, usedToday, sendKiss, sendNote, sendReply }

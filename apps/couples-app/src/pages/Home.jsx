@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import RelationshipCounter from '../components/counter/RelationshipCounter'
 import InstallBanner from '../components/InstallBanner'
 import NotificationBanner from '../components/NotificationBanner'
@@ -5,14 +6,16 @@ import LocationClocks from '../components/LocationClocks'
 import MoodBubble from '../components/MoodBubble'
 import { useAuth } from '../context/AuthContext'
 import { useMoods } from '../hooks/useMoods'
+import { useChatSettings } from '../hooks/useChatSettings'
+import { avatarFor, preferredNameFor } from '../lib/avatars'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
-import cristina from '../assets/images/cristina.jpg'
-import scott from '../assets/images/scott.jpg'
 
 export default function Home() {
+  const navigate = useNavigate()
   const { user } = useAuth()
   const { moods, setMyMood } = useMoods()
+  const [chatSettings] = useChatSettings()
 
   return (
     <div className="relative flex flex-1 flex-col overflow-y-auto">
@@ -58,21 +61,23 @@ export default function Home() {
 
         <div className="flex items-start gap-6 sm:gap-10">
           <Avatar
-            src={cristina}
-            name="Cristina"
+            src={avatarFor('Cristina', chatSettings.avatars)}
+            name={preferredNameFor('Cristina', chatSettings.preferredNames)}
             ring="ring-blush"
             mood={moodFor('Cristina', user, moods)}
             isMine={user.displayName === 'Cristina'}
             onSetMood={setMyMood}
+            onOpenProfile={() => navigate('/profile')}
           />
           <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
           <Avatar
-            src={scott}
-            name="Scott"
+            src={avatarFor('Scott', chatSettings.avatars)}
+            name={preferredNameFor('Scott', chatSettings.preferredNames)}
             ring="ring-teal"
             mood={moodFor('Scott', user, moods)}
             isMine={user.displayName === 'Scott'}
             onSetMood={setMyMood}
+            onOpenProfile={() => navigate('/profile')}
           />
         </div>
 
@@ -94,13 +99,16 @@ function moodFor(name, user, moods) {
   return partnerEntry?.[1]
 }
 
-function Avatar({ src, name, ring, mood, isMine, onSetMood }) {
+function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenProfile }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <img
         src={src}
         alt={name}
-        className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring}`}
+        onClick={isMine ? onOpenProfile : undefined}
+        className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring} ${
+          isMine ? 'cursor-pointer transition-transform hover:scale-105' : ''
+        }`}
       />
       <span className="font-body text-sm text-ink-soft">{name}</span>
       <MoodBubble mood={mood} isMine={isMine} onSetMood={onSetMood} />

@@ -41,13 +41,21 @@ export default function IncomingLoveNotePopup() {
     setReplied(true)
   }
 
+  // A note carrying replyToId is itself the partner's reply to something we
+  // sent — offering "send one back" here would just ping-pong forever, so
+  // this case only ever gets a close button.
+  const isReply = !!incoming.replyToId
+
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 px-6">
       <div className="w-full max-w-sm rounded-2xl bg-paper p-6 text-center shadow-xl">
         <p className="text-4xl">{incoming.emoji}</p>
         <p className="mt-3 font-display text-xl italic text-ink">{incoming.message}</p>
+        {isReply && (
+          <p className="mt-1 font-body text-sm text-ink-soft">Sent back to you 💕</p>
+        )}
         <div className="mt-5 flex justify-center gap-3">
-          {!replied && (
+          {!replied && !isReply && (
             <button
               type="button"
               onClick={reply}
@@ -61,7 +69,7 @@ export default function IncomingLoveNotePopup() {
             onClick={dismiss}
             className="rounded-full border border-ink/15 px-6 py-2.5 font-body font-medium text-ink-soft transition-colors hover:border-rose hover:text-rose"
           >
-            {replied ? 'Close' : 'Not now'}
+            {replied || isReply ? 'Close' : 'Not now'}
           </button>
         </div>
       </div>

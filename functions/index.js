@@ -121,11 +121,21 @@ function mirrorToJournal(fields) {
   return db.collection('journalEvents').add({ createdAt: FieldValue.serverTimestamp(), ...fields })
 }
 
+// Chat is end-to-end encrypted client-side — `data.text` doesn't exist
+// server-side (it's inside `encryptedContent`, which this function never
+// touches), so the body is generic by type rather than a content preview.
 exports.notifyOnMessage = onDocumentCreated('messages/{id}', async (event) => {
   const data = event.data.data()
+  const senderName = data.senderName || 'They'
+  const body =
+    data.type === 'image'
+      ? `${senderName} sent a photo`
+      : data.type === 'link'
+        ? `${senderName} shared a link`
+        : `${senderName} sent a message`
   await notifyPartner(data.senderUid, {
     title: 'New message',
-    body: data.type === 'image' ? `${data.senderName || 'They'} sent a photo` : truncate(data.text),
+    body,
     url: '/YouAreMyHome/#/chat',
   })
 })
@@ -156,12 +166,12 @@ exports.notifyOnReaction = onDocumentUpdated('messages/{id}', async (event) => {
   }
 
   const isSelfReact = after.senderUid === reactorUid
-  const preview = after.type === 'image' ? 'a photo' : truncate(after.text)
-  const target = isSelfReact ? 'their own message' : 'your message'
+  const target = isSelfReact ? 'their own' : 'your'
+  const kind = after.type === 'image' ? 'photo' : 'message'
 
   await notifyPartner(reactorUid, {
     title: 'New reaction',
-    body: `${reactorName} reacted ${emoji} to ${target}${preview ? `: ${preview}` : ''}`,
+    body: `${reactorName} reacted ${emoji} to ${target} ${kind}`,
     url: '/YouAreMyHome/#/chat',
   })
 })
@@ -201,12 +211,17 @@ exports.notifyOnGallery = onDocumentCreated('gallery/{id}', async (event) => {
       body: `${data.uploadedByName || 'They'} added a photo to the gallery`,
       url: '/YouAreMyHome/#/gallery',
     }),
+    // Gallery photos are end-to-end encrypted client-side — a doc created
+    // after that shipped has `encryptedImage`, not `imageDataUrl`. Passing
+    // through whichever field actually exists (never both, never neither)
+    // avoids writing an explicit `undefined`, which Firestore's Admin SDK
+    // rejects and would otherwise throw on every future gallery upload.
     mirrorToJournal({
       type: 'gallery',
       sourceId: event.params.id,
-      imageDataUrl: data.imageDataUrl,
       authorUid: data.uploadedBy,
       authorName: data.uploadedByName,
+      ...(data.encryptedImage ? { encryptedImage: data.encryptedImage } : { imageDataUrl: data.imageDataUrl }),
     }),
   ])
 })
@@ -395,7 +410,10 @@ exports.notifyOnLoveNote = onDocumentCreated('loveNotes/{id}', async (event) => 
 // (which is what the badge queries above actually look at) and its
 // commentCount, then notifies the partner the same way every other feature
 // does. Comments are add-only in v1 — no decrement path needed.
-function notifyOnComment(parentCollection, { title, url }) {
+// contentEncrypted: true (only gallery comments, so far) means
+// `comment.text` doesn't exist server-side — it's inside encryptedContent,
+// which this function never touches — so the body drops the text preview.
+function notifyOnComment(parentCollection, { title, url, contentEncrypted = false }) {
   return onDocumentCreated(`${parentCollection}/{parentId}/comments/{commentId}`, async (event) => {
     const comment = event.data.data()
     const parentRef = db.doc(`${parentCollection}/${event.params.parentId}`)
@@ -404,9 +422,10 @@ function notifyOnComment(parentCollection, { title, url }) {
       lastActivityByUid: comment.authorUid,
       commentCount: FieldValue.increment(1),
     })
+    const authorName = comment.authorName || 'They'
     await notifyPartner(comment.authorUid, {
       title,
-      body: `${comment.authorName || 'They'} commented: ${truncate(comment.text)}`,
+      body: contentEncrypted ? `${authorName} commented` : `${authorName} commented: ${truncate(comment.text)}`,
       url,
     })
   })
@@ -422,6 +441,7 @@ exports.notifyOnScrapbookComment = notifyOnComment('scrapbook', {
   url: '/YouAreMyHome/#/games',
 })
 exports.notifyOnGalleryComment = notifyOnComment('gallery', {
+  contentEncrypted: true,
   title: 'New comment',
   url: '/YouAreMyHome/#/gallery',
 })

@@ -1,6 +1,10 @@
 // Resize + re-encode an image file client-side so it fits comfortably inside
 // a Firestore document (1MiB limit) instead of needing Cloud Storage.
-export function resizeImageFile(file, { maxDimension = 1600, quality = 0.75 } = {}) {
+// maxDimension/quality are tuned to leave headroom for chat/gallery images
+// being wrapped in an encrypted (AES-GCM + base64) envelope, which adds
+// roughly another 33% on top of this data URL's own base64 size — a photo
+// sized right up against 1MiB before encryption would fail to write after.
+export function resizeImageFile(file, { maxDimension = 1280, quality = 0.65 } = {}) {
   return new Promise((resolve, reject) => {
     const img = new Image()
     const objectUrl = URL.createObjectURL(file)

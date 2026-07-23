@@ -4,6 +4,9 @@ import { addDoc, collection, serverTimestamp } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { resizeImageFile } from '../lib/image'
+import { encryptJson } from '../lib/e2ee'
+import { useEncryptionKey } from '../hooks/useEncryptionKey'
+import EncryptionGate from '../components/EncryptionGate'
 
 const SHARE_CACHE = 'share-target-v1'
 const PROJECT_ID = import.meta.env.VITE_FIREBASE_PROJECT_ID
@@ -23,6 +26,7 @@ function safeHostname(url) {
 // this app (Chat/Mail/Calendar).
 export default function ShareTarget() {
   const { user } = useAuth()
+  const { hasKey, cryptoKey, saveKey } = useEncryptionKey()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [imageDataUrl, setImageDataUrl] = useState(null)
@@ -81,16 +85,18 @@ export default function ShareTarget() {
       const senderName = user.displayName || user.email
 
       if (imageDataUrl && firebaseReady) {
+        const encryptedContent = await encryptJson({ imageDataUrl }, cryptoKey)
+        const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
         await addDoc(collection(db, 'messages'), {
           type: 'image',
-          imageDataUrl,
+          encryptedContent,
           replyTo: null,
           senderUid: user.uid,
           senderName,
           createdAt: serverTimestamp(),
         })
         await addDoc(collection(db, 'gallery'), {
-          imageDataUrl,
+          encryptedImage,
           uploadedBy: user.uid,
           uploadedByName: senderName,
           createdAt: serverTimestamp(),
@@ -99,13 +105,19 @@ export default function ShareTarget() {
           commentCount: 0,
         })
       } else if (sharedUrl && firebaseReady) {
+        const encryptedContent = await encryptJson(
+          {
+            url: sharedUrl,
+            previewTitle: preview?.title || null,
+            previewImage: preview?.image || null,
+            previewDomain: preview?.domain || safeHostname(sharedUrl),
+            caption: caption.trim() || null,
+          },
+          cryptoKey,
+        )
         await addDoc(collection(db, 'messages'), {
           type: 'link',
-          url: sharedUrl,
-          previewTitle: preview?.title || null,
-          previewImage: preview?.image || null,
-          previewDomain: preview?.domain || safeHostname(sharedUrl),
-          caption: caption.trim() || null,
+          encryptedContent,
           replyTo: null,
           senderUid: user.uid,
           senderName,
@@ -124,6 +136,10 @@ export default function ShareTarget() {
         <p className="font-hand text-2xl text-ink-soft">just a moment...</p>
       </div>
     )
+  }
+
+  if (!hasKey) {
+    return <EncryptionGate saveKey={saveKey} />
   }
 
   const domain = preview?.domain || (sharedUrl ? safeHostname(sharedUrl) : null)

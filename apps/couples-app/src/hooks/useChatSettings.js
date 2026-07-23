@@ -5,14 +5,16 @@ import { DEFAULT_CHAT_BACKGROUND } from '../lib/chatBackgrounds'
 import { DEFAULT_CHAT_FONT } from '../lib/chatFonts'
 
 // A single shared document, not per-device localStorage — chat background,
-// font, and bubble colors are things the two of us decide on together, so
-// either person changing them should update it for both, live.
+// font, bubble colors, avatars, and preferred names are things the two of us
+// each set for ourselves but that the other should see live, so one shared
+// doc (rather than per-account state) is what both Chat and Profile read from.
 const STORAGE_KEY = 'you-are-my-home:chat-settings'
 const DEFAULT_SETTINGS = {
   background: DEFAULT_CHAT_BACKGROUND,
   font: DEFAULT_CHAT_FONT,
   bubbleColors: {},
   avatars: {},
+  preferredNames: {},
 }
 
 function readLocal() {
@@ -50,6 +52,9 @@ export function useChatSettings() {
         ? { ...settings.bubbleColors, ...partial.bubbleColors }
         : settings.bubbleColors,
       avatars: partial.avatars ? { ...settings.avatars, ...partial.avatars } : settings.avatars,
+      preferredNames: partial.preferredNames
+        ? { ...settings.preferredNames, ...partial.preferredNames }
+        : settings.preferredNames,
     }
     setSettings(next)
     if (!firebaseReady) {

@@ -9,7 +9,12 @@ import { toDate } from '../lib/chatGrouping'
 // Scrapbook drawing, and a Gallery photo — same collection shape
 // (`{collectionName}/{parentId}/comments`) under all four. Add-only in v1,
 // no comment edit/delete.
-export default function CommentThread({ collectionName, parentId }) {
+//
+// `encrypt`/`decrypt` are optional (async) callbacks — only Gallery.jsx
+// passes them, since gallery-photo comments are the only ones in the
+// Chat/Gallery encryption scope. Left undefined (Calendar/QA/Scrapbook),
+// behavior is exactly what it was before encryption existed.
+export default function CommentThread({ collectionName, parentId, encrypt, decrypt }) {
   const { user } = useAuth()
   const demoKey = `comments:${collectionName}:${parentId}`
   const [comments, setComments] = useState(firebaseReady ? [] : readDemoList(demoKey))
@@ -22,11 +27,24 @@ export default function CommentThread({ collectionName, parentId }) {
       collection(db, collectionName, parentId, 'comments'),
       orderBy('createdAt', 'asc'),
     )
-    const unsubscribe = onSnapshot(commentsQuery, (snapshot) => {
-      setComments(snapshot.docs.map((commentDoc) => ({ id: commentDoc.id, ...commentDoc.data() })))
+    const unsubscribe = onSnapshot(commentsQuery, async (snapshot) => {
+      const raw = snapshot.docs.map((commentDoc) => ({ id: commentDoc.id, ...commentDoc.data() }))
+      const resolved = decrypt
+        ? await Promise.all(
+            raw.map(async (comment) => {
+              if (!comment.encryptedContent) return comment
+              try {
+                return { ...comment, ...(await decrypt(comment.encryptedContent)) }
+              } catch {
+                return { ...comment, text: '🔒 Encrypted — couldn\'t unlock with this device\'s key' }
+              }
+            }),
+          )
+        : raw
+      setComments(resolved)
     })
     return unsubscribe
-  }, [collectionName, parentId])
+  }, [collectionName, parentId, decrypt])
 
   async function handleSubmit(event) {
     event.preventDefault()
@@ -48,6 +66,13 @@ export default function CommentThread({ collectionName, parentId }) {
           const next = [...prev, entry]
           writeDemoList(demoKey, next)
           return next
+        })
+      } else if (encrypt) {
+        await addDoc(collection(db, collectionName, parentId, 'comments'), {
+          encryptedContent: await encrypt({ text: trimmed }),
+          authorUid: user.uid,
+          authorName,
+          createdAt: serverTimestamp(),
         })
       } else {
         await addDoc(collection(db, collectionName, parentId, 'comments'), {

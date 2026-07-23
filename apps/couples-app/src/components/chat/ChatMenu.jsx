@@ -8,6 +8,25 @@ import { CHAT_FONTS } from '../../lib/chatFonts'
 import { BUBBLE_COLORS } from '../../lib/bubbleColors'
 import { AVATAR_PRESETS } from '../../lib/avatarOptions'
 import { squareThumbnailFromUrl } from '../../lib/image'
+import { decryptJson } from '../../lib/e2ee'
+
+// Fetched independently of Gallery.jsx's own onSnapshot, so encrypted photos
+// need their own decrypt step here too. Legacy plaintext photos (no
+// encryptedImage field) pass through unchanged; a photo this device can't
+// decrypt (no key yet) is dropped from the picker rather than shown broken —
+// picking a background/avatar from the gallery already isn't reachable
+// until Chat's own EncryptionGate has been satisfied, so cryptoKey should
+// normally be present by the time this runs.
+async function decryptGalleryPhoto(photo, cryptoKey) {
+  if (!photo.encryptedImage) return photo
+  if (!cryptoKey) return null
+  try {
+    const { imageDataUrl } = await decryptJson(photo.encryptedImage, cryptoKey)
+    return { ...photo, imageDataUrl }
+  } catch {
+    return null
+  }
+}
 
 const TABS = [
   { id: 'background', label: 'Background' },
@@ -18,31 +37,40 @@ const TABS = [
 
 const GALLERY_LIMIT = 18
 
-export default function ChatMenu({ settings, onUpdateSettings, onExportHistory, onClose }) {
+export default function ChatMenu({ settings, onUpdateSettings, onExportHistory, onClose, cryptoKey }) {
   const { user } = useAuth()
   const [tab, setTab] = useState('background')
   const [galleryPhotos, setGalleryPhotos] = useState([])
   const [pickingAvatar, setPickingAvatar] = useState(false)
 
   useEffect(() => {
-    if (!firebaseReady) {
-      setGalleryPhotos(readDemoList('gallery').slice(0, GALLERY_LIMIT))
-      return
-    }
     let cancelled = false
-    getDocs(query(collection(db, 'gallery'), orderBy('createdAt', 'desc'), limit(GALLERY_LIMIT))).then(
-      (snapshot) => {
-        if (!cancelled) setGalleryPhotos(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })))
-      },
-    )
+
+    async function load() {
+      const raw = firebaseReady
+        ? (
+            await getDocs(query(collection(db, 'gallery'), orderBy('createdAt', 'desc'), limit(GALLERY_LIMIT)))
+          ).docs.map((d) => ({ id: d.id, ...d.data() }))
+        : readDemoList('gallery').slice(0, GALLERY_LIMIT)
+      const decrypted = (await Promise.all(raw.map((photo) => decryptGalleryPhoto(photo, cryptoKey)))).filter(Boolean)
+      if (!cancelled) setGalleryPhotos(decrypted)
+    }
+
+    load()
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [cryptoKey])
 
   const myColor = settings.bubbleColors[user.displayName]
   const myAvatar = settings.avatars[user.displayName]
 
+  // Known accepted gap: picking a gallery photo as a background or avatar
+  // below writes its (already-decrypted) imageDataUrl into settings/chat,
+  // a doc outside the Chat/Gallery encryption scheme — so a photo used this
+  // way keeps a plaintext copy there even after the source gallery photo is
+  // encrypted or deleted. Same pre-existing tradeoff as gallery-photo-as-
+  // avatar already had before encryption existed; not fixed in this pass.
   async function chooseGalleryAvatar(photo) {
     setPickingAvatar(true)
     try {

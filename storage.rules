@@ -1,0 +1,11 @@
+rules_version = '2';
+
+// Same model as firestore.rules — no public sign-up, so "signed in" already
+// means "one of the two of us." Avatars are the only thing stored here.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /avatars/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

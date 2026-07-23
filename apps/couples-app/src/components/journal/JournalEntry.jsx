@@ -40,15 +40,27 @@ function Body({ entry, isMine }) {
         </p>
       )
     case 'scrapbook':
-    case 'gallery':
       return (
         <div>
-          <p className="mb-2 font-body text-sm text-ink">
-            {isMine ? 'You' : entry.authorName} {entry.type === 'scrapbook' ? 'saved a drawing' : 'added a photo'}
-          </p>
+          <p className="mb-2 font-body text-sm text-ink">{isMine ? 'You' : entry.authorName} saved a drawing</p>
           {entry.imageDataUrl && (
             <img src={entry.imageDataUrl} alt="" className="h-24 w-24 rounded-xl object-cover" />
           )}
+        </div>
+      )
+    case 'gallery':
+      return (
+        <div>
+          <p className="mb-2 font-body text-sm text-ink">{isMine ? 'You' : entry.authorName} added a photo</p>
+          {entry.imageDataUrl ? (
+            <img src={entry.imageDataUrl} alt="" className="h-24 w-24 rounded-xl object-cover" />
+          ) : entry.encryptedImage ? (
+            // Gallery photos are end-to-end encrypted; Journal has no
+            // decryption key context by design, so a mirrored photo shows
+            // as a placeholder here rather than as a broken image. See it
+            // decrypted in Gallery itself.
+            <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-white/60 text-2xl">🔒</div>
+          ) : null}
         </div>
       )
     case 'custom':
