@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   addDoc,
   collection,
+  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -24,11 +25,13 @@ import { textColorFor } from '../lib/bubbleColors'
 import { avatarFor } from '../lib/avatars'
 import { playSound } from '../lib/sounds'
 import { decryptJson, encryptJson } from '../lib/e2ee'
+import { downloadDataUrl } from '../lib/downloadImage'
 import { useEncryptionKey } from '../hooks/useEncryptionKey'
 import EncryptionGate from '../components/EncryptionGate'
 import ChatMenu from '../components/chat/ChatMenu'
 import EmojiPicker from '../components/chat/EmojiPicker'
 import MessageActionMenu from '../components/chat/MessageActionMenu'
+import SendImageModal from '../components/chat/SendImageModal'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { useLongPress } from '../hooks/useLongPress'
 import { useMarkSeen } from '../hooks/useMarkSeen'
@@ -41,6 +44,26 @@ const RECENT_LIMIT = 200
 // so no line-height math is needed to enforce the 3-line limit exactly.
 const MAX_INPUT_HEIGHT = 84
 const URL_PATTERN = /(https?:\/\/[^\s]+)/g
+const VANISH_MS = 60_000
+const AUTO_DOWNLOADED_KEY = 'you-are-my-home:auto-downloaded-image-ids'
+
+function readAutoDownloadedIds() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(AUTO_DOWNLOADED_KEY)) || [])
+  } catch {
+    return new Set()
+  }
+}
+
+function rememberAutoDownloadedIds(ids) {
+  try {
+    // Cap so this can't grow unbounded over years of chat history.
+    localStorage.setItem(AUTO_DOWNLOADED_KEY, JSON.stringify([...ids].slice(-500)))
+  } catch {
+    // storage full/unavailable — worst case a photo gets auto-downloaded
+    // twice, which is harmless
+  }
+}
 
 // Splits plain message text on URLs and turns those into real links —
 // separate from the rich-preview `type: 'link'` messages the share-target
@@ -104,6 +127,7 @@ export default function Chat() {
   const [replyingTo, setReplyingTo] = useState(null)
   const [editingMessage, setEditingMessage] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [pendingImage, setPendingImage] = useState(null)
   const [activeMenu, setActiveMenu] = useState(null)
   const [atBottom, setAtBottomState] = useState(true)
   const bottomRef = useRef(null)
@@ -169,6 +193,64 @@ export default function Chat() {
     })
     return unsubscribe
   }, [cryptoKey])
+
+  // Deletes a vanishing image 1 minute after `viewedAt` is set (see
+  // revealVanishingImage) — scheduled on whichever device(s) currently have
+  // Chat open. If both devices are closed when the minute is up, whichever
+  // one opens Chat next re-runs this and fires the overdue deletion
+  // immediately (remaining <= 0), so nothing lingers forever. A scheduled
+  // Cloud Function (expireVanishingImages) backstops this for the case
+  // where neither device reopens Chat for a while.
+  const vanishTimersRef = useRef({})
+  useEffect(() => {
+    const scheduled = vanishTimersRef.current
+    for (const message of messages) {
+      if (!message.vanishing || !message.viewedAt || scheduled[message.id]) continue
+      const remaining = VANISH_MS - (Date.now() - toDate(message.viewedAt).getTime())
+      scheduled[message.id] = setTimeout(() => {
+        delete scheduled[message.id]
+        if (firebaseReady) {
+          deleteDoc(doc(db, 'messages', message.id)).catch(() => {})
+        } else {
+          setMessages((prev) => prev.filter((m) => m.id !== message.id))
+        }
+      }, Math.max(0, remaining))
+    }
+    const stillPresent = new Set(messages.map((m) => m.id))
+    for (const id of Object.keys(scheduled)) {
+      if (!stillPresent.has(id)) {
+        clearTimeout(scheduled[id])
+        delete scheduled[id]
+      }
+    }
+  }, [messages])
+
+  useEffect(() => () => Object.values(vanishTimersRef.current).forEach(clearTimeout), [])
+
+  // Auto-download for images the sender opted to auto-download — fires once
+  // per message, the first time it's seen (decrypted) on this device,
+  // regardless of vanishing status. Tracked in localStorage (not just a
+  // ref) so a page reload doesn't re-trigger it for messages from earlier
+  // sessions.
+  const autoDownloadedRef = useRef(readAutoDownloadedIds())
+  useEffect(() => {
+    const seen = autoDownloadedRef.current
+    let changed = false
+    for (const message of messages) {
+      if (
+        message.type === 'image' &&
+        message.autoDownload &&
+        message.senderUid !== user.uid &&
+        message.imageDataUrl &&
+        !seen.has(message.id)
+      ) {
+        downloadDataUrl(message.imageDataUrl, `photo-${message.id}.jpg`)
+        seen.add(message.id)
+        changed = true
+      }
+    }
+    if (changed) rememberAutoDownloadedIds(seen)
+  }, [messages, user.uid])
 
   // Tracks whether the bottom sentinel is currently in view within the
   // scrolling message list — drives both the "jump to bottom" button and
@@ -389,15 +471,29 @@ export default function Chat() {
     }
   }
 
-  async function handleImageSelect(event) {
+  // Picking a file just opens the options modal — the actual send (and the
+  // reply snapshot, captured now so a reply started before picking still
+  // applies) happens in confirmSendImage once permanent/vanishing and
+  // auto-download are chosen.
+  function handleImageSelect(event) {
     const file = event.target.files?.[0]
     event.target.value = ''
     if (!file) return
 
-    setUploadingImage(true)
     const replyTo = buildReplySnapshot()
     const replyText = buildReplyText()
     setReplyingTo(null)
+    setPendingImage({ file, previewUrl: URL.createObjectURL(file), replyTo, replyText })
+  }
+
+  function cancelSendImage() {
+    if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
+    setPendingImage(null)
+  }
+
+  async function confirmSendImage({ vanishing, autoDownload }) {
+    const { file, previewUrl, replyTo, replyText } = pendingImage
+    setUploadingImage(true)
     try {
       const imageDataUrl = await resizeImageFile(file)
       const senderName = user.displayName || user.email
@@ -410,6 +506,8 @@ export default function Chat() {
             type: 'image',
             imageDataUrl,
             replyTo: replyTo ? { ...replyTo, text: replyText } : null,
+            vanishing,
+            autoDownload,
             senderUid: user.uid,
             senderName,
             createdAt: { toDate: () => new Date() },
@@ -417,38 +515,62 @@ export default function Chat() {
             lastActivityByUid: user.uid,
           },
         ])
-        const gallery = readDemoList('gallery')
-        writeDemoList('gallery', [
-          { id: crypto.randomUUID(), imageDataUrl, uploadedByName: senderName, createdAt: new Date().toISOString() },
-          ...gallery,
-        ])
+        // Vanishing images never go in the shared gallery — a permanent
+        // copy there would defeat the point.
+        if (!vanishing) {
+          const gallery = readDemoList('gallery')
+          writeDemoList('gallery', [
+            { id: crypto.randomUUID(), imageDataUrl, uploadedByName: senderName, createdAt: new Date().toISOString() },
+            ...gallery,
+          ])
+        }
         return
       }
 
       const encryptedContent = await encryptJson({ imageDataUrl, replyText }, cryptoKey)
-      const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
       await addDoc(collection(db, 'messages'), {
         type: 'image',
         encryptedContent,
         replyTo,
+        vanishing,
+        autoDownload,
         senderUid: user.uid,
         senderName,
         createdAt: serverTimestamp(),
         lastActivityAt: serverTimestamp(),
         lastActivityByUid: user.uid,
       })
-      await addDoc(collection(db, 'gallery'), {
-        encryptedImage,
-        uploadedBy: user.uid,
-        uploadedByName: senderName,
-        createdAt: serverTimestamp(),
-        lastActivityAt: serverTimestamp(),
-        lastActivityByUid: user.uid,
-        commentCount: 0,
-      })
+      if (!vanishing) {
+        const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
+        await addDoc(collection(db, 'gallery'), {
+          encryptedImage,
+          uploadedBy: user.uid,
+          uploadedByName: senderName,
+          createdAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          lastActivityByUid: user.uid,
+          commentCount: 0,
+        })
+      }
     } finally {
+      URL.revokeObjectURL(previewUrl)
+      setPendingImage(null)
       setUploadingImage(false)
     }
+  }
+
+  // Only the recipient tapping to reveal starts the 1-minute countdown —
+  // the sender can already see what they sent, so isOwn is excluded at the
+  // MessageBubble/VanishingImage level, not here.
+  async function revealVanishingImage(message) {
+    if (message.viewedAt) return
+    if (!firebaseReady) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === message.id ? { ...m, viewedAt: { toDate: () => new Date() } } : m)),
+      )
+      return
+    }
+    await updateDoc(doc(db, 'messages', message.id), { viewedAt: serverTimestamp() })
   }
 
   async function handleExportHistory() {
@@ -521,6 +643,15 @@ export default function Chat() {
         />
       )}
 
+      {pendingImage && (
+        <SendImageModal
+          previewUrl={pendingImage.previewUrl}
+          sending={uploadingImage}
+          onCancel={cancelSendImage}
+          onConfirm={confirmSendImage}
+        />
+      )}
+
       <div
         ref={listRef}
         className="relative flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6"
@@ -548,6 +679,7 @@ export default function Chat() {
               chatSettings={chatSettings}
               onRegister={registerMessageEl}
               onJumpToMessage={jumpToMessage}
+              onRevealVanishing={revealVanishingImage}
               highlighted={highlightedId === item.message.id}
               read={
                 item.message.senderUid === user.uid &&
@@ -647,7 +779,7 @@ export default function Chat() {
         <button
           type="button"
           onClick={() => imageInputRef.current?.click()}
-          disabled={uploadingImage || !!editingMessage}
+          disabled={uploadingImage || !!editingMessage || !!pendingImage}
           aria-label="Send a photo"
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-rose disabled:opacity-50"
         >
@@ -698,7 +830,18 @@ export default function Chat() {
   )
 }
 
-function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegister, onJumpToMessage, highlighted, read }) {
+function MessageBubble({
+  message,
+  isOwn,
+  tight,
+  onOpenMenu,
+  chatSettings,
+  onRegister,
+  onJumpToMessage,
+  onRevealVanishing,
+  highlighted,
+  read,
+}) {
   const time = toDate(message.createdAt).toLocaleTimeString([], {
     hour: 'numeric',
     minute: '2-digit',
@@ -766,6 +909,8 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegi
             )}
             {message._locked ? (
               <p className="italic text-inherit opacity-80">🔒 Encrypted — couldn't unlock with this device's key</p>
+            ) : message.type === 'image' && message.vanishing ? (
+              <VanishingImage message={message} isOwn={isOwn} onReveal={onRevealVanishing} />
             ) : message.type === 'image' ? (
               <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
             ) : message.type === 'link' ? (
@@ -806,6 +951,48 @@ function MessageBubble({ message, isOwn, tight, onOpenMenu, chatSettings, onRegi
           </span>
         )}
       </div>
+    </div>
+  )
+}
+
+// Recipient sees a locked placeholder until they tap it (that tap is what
+// starts the 1-minute countdown, via onReveal → revealVanishingImage). The
+// sender can always see their own sent photo — isOwn skips the placeholder
+// — but still sees the live "vanishes in Xs" countdown once the recipient
+// opens it, since viewedAt syncs to both sides the same way any other
+// field update does.
+function VanishingImage({ message, isOwn, onReveal }) {
+  const viewed = !!message.viewedAt
+  const revealed = isOwn || viewed
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!viewed) return
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [viewed])
+
+  if (!revealed) {
+    return (
+      <button
+        type="button"
+        onClick={() => onReveal(message)}
+        className="flex h-40 w-full flex-col items-center justify-center gap-1 rounded-xl bg-ink/10 text-inherit transition-transform hover:scale-[1.02]"
+      >
+        <span className="text-2xl">⏳</span>
+        <span className="font-body text-xs">Tap to view — vanishes 1 minute after opening</span>
+      </button>
+    )
+  }
+
+  const remainingSeconds = viewed ? Math.max(0, 60 - Math.floor((now - toDate(message.viewedAt).getTime()) / 1000)) : null
+
+  return (
+    <div>
+      <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
+      <p className="mt-1 text-center font-body text-[10px] italic text-inherit opacity-70">
+        {viewed ? `⏳ vanishes in ${remainingSeconds}s` : '⏳ vanishing — not opened yet'}
+      </p>
     </div>
   )
 }

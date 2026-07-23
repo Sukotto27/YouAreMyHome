@@ -129,7 +129,7 @@ exports.notifyOnMessage = onDocumentCreated('messages/{id}', async (event) => {
   const senderName = data.senderName || 'They'
   const body =
     data.type === 'image'
-      ? `${senderName} sent a photo`
+      ? `${senderName} sent a${data.vanishing ? ' vanishing' : ''} photo`
       : data.type === 'link'
         ? `${senderName} shared a link`
         : `${senderName} sent a message`
@@ -342,6 +342,23 @@ exports.sendDateNightReminders = onSchedule('every 15 minutes', async () => {
       await Promise.all(tasks)
     }
   }
+})
+
+// Backstop for the client's own vanish-on-a-timer logic (Chat.jsx) — that
+// only fires while someone has Chat open. This is the guarantee that a
+// vanishing image actually disappears within about a minute of being
+// opened even if neither device reopens the app afterward. Deletion needs
+// no plaintext access, just the (unencrypted) vanishing/viewedAt metadata.
+exports.expireVanishingImages = onSchedule('* * * * *', async () => {
+  const snapshot = await db.collection('messages').where('vanishing', '==', true).get()
+  const now = Date.now()
+  const deletions = snapshot.docs
+    .filter((docSnap) => {
+      const viewedAt = docSnap.data().viewedAt
+      return viewedAt && now - viewedAt.toMillis() >= 60_000
+    })
+    .map((docSnap) => docSnap.ref.delete())
+  await Promise.all(deletions)
 })
 
 // Shared by every game's "Invite partner" button (Draw, Mad Libs,
