@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { useMoods } from '../hooks/useMoods'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { avatarFor, preferredNameFor } from '../lib/avatars'
+import { APP_VERSION_LABEL } from '../lib/appVersion'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 
@@ -88,6 +89,7 @@ export default function Home() {
         <p className="font-hand text-lg text-ink-soft">
           — always us, always ours · sempre nós, sempre nosso —
         </p>
+        <p className="mt-1.5 font-body text-[10px] text-ink-soft/40">{APP_VERSION_LABEL}</p>
       </footer>
     </div>
   )

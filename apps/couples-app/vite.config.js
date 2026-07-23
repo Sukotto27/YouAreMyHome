@@ -1,8 +1,24 @@
+import { execSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import { fileURLToPath } from 'node:url'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+
+const packageVersion = JSON.parse(readFileSync(new URL('./package.json', import.meta.url))).version
+
+// Short commit hash of whatever's actually checked out — reflects reality
+// automatically on every deploy without needing anyone to remember to bump
+// a version number by hand. Falls back gracefully if git isn't available
+// (e.g. a source tarball with no .git directory).
+function gitCommit() {
+  try {
+    return execSync('git rev-parse --short HEAD').toString().trim()
+  } catch {
+    return 'unknown'
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -10,6 +26,11 @@ export default defineConfig({
   // .env.local lives at the monorepo root and is shared with apps/home-game
   // (both apps read the same Firebase project config).
   envDir: fileURLToPath(new URL('../..', import.meta.url)),
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(packageVersion),
+    'import.meta.env.VITE_BUILD_COMMIT': JSON.stringify(gitCommit()),
+    'import.meta.env.VITE_BUILD_TIME': JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     tailwindcss(),
