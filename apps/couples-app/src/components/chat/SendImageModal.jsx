@@ -1,11 +1,10 @@
 import { useState } from 'react'
 
 // Shown after picking a photo to send, before it actually goes anywhere —
-// lets you choose permanent vs. vanishing, and whether it should
-// auto-download to their device either way.
+// lets you choose permanent vs. vanishing. Whether it auto-downloads is the
+// recipient's own call (Settings → Photos in chat), not something set here.
 export default function SendImageModal({ previewUrl, sending, onCancel, onConfirm }) {
   const [vanishing, setVanishing] = useState(false)
-  const [autoDownload, setAutoDownload] = useState(false)
 
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-ink/40 px-6" onClick={onCancel}>
@@ -46,21 +45,6 @@ export default function SendImageModal({ previewUrl, sending, onCancel, onConfir
           </button>
         </div>
 
-        <label className="mt-3 flex items-start gap-2 rounded-xl border border-ink/10 bg-white/50 px-3 py-2.5 font-body text-sm text-ink-soft">
-          <input
-            type="checkbox"
-            checked={autoDownload}
-            onChange={(event) => setAutoDownload(event.target.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            Auto-download for them
-            <span className="block text-xs text-ink-soft/70">
-              Saves a copy straight to their device — even if it's set to vanish
-            </span>
-          </span>
-        </label>
-
         <div className="mt-4 flex gap-2">
           <button
             type="button"
@@ -72,7 +56,7 @@ export default function SendImageModal({ previewUrl, sending, onCancel, onConfir
           <button
             type="button"
             disabled={sending}
-            onClick={() => onConfirm({ vanishing, autoDownload })}
+            onClick={() => onConfirm({ vanishing })}
             className="flex-1 rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper disabled:cursor-not-allowed disabled:opacity-60"
           >
             {sending ? 'Sending…' : 'Send'}

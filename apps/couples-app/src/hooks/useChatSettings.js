@@ -7,7 +7,7 @@ import { DEFAULT_CHAT_FONT } from '../lib/chatFonts'
 // A single shared document, not per-device localStorage — chat background,
 // font, bubble colors, avatars, and preferred names are things the two of us
 // each set for ourselves but that the other should see live, so one shared
-// doc (rather than per-account state) is what both Chat and Profile read from.
+// doc (rather than per-account state) is what both Chat and Settings read from.
 const STORAGE_KEY = 'you-are-my-home:chat-settings'
 const DEFAULT_SETTINGS = {
   background: DEFAULT_CHAT_BACKGROUND,

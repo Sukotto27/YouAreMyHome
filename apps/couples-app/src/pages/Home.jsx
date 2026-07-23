@@ -68,7 +68,7 @@ export default function Home() {
             mood={moodFor('Cristina', user, moods)}
             isMine={user.displayName === 'Cristina'}
             onSetMood={setMyMood}
-            onOpenProfile={() => navigate('/profile')}
+            onOpenSettings={() => navigate('/settings')}
           />
           <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
           <Avatar
@@ -78,7 +78,7 @@ export default function Home() {
             mood={moodFor('Scott', user, moods)}
             isMine={user.displayName === 'Scott'}
             onSetMood={setMyMood}
-            onOpenProfile={() => navigate('/profile')}
+            onOpenSettings={() => navigate('/settings')}
           />
         </div>
 
@@ -101,13 +101,13 @@ function moodFor(name, user, moods) {
   return partnerEntry?.[1]
 }
 
-function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenProfile }) {
+function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <img
         src={src}
         alt={name}
-        onClick={isMine ? onOpenProfile : undefined}
+        onClick={isMine ? onOpenSettings : undefined}
         className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring} ${
           isMine ? 'cursor-pointer transition-transform hover:scale-105' : ''
         }`}

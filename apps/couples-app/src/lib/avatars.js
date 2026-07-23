@@ -14,7 +14,7 @@ export function avatarFor(name, avatars) {
 }
 
 // `preferredNames` is the shared { [displayName]: nickname } map from chat
-// settings — a cosmetic-only rename set from the Profile page. The
+// settings — a cosmetic-only rename set from the Settings page. The
 // underlying `displayName` ('Scott'/'Cristina') stays the identity key every
 // other feature matches against; this is purely what gets shown for it.
 export function preferredNameFor(name, preferredNames) {

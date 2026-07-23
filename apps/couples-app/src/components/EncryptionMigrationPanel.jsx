@@ -23,7 +23,7 @@ function messageContentFrom(data) {
 }
 
 // One-time, user-triggered conversion of existing plaintext chat/gallery
-// history to encrypted, run from Profile → Security once both of you have
+// history to encrypted, run from Settings → Security once both of you have
 // set up the same key. Client-side and idempotent — safe to re-run, it just
 // skips whatever's already converted. Never runs with a service account;
 // this is the same authenticated session and Firestore rules as normal use.

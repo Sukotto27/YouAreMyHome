@@ -13,7 +13,7 @@ import Mail from './pages/Mail'
 import Calendar from './pages/Calendar'
 import Journal from './pages/Journal'
 import ShareTarget from './pages/ShareTarget'
-import Profile from './pages/Profile'
+import Settings from './pages/Settings'
 
 function App() {
   return (
@@ -38,7 +38,7 @@ function App() {
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/journal" element={<Journal />} />
             <Route path="/share-target" element={<ShareTarget />} />
-            <Route path="/profile" element={<Profile />} />
+            <Route path="/settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

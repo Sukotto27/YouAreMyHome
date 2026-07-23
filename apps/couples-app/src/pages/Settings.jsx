@@ -3,28 +3,44 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { useEncryptionKey } from '../hooks/useEncryptionKey'
+import { usePushNotifications } from '../hooks/usePushNotifications'
 import { AVATAR_PRESETS } from '../lib/avatarOptions'
 import { avatarFor } from '../lib/avatars'
 import { squareThumbnailFromUrl } from '../lib/image'
+import {
+  autoDownloadImagesEnabled,
+  setAutoDownloadImagesEnabled,
+  setSoundsEnabled,
+  soundsEnabled,
+} from '../lib/deviceSettings'
 import EncryptionMigrationPanel from '../components/EncryptionMigrationPanel'
+import ChatCustomizationPanel from '../components/chat/ChatCustomizationPanel'
 
 const SAVED_FEEDBACK_MS = 1400
 
-// Reached by tapping your own avatar on Home or in Chat. Avatar and name
-// here are cosmetic-only: they live in the shared chat-settings doc (see
-// useChatSettings), keyed by the fixed 'Scott'/'Cristina' identity that
-// every other feature already matches against — this page never touches
-// that identity itself, just how it's shown.
-export default function Profile() {
+// Reached via the header's Settings icon (or by tapping your own avatar on
+// Home or in Chat). Everything
+// personal (avatar, name) is cosmetic-only, living in the shared
+// chat-settings doc (see useChatSettings) keyed by the fixed
+// 'Scott'/'Cristina' identity every other feature matches against — this
+// page never touches that identity itself, just how it's shown. Sounds and
+// auto-download are per-device preferences (localStorage, see
+// lib/deviceSettings) — deliberately not shared, since what you want on
+// your phone has nothing to do with what your partner wants on theirs.
+export default function Settings() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, logout } = useAuth()
   const { hasKey, cryptoKey, rawKeyBase64 } = useEncryptionKey()
+  const { permission, supported, enable } = usePushNotifications()
   const [revealingKey, setRevealingKey] = useState(false)
   const [settings, updateSettings] = useChatSettings()
   const [nameDraft, setNameDraft] = useState(settings.preferredNames[user.displayName] || user.displayName)
   const [nameSaved, setNameSaved] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState(null)
+  const [soundsOn, setSoundsOn] = useState(soundsEnabled)
+  const [autoDownloadOn, setAutoDownloadOn] = useState(autoDownloadImagesEnabled)
+  const [enablingPush, setEnablingPush] = useState(false)
   const fileInputRef = useRef(null)
 
   const myAvatar = avatarFor(user.displayName, settings.avatars)
@@ -68,6 +84,27 @@ export default function Profile() {
     setTimeout(() => setNameSaved(false), SAVED_FEEDBACK_MS)
   }
 
+  function toggleSounds(event) {
+    const checked = event.target.checked
+    setSoundsOn(checked)
+    setSoundsEnabled(checked)
+  }
+
+  function toggleAutoDownload(event) {
+    const checked = event.target.checked
+    setAutoDownloadOn(checked)
+    setAutoDownloadImagesEnabled(checked)
+  }
+
+  async function handleEnablePush() {
+    setEnablingPush(true)
+    try {
+      await enable()
+    } finally {
+      setEnablingPush(false)
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
       <div className="mx-auto w-full max-w-md">
@@ -82,10 +119,11 @@ export default function Profile() {
           Back
         </button>
 
-        <h1 className="font-display text-2xl italic text-ink">Your Profile</h1>
+        <h1 className="font-display text-2xl italic text-ink">Settings</h1>
 
         <section className="mt-6">
-          <div className="flex flex-col items-center gap-3">
+          <p className="font-body text-xs font-medium text-ink-soft">You</p>
+          <div className="mt-2 flex flex-col items-center gap-3">
             {myAvatar ? (
               <img
                 src={myAvatar}
@@ -133,33 +171,97 @@ export default function Profile() {
               )
             })}
           </div>
+
+          <div className="mt-4">
+            <label htmlFor="settings-name" className="font-body text-xs font-medium text-ink-soft">
+              Display name
+            </label>
+            <form onSubmit={saveName} className="mt-1.5 flex gap-2">
+              <input
+                id="settings-name"
+                type="text"
+                value={nameDraft}
+                onChange={(event) => setNameDraft(event.target.value)}
+                placeholder={user.displayName}
+                className="min-w-0 flex-1 rounded-full border border-ink/15 bg-white/70 px-4 py-2 font-body text-sm text-ink outline-none focus:border-rose"
+              />
+              <button
+                type="submit"
+                className="shrink-0 rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper transition-transform hover:-translate-y-0.5"
+              >
+                Save
+              </button>
+            </form>
+            <p className="mt-1.5 font-body text-xs text-ink-soft">
+              {nameSaved ? 'Saved!' : "Just how you're shown around the app — doesn't change your account name."}
+            </p>
+          </div>
         </section>
 
         <hr className="my-6 border-ink/10" />
 
         <section>
-          <label htmlFor="profile-name" className="font-body text-xs font-medium text-ink-soft">
-            Display name
+          <p className="mb-2 font-body text-xs font-medium text-ink-soft">Sounds</p>
+          <label className="flex items-start gap-2 font-body text-sm text-ink">
+            <input type="checkbox" checked={soundsOn} onChange={toggleSounds} className="mt-0.5" />
+            <span>
+              Play sounds
+              <span className="block font-body text-xs text-ink-soft">
+                Chat sends/reads, reactions, dice rolls, and the rest — this device only.
+              </span>
+            </span>
           </label>
-          <form onSubmit={saveName} className="mt-1.5 flex gap-2">
-            <input
-              id="profile-name"
-              type="text"
-              value={nameDraft}
-              onChange={(event) => setNameDraft(event.target.value)}
-              placeholder={user.displayName}
-              className="min-w-0 flex-1 rounded-full border border-ink/15 bg-white/70 px-4 py-2 font-body text-sm text-ink outline-none focus:border-rose"
-            />
-            <button
-              type="submit"
-              className="shrink-0 rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper transition-transform hover:-translate-y-0.5"
-            >
-              Save
-            </button>
-          </form>
-          <p className="mt-1.5 font-body text-xs text-ink-soft">
-            {nameSaved ? 'Saved!' : "Just how you're shown around the app — doesn't change your account name."}
-          </p>
+        </section>
+
+        <hr className="my-6 border-ink/10" />
+
+        <section>
+          <p className="mb-2 font-body text-xs font-medium text-ink-soft">Notifications</p>
+          {!supported ? (
+            <p className="font-body text-xs text-ink-soft">Push notifications aren't supported on this device/browser.</p>
+          ) : permission === 'granted' ? (
+            <p className="font-body text-sm text-ink">✅ Enabled on this device.</p>
+          ) : permission === 'denied' ? (
+            <p className="font-body text-xs text-ink-soft">
+              Blocked at the browser level — re-enable them from your browser's site settings if you'd like
+              them back.
+            </p>
+          ) : (
+            <div className="flex items-center justify-between gap-3">
+              <p className="font-body text-sm text-ink-soft">Get notified the moment the other one of us does something.</p>
+              <button
+                type="button"
+                onClick={handleEnablePush}
+                disabled={enablingPush}
+                className="shrink-0 rounded-full bg-rose px-4 py-1.5 font-body text-sm font-medium text-paper disabled:opacity-60"
+              >
+                {enablingPush ? '…' : 'Enable'}
+              </button>
+            </div>
+          )}
+        </section>
+
+        <hr className="my-6 border-ink/10" />
+
+        <section>
+          <p className="mb-2 font-body text-xs font-medium text-ink-soft">Photos in chat</p>
+          <label className="flex items-start gap-2 font-body text-sm text-ink">
+            <input type="checkbox" checked={autoDownloadOn} onChange={toggleAutoDownload} className="mt-0.5" />
+            <span>
+              Auto-download images you receive
+              <span className="block font-body text-xs text-ink-soft">
+                Saves a copy to this device the moment a photo arrives — permanent or vanishing. Off by
+                default; this is your call, not theirs.
+              </span>
+            </span>
+          </label>
+        </section>
+
+        <hr className="my-6 border-ink/10" />
+
+        <section>
+          <p className="mb-2 font-body text-xs font-medium text-ink-soft">Chat customization</p>
+          <ChatCustomizationPanel settings={settings} onUpdateSettings={updateSettings} cryptoKey={cryptoKey} />
         </section>
 
         <hr className="my-6 border-ink/10" />
@@ -193,6 +295,18 @@ export default function Profile() {
               encrypt any existing history.
             </p>
           )}
+        </section>
+
+        <hr className="my-6 border-ink/10" />
+
+        <section>
+          <button
+            type="button"
+            onClick={logout}
+            className="w-full rounded-full border border-ink/15 px-4 py-2 font-body text-sm font-medium text-ink-soft transition-colors hover:border-rose hover:text-rose"
+          >
+            Sign out
+          </button>
         </section>
       </div>
     </div>

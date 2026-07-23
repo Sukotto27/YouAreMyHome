@@ -5,6 +5,7 @@ import notification from '../assets/sounds/notification.mp3'
 import typing from '../assets/sounds/typing.mp3'
 import bubble from '../assets/sounds/bubble.mp3'
 import diceRoll from '../assets/sounds/dice_roll.mp3'
+import { soundsEnabled } from './deviceSettings'
 
 const SOUNDS = {
   chat_send: chatSend,
@@ -24,6 +25,7 @@ const audioCache = {}
 // a custom `sound` on it, and browsers don't support that anyway).
 export function playSound(key) {
   if (document.visibilityState !== 'visible') return
+  if (!soundsEnabled()) return
   const src = SOUNDS[key]
   if (!src) return
 

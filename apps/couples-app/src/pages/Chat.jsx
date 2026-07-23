@@ -26,6 +26,7 @@ import { avatarFor } from '../lib/avatars'
 import { playSound } from '../lib/sounds'
 import { decryptJson, encryptJson } from '../lib/e2ee'
 import { downloadDataUrl } from '../lib/downloadImage'
+import { autoDownloadImagesEnabled } from '../lib/deviceSettings'
 import { useEncryptionKey } from '../hooks/useEncryptionKey'
 import EncryptionGate from '../components/EncryptionGate'
 import ChatMenu from '../components/chat/ChatMenu'
@@ -128,6 +129,7 @@ export default function Chat() {
   const [editingMessage, setEditingMessage] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [pendingImage, setPendingImage] = useState(null)
+  const [lightboxImage, setLightboxImage] = useState(null)
   const [activeMenu, setActiveMenu] = useState(null)
   const [atBottom, setAtBottomState] = useState(true)
   const bottomRef = useRef(null)
@@ -227,19 +229,20 @@ export default function Chat() {
 
   useEffect(() => () => Object.values(vanishTimersRef.current).forEach(clearTimeout), [])
 
-  // Auto-download for images the sender opted to auto-download — fires once
-  // per message, the first time it's seen (decrypted) on this device,
-  // regardless of vanishing status. Tracked in localStorage (not just a
-  // ref) so a page reload doesn't re-trigger it for messages from earlier
-  // sessions.
+  // Auto-download is the recipient's own call (Settings → Photos in chat),
+  // not something the sender sets per-image — checked fresh here since it
+  // can change between snapshots. Fires once per message, the first time
+  // it's seen (decrypted) on this device, regardless of vanishing status.
+  // Tracked in localStorage (not just a ref) so a page reload doesn't
+  // re-trigger it for messages from earlier sessions.
   const autoDownloadedRef = useRef(readAutoDownloadedIds())
   useEffect(() => {
+    if (!autoDownloadImagesEnabled()) return
     const seen = autoDownloadedRef.current
     let changed = false
     for (const message of messages) {
       if (
         message.type === 'image' &&
-        message.autoDownload &&
         message.senderUid !== user.uid &&
         message.imageDataUrl &&
         !seen.has(message.id)
@@ -491,7 +494,7 @@ export default function Chat() {
     setPendingImage(null)
   }
 
-  async function confirmSendImage({ vanishing, autoDownload }) {
+  async function confirmSendImage({ vanishing }) {
     const { file, previewUrl, replyTo, replyText } = pendingImage
     setUploadingImage(true)
     try {
@@ -507,7 +510,6 @@ export default function Chat() {
             imageDataUrl,
             replyTo: replyTo ? { ...replyTo, text: replyText } : null,
             vanishing,
-            autoDownload,
             senderUid: user.uid,
             senderName,
             createdAt: { toDate: () => new Date() },
@@ -533,7 +535,6 @@ export default function Chat() {
         encryptedContent,
         replyTo,
         vanishing,
-        autoDownload,
         senderUid: user.uid,
         senderName,
         createdAt: serverTimestamp(),
@@ -609,16 +610,6 @@ export default function Chat() {
 
   return (
     <div className="relative flex flex-1 flex-col overflow-hidden">
-      <div className="absolute left-4 top-3 z-10 sm:left-6">
-        <button
-          type="button"
-          onClick={() => navigate('/profile')}
-          aria-label="Your profile"
-          className="block h-9 w-9 overflow-hidden rounded-full ring-2 ring-offset-2 ring-offset-paper ring-rose transition-transform hover:scale-105"
-        >
-          <img src={avatarFor(user.displayName, chatSettings.avatars)} alt="" className="h-full w-full object-cover" />
-        </button>
-      </div>
       <div className="absolute right-4 top-3 z-10 flex items-center gap-2 sm:right-6">
         <button
           type="button"
@@ -680,6 +671,8 @@ export default function Chat() {
               onRegister={registerMessageEl}
               onJumpToMessage={jumpToMessage}
               onRevealVanishing={revealVanishingImage}
+              onOpenSettings={() => navigate('/settings')}
+              onExpandImage={setLightboxImage}
               highlighted={highlightedId === item.message.id}
               read={
                 item.message.senderUid === user.uid &&
@@ -826,6 +819,28 @@ export default function Chat() {
           )}
         </button>
       </form>
+
+      <ImageLightbox src={lightboxImage} onClose={() => setLightboxImage(null)} />
+    </div>
+  )
+}
+
+function ImageLightbox({ src, onClose }) {
+  if (!src) return null
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-ink/90 p-4"
+      onClick={onClose}
+    >
+      <img src={src} alt="" className="max-h-full max-w-full rounded-lg object-contain" onClick={(event) => event.stopPropagation()} />
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close"
+        className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full bg-white/10 font-body text-2xl text-paper transition-colors hover:bg-white/20"
+      >
+        ×
+      </button>
     </div>
   )
 }
@@ -839,6 +854,8 @@ function MessageBubble({
   onRegister,
   onJumpToMessage,
   onRevealVanishing,
+  onOpenSettings,
+  onExpandImage,
   highlighted,
   read,
 }) {
@@ -878,7 +895,12 @@ function MessageBubble({
     >
       <div className="h-6 w-6 shrink-0">
         {avatarSrc && !tight && (
-          <img src={avatarSrc} alt="" className="h-6 w-6 rounded-full object-cover" />
+          <img
+            src={avatarSrc}
+            alt=""
+            onClick={isOwn ? onOpenSettings : undefined}
+            className={`h-6 w-6 rounded-full object-cover ${isOwn ? 'cursor-pointer transition-transform hover:scale-110' : ''}`}
+          />
         )}
       </div>
       <div className={`flex min-w-0 flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
@@ -910,9 +932,14 @@ function MessageBubble({
             {message._locked ? (
               <p className="italic text-inherit opacity-80">🔒 Encrypted — couldn't unlock with this device's key</p>
             ) : message.type === 'image' && message.vanishing ? (
-              <VanishingImage message={message} isOwn={isOwn} onReveal={onRevealVanishing} />
+              <VanishingImage message={message} isOwn={isOwn} onReveal={onRevealVanishing} onExpand={onExpandImage} />
             ) : message.type === 'image' ? (
-              <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
+              <img
+                src={message.imageDataUrl}
+                alt=""
+                onClick={() => onExpandImage(message.imageDataUrl)}
+                className="max-h-72 w-full cursor-pointer rounded-xl object-cover transition-transform hover:scale-[1.01]"
+              />
             ) : message.type === 'link' ? (
               <a href={message.url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl bg-white">
                 {message.previewImage && (
@@ -958,10 +985,12 @@ function MessageBubble({
 // Recipient sees a locked placeholder until they tap it (that tap is what
 // starts the 1-minute countdown, via onReveal → revealVanishingImage). The
 // sender can always see their own sent photo — isOwn skips the placeholder
-// — but still sees the live "vanishes in Xs" countdown once the recipient
-// opens it, since viewedAt syncs to both sides the same way any other
-// field update does.
-function VanishingImage({ message, isOwn, onReveal }) {
+// — but still sees the live countdown ring once the recipient opens it,
+// since viewedAt syncs to both sides the same way any other field update
+// does. The slight transparency and "Unopened" caption are sender-only —
+// the recipient's own copy, once they've opened it, looks like any other
+// photo (just with the countdown ring, which both of you see identically).
+function VanishingImage({ message, isOwn, onReveal, onExpand }) {
   const viewed = !!message.viewedAt
   const revealed = isOwn || viewed
   const [now, setNow] = useState(() => Date.now())
@@ -980,7 +1009,7 @@ function VanishingImage({ message, isOwn, onReveal }) {
         className="flex h-40 w-full flex-col items-center justify-center gap-1 rounded-xl bg-ink/10 text-inherit transition-transform hover:scale-[1.02]"
       >
         <span className="text-2xl">⏳</span>
-        <span className="font-body text-xs">Tap to view — vanishes 1 minute after opening</span>
+        <span className="font-body text-xs">Vanishing Image. Tap to view</span>
       </button>
     )
   }
@@ -989,10 +1018,53 @@ function VanishingImage({ message, isOwn, onReveal }) {
 
   return (
     <div>
-      <img src={message.imageDataUrl} alt="" className="max-h-72 w-full rounded-xl object-cover" />
-      <p className="mt-1 text-center font-body text-[10px] italic text-inherit opacity-70">
-        {viewed ? `⏳ vanishes in ${remainingSeconds}s` : '⏳ vanishing — not opened yet'}
-      </p>
+      <div className="relative">
+        <img
+          src={message.imageDataUrl}
+          alt=""
+          onClick={() => onExpand(message.imageDataUrl)}
+          className={`max-h-72 w-full cursor-pointer rounded-xl object-cover transition-transform hover:scale-[1.01] ${
+            isOwn ? 'opacity-80' : ''
+          }`}
+        />
+        {viewed && (
+          <div className="absolute bottom-1.5 right-1.5">
+            <CircularCountdown remainingSeconds={remainingSeconds} />
+          </div>
+        )}
+      </div>
+      {!viewed && isOwn && (
+        <p className="mt-1 text-center font-body text-[10px] italic text-inherit opacity-70">Unopened Vanishing Image.</p>
+      )}
+    </div>
+  )
+}
+
+const COUNTDOWN_TOTAL_SECONDS = 60
+const COUNTDOWN_RADIUS = 14
+const COUNTDOWN_CIRCUMFERENCE = 2 * Math.PI * COUNTDOWN_RADIUS
+
+function CircularCountdown({ remainingSeconds }) {
+  const progress = remainingSeconds / COUNTDOWN_TOTAL_SECONDS
+  const dashOffset = COUNTDOWN_CIRCUMFERENCE * (1 - progress)
+
+  return (
+    <div className="relative flex h-9 w-9 items-center justify-center" title={`Vanishes in ${remainingSeconds}s`}>
+      <svg viewBox="0 0 36 36" className="h-9 w-9 -rotate-90">
+        <circle cx="18" cy="18" r={COUNTDOWN_RADIUS} className="fill-ink/50" />
+        <circle
+          cx="18"
+          cy="18"
+          r={COUNTDOWN_RADIUS}
+          fill="none"
+          stroke="white"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeDasharray={COUNTDOWN_CIRCUMFERENCE}
+          strokeDashoffset={dashOffset}
+        />
+      </svg>
+      <span className="absolute font-body text-[10px] font-medium text-white">{remainingSeconds}</span>
     </div>
   )
 }
