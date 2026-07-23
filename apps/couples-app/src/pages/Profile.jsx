@@ -6,8 +6,6 @@ import { useEncryptionKey } from '../hooks/useEncryptionKey'
 import { AVATAR_PRESETS } from '../lib/avatarOptions'
 import { avatarFor } from '../lib/avatars'
 import { squareThumbnailFromUrl } from '../lib/image'
-import { uploadAvatarPhoto } from '../lib/avatarUpload'
-import { firebaseReady } from '../firebase'
 import EncryptionMigrationPanel from '../components/EncryptionMigrationPanel'
 
 const SAVED_FEEDBACK_MS = 1400
@@ -45,9 +43,11 @@ export default function Profile() {
     setUploadError(null)
     const objectUrl = URL.createObjectURL(file)
     try {
+      // Same approach as everywhere else in the app (gallery/chat photos,
+      // gallery-photo-as-avatar) — a small data URL stored directly in the
+      // shared settings doc, no Cloud Storage bucket needed.
       const thumbnail = await squareThumbnailFromUrl(objectUrl, { size: 256, quality: 0.85 })
-      const url = firebaseReady ? await uploadAvatarPhoto(user.uid, thumbnail) : thumbnail
-      await updateSettings({ avatars: { [user.displayName]: url } })
+      await updateSettings({ avatars: { [user.displayName]: thumbnail } })
     } catch {
       setUploadError("Couldn't upload that photo — try a different one.")
     } finally {
