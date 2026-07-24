@@ -259,6 +259,11 @@ export default function Chat() {
   // scrolling message list — drives both the "jump to bottom" button and
   // whether a new message should auto-scroll (don't yank someone back down
   // if they've scrolled up to read history, unless it's their own message).
+  // Keyed on hasKey — on first mount the encryption key is still loading
+  // (async), so this page renders EncryptionGate instead of the real chat
+  // UI and listRef/bottomRef don't exist yet. Without this dependency the
+  // effect would bail out once on that first pass and never run again once
+  // the real UI actually mounts.
   useEffect(() => {
     const list = listRef.current
     const sentinel = bottomRef.current
@@ -269,7 +274,7 @@ export default function Chat() {
     })
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [])
+  }, [hasKey])
 
   const prevMessageCountRef = useRef(0)
   useEffect(() => {
@@ -782,12 +787,17 @@ export default function Chat() {
             <path d="M3.5 16l4.5-4.5 3.5 3.5 3-3 5 5" />
           </svg>
         </button>
+        {/* display:none (Tailwind's `hidden`) is enough on desktop, but some
+        mobile browsers refuse to open the native file/camera picker for a
+        programmatic .click() on an input that isn't actually rendered —
+        this stays in the render tree, just invisible and 1px, which works
+        reliably everywhere. */}
         <input
           ref={imageInputRef}
           type="file"
           accept="image/*"
           onChange={handleImageSelect}
-          className="hidden"
+          className="absolute h-px w-px overflow-hidden opacity-0"
         />
         <textarea
           ref={inputRef}

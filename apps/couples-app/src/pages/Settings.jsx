@@ -143,12 +143,15 @@ export default function Settings() {
             >
               {uploading ? 'Uploading…' : 'Upload a photo'}
             </button>
+            {/* Stays in the render tree (invisible, 1px) rather than
+            display:none — some mobile browsers won't open the native file
+            picker for a .click() on an input that isn't actually rendered. */}
             <input
               ref={fileInputRef}
               type="file"
               accept="image/*"
               onChange={handleFileChange}
-              className="hidden"
+              className="absolute h-px w-px overflow-hidden opacity-0"
             />
             {uploadError && <p className="font-body text-xs text-rose">{uploadError}</p>}
           </div>
@@ -193,7 +196,7 @@ export default function Settings() {
               </button>
             </form>
             <p className="mt-1.5 font-body text-xs text-ink-soft">
-              {nameSaved ? 'Saved!' : "Just how you're shown around the app — doesn't change your account name."}
+              {nameSaved ? 'Saved!' : "Choose how your name is displayed on the app."}
             </p>
           </div>
         </section>
@@ -207,7 +210,7 @@ export default function Settings() {
             <span>
               Play sounds
               <span className="block font-body text-xs text-ink-soft">
-                Chat sends/reads, reactions, dice rolls, and the rest — this device only.
+                Toggle in-app sounds.
               </span>
             </span>
           </label>
@@ -223,7 +226,7 @@ export default function Settings() {
             <p className="font-body text-sm text-ink">✅ Enabled on this device.</p>
           ) : permission === 'denied' ? (
             <p className="font-body text-xs text-ink-soft">
-              Blocked at the browser level — re-enable them from your browser's site settings if you'd like
+              Blocked by your browser. Re-enable them from your browser's site settings if you'd like
               them back.
             </p>
           ) : (
@@ -250,8 +253,7 @@ export default function Settings() {
             <span>
               Auto-download images you receive
               <span className="block font-body text-xs text-ink-soft">
-                Saves a copy to this device the moment a photo arrives — permanent or vanishing. Off by
-                default; this is your call, not theirs.
+                Automacitally saves all received images to your device.
               </span>
             </span>
           </label>
@@ -271,8 +273,7 @@ export default function Settings() {
           {hasKey ? (
             <div className="mt-1.5 space-y-3">
               <p className="font-body text-xs text-ink-soft">
-                Chat and Gallery are end-to-end encrypted on this device. Setting up another device
-                (or your partner's, if they haven't yet) needs this same key.
+                Chat and Gallery are end-to-end encrypted on this device. If you need to set up another device, you can get the key here.
               </p>
               {revealingKey ? (
                 <div className="break-all rounded-xl border border-ink/15 bg-white/70 px-4 py-3 font-mono text-sm text-ink">

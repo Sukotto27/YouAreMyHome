@@ -5,6 +5,25 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.3.1
+
+- Fixed the "send a photo" file picker not opening on some mobile browsers
+  (Chat, Gallery, and Settings' avatar upload) — the hidden file input now
+  stays in the render tree (invisible, 1px) instead of `display:none`,
+  which some mobile browsers won't invoke a native picker for
+
+## v1.3.0
+
+- Home: a small bouncing chat-bubble badge now appears on the other
+  person's avatar whenever there's an unread chat message from them — tap
+  it to jump straight to Chat
+
+## v1.2.2
+
+- Fixed the "jump to latest messages" button in Chat, which had stopped
+  appearing — a side effect of the encryption gate delaying the chat UI's
+  first real render past the point its scroll-tracking was set up
+
 ## v1.2.1
 
 - Recipient's unopened vanishing-image placeholder now reads "Vanishing

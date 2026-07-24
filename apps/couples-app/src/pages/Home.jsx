@@ -7,6 +7,7 @@ import MoodBubble from '../components/MoodBubble'
 import { useAuth } from '../context/AuthContext'
 import { useMoods } from '../hooks/useMoods'
 import { useChatSettings } from '../hooks/useChatSettings'
+import { useUnreadBadges } from '../hooks/useUnreadBadges'
 import { avatarFor, preferredNameFor } from '../lib/avatars'
 import { APP_VERSION_LABEL } from '../lib/appVersion'
 import heartLeft from '../assets/images/heart-left.png'
@@ -17,6 +18,7 @@ export default function Home() {
   const { user } = useAuth()
   const { moods, setMyMood } = useMoods()
   const [chatSettings] = useChatSettings()
+  const unread = useUnreadBadges()
 
   return (
     <div className="relative flex flex-1 flex-col overflow-y-auto">
@@ -69,6 +71,8 @@ export default function Home() {
             isMine={user.displayName === 'Cristina'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
+            showUnreadChat={user.displayName !== 'Cristina' && unread.chat}
+            onOpenChat={() => navigate('/chat')}
           />
           <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
           <Avatar
@@ -79,6 +83,8 @@ export default function Home() {
             isMine={user.displayName === 'Scott'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
+            showUnreadChat={user.displayName !== 'Scott' && unread.chat}
+            onOpenChat={() => navigate('/chat')}
           />
         </div>
 
@@ -101,17 +107,29 @@ function moodFor(name, user, moods) {
   return partnerEntry?.[1]
 }
 
-function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings }) {
+function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, showUnreadChat, onOpenChat }) {
   return (
     <div className="flex flex-col items-center gap-2">
-      <img
-        src={src}
-        alt={name}
-        onClick={isMine ? onOpenSettings : undefined}
-        className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring} ${
-          isMine ? 'cursor-pointer transition-transform hover:scale-105' : ''
-        }`}
-      />
+      <div className="relative">
+        <img
+          src={src}
+          alt={name}
+          onClick={isMine ? onOpenSettings : undefined}
+          className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring} ${
+            isMine ? 'cursor-pointer transition-transform hover:scale-105' : ''
+          }`}
+        />
+        {showUnreadChat && (
+          <button
+            type="button"
+            onClick={onOpenChat}
+            aria-label={`Unread messages from ${name} — open chat`}
+            className="absolute -right-1 -top-1 flex h-6 w-6 animate-bounce items-center justify-center rounded-full bg-rose text-xs shadow-md ring-2 ring-paper transition-transform hover:scale-110"
+          >
+            💬
+          </button>
+        )}
+      </div>
       <span className="font-body text-sm text-ink-soft">{name}</span>
       <MoodBubble mood={mood} isMine={isMine} onSetMood={onSetMood} />
     </div>

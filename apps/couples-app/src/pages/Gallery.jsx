@@ -130,12 +130,16 @@ export default function Gallery() {
         >
           {uploading ? 'Sending…' : 'Send a photo'}
         </button>
+        {/* Stays in the render tree (invisible, 1px) rather than
+        display:none — some mobile browsers won't open the native file/
+        camera picker for a .click() on an input that isn't actually
+        rendered. */}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
           onChange={handleFileChange}
-          className="hidden"
+          className="absolute h-px w-px overflow-hidden opacity-0"
         />
       </div>
 
