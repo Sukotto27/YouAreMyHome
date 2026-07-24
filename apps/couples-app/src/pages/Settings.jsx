@@ -31,7 +31,7 @@ export default function Settings() {
   const navigate = useNavigate()
   const { user, logout } = useAuth()
   const { hasKey, cryptoKey, rawKeyBase64 } = useEncryptionKey()
-  const { permission, supported, enable } = usePushNotifications()
+  const { permission, supported, unsupportedReasons, enable } = usePushNotifications()
   const [revealingKey, setRevealingKey] = useState(false)
   const [settings, updateSettings] = useChatSettings()
   const [nameDraft, setNameDraft] = useState(settings.preferredNames[user.displayName] || user.displayName)
@@ -221,7 +221,12 @@ export default function Settings() {
         <section>
           <p className="mb-2 font-body text-xs font-medium text-ink-soft">Notifications</p>
           {!supported ? (
-            <p className="font-body text-xs text-ink-soft">Push notifications aren't supported on this device/browser.</p>
+            <div>
+              <p className="font-body text-xs text-ink-soft">Push notifications aren't supported on this device/browser.</p>
+              {unsupportedReasons.length > 0 && (
+                <p className="mt-1 font-body text-xs text-ink-soft/60">({unsupportedReasons.join(', ')})</p>
+              )}
+            </div>
           ) : permission === 'granted' ? (
             <p className="font-body text-sm text-ink">✅ Enabled on this device.</p>
           ) : permission === 'denied' ? (

@@ -31,6 +31,7 @@ export default function Gallery() {
   const [photos, setPhotos] = useState(firebaseReady ? [] : readDemoList('gallery'))
   const [selected, setSelected] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function Gallery() {
     if (!file) return
 
     setUploading(true)
+    setUploadError('')
     try {
       const imageDataUrl = await resizeImageFile(file)
 
@@ -64,19 +66,24 @@ export default function Gallery() {
           writeDemoList('gallery', next)
           return next
         })
-        return
+      } else {
+        const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
+        await addDoc(collection(db, 'gallery'), {
+          encryptedImage,
+          uploadedBy: user.uid,
+          uploadedByName: user.displayName || user.email,
+          createdAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          lastActivityByUid: user.uid,
+          commentCount: 0,
+        })
       }
-
-      const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
-      await addDoc(collection(db, 'gallery'), {
-        encryptedImage,
-        uploadedBy: user.uid,
-        uploadedByName: user.displayName || user.email,
-        createdAt: serverTimestamp(),
-        lastActivityAt: serverTimestamp(),
-        lastActivityByUid: user.uid,
-        commentCount: 0,
-      })
+    } catch (error) {
+      // Surfaced on-screen rather than just console.error'd — this is a
+      // 2-person app, not a public product, so a raw error message is more
+      // useful for remote diagnosis than it is embarrassing.
+      console.error('Failed to upload photo:', error)
+      setUploadError(error?.message || String(error))
     } finally {
       setUploading(false)
     }
@@ -142,6 +149,10 @@ export default function Gallery() {
           className="absolute h-px w-px overflow-hidden opacity-0"
         />
       </div>
+
+      {uploadError && (
+        <p className="font-body text-xs text-rose">Couldn't send that photo: {uploadError}</p>
+      )}
 
       {photos.length === 0 ? (
         <p className="pt-10 text-center font-hand text-xl text-ink-soft">

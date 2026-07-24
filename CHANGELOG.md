@@ -5,6 +5,14 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.3.2
+
+- Push notifications: when unsupported, Settings now shows *why* (missing
+  Service Worker/Push API, cookies disabled, IndexedDB blocked, etc.)
+  instead of a generic message — makes remote diagnosis possible
+- Sending a photo (Chat or Gallery) that fails now shows the actual error
+  on screen instead of silently doing nothing
+
 ## v1.3.1
 
 - Fixed the "send a photo" file picker not opening on some mobile browsers

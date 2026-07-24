@@ -3,7 +3,7 @@ import { useState } from 'react'
 // Shown after picking a photo to send, before it actually goes anywhere —
 // lets you choose permanent vs. vanishing. Whether it auto-downloads is the
 // recipient's own call (Settings → Photos in chat), not something set here.
-export default function SendImageModal({ previewUrl, sending, onCancel, onConfirm }) {
+export default function SendImageModal({ previewUrl, sending, error, onCancel, onConfirm }) {
   const [vanishing, setVanishing] = useState(false)
 
   return (
@@ -44,6 +44,8 @@ export default function SendImageModal({ previewUrl, sending, onCancel, onConfir
             </span>
           </button>
         </div>
+
+        {error && <p className="mt-3 font-body text-xs text-rose">Couldn't send that photo: {error}</p>}
 
         <div className="mt-4 flex gap-2">
           <button

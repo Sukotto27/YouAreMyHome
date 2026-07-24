@@ -129,6 +129,7 @@ export default function Chat() {
   const [editingMessage, setEditingMessage] = useState(null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [pendingImage, setPendingImage] = useState(null)
+  const [imageSendError, setImageSendError] = useState('')
   const [lightboxImage, setLightboxImage] = useState(null)
   const [activeMenu, setActiveMenu] = useState(null)
   const [atBottom, setAtBottomState] = useState(true)
@@ -497,11 +498,13 @@ export default function Chat() {
   function cancelSendImage() {
     if (pendingImage) URL.revokeObjectURL(pendingImage.previewUrl)
     setPendingImage(null)
+    setImageSendError('')
   }
 
   async function confirmSendImage({ vanishing }) {
     const { file, previewUrl, replyTo, replyText } = pendingImage
     setUploadingImage(true)
+    setImageSendError('')
     try {
       const imageDataUrl = await resizeImageFile(file)
       const senderName = user.displayName || user.email
@@ -531,36 +534,44 @@ export default function Chat() {
             ...gallery,
           ])
         }
-        return
-      }
-
-      const encryptedContent = await encryptJson({ imageDataUrl, replyText }, cryptoKey)
-      await addDoc(collection(db, 'messages'), {
-        type: 'image',
-        encryptedContent,
-        replyTo,
-        vanishing,
-        senderUid: user.uid,
-        senderName,
-        createdAt: serverTimestamp(),
-        lastActivityAt: serverTimestamp(),
-        lastActivityByUid: user.uid,
-      })
-      if (!vanishing) {
-        const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
-        await addDoc(collection(db, 'gallery'), {
-          encryptedImage,
-          uploadedBy: user.uid,
-          uploadedByName: senderName,
+      } else {
+        const encryptedContent = await encryptJson({ imageDataUrl, replyText }, cryptoKey)
+        await addDoc(collection(db, 'messages'), {
+          type: 'image',
+          encryptedContent,
+          replyTo,
+          vanishing,
+          senderUid: user.uid,
+          senderName,
           createdAt: serverTimestamp(),
           lastActivityAt: serverTimestamp(),
           lastActivityByUid: user.uid,
-          commentCount: 0,
         })
+        if (!vanishing) {
+          const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
+          await addDoc(collection(db, 'gallery'), {
+            encryptedImage,
+            uploadedBy: user.uid,
+            uploadedByName: senderName,
+            createdAt: serverTimestamp(),
+            lastActivityAt: serverTimestamp(),
+            lastActivityByUid: user.uid,
+            commentCount: 0,
+          })
+        }
       }
-    } finally {
+
       URL.revokeObjectURL(previewUrl)
       setPendingImage(null)
+    } catch (error) {
+      // Surfaced on-screen rather than just console.error'd — this is a
+      // 2-person app, not a public product, so a raw error message is more
+      // useful for remote diagnosis than it is embarrassing. Modal stays
+      // open (with the picked image still queued) so the failure is
+      // visible and retryable instead of silently vanishing.
+      console.error('Failed to send image:', error)
+      setImageSendError(error?.message || String(error))
+    } finally {
       setUploadingImage(false)
     }
   }
@@ -643,6 +654,7 @@ export default function Chat() {
         <SendImageModal
           previewUrl={pendingImage.previewUrl}
           sending={uploadingImage}
+          error={imageSendError}
           onCancel={cancelSendImage}
           onConfirm={confirmSendImage}
         />
