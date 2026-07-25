@@ -13,6 +13,8 @@ const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY
 // access to the device's devtools.
 async function checkNotificationSupport() {
   const reasons = []
+  if (!firebaseReady) reasons.push('app is missing its Firebase config')
+  if (!VAPID_KEY) reasons.push('app is missing its VAPID key')
   if (!('serviceWorker' in navigator)) reasons.push('no Service Worker support')
   if (!('PushManager' in window)) reasons.push('no Push API support')
   if (!('Notification' in window)) reasons.push('no Notification API support')
@@ -49,9 +51,15 @@ export function usePushNotifications() {
   const [unsupportedReasons, setUnsupportedReasons] = useState([])
 
   useEffect(() => {
+    // Runs unconditionally — this is the diagnostic path, so it must not be
+    // gated behind the same things (firebaseReady, Notification existing)
+    // that it exists to detect the absence of. Earlier this bailed out
+    // alongside isSupported() below, which meant a device actually missing
+    // the Notification API got no reasons at all, just the generic message.
+    checkNotificationSupport().then(setUnsupportedReasons)
+
     if (!firebaseReady || typeof Notification === 'undefined' || !VAPID_KEY) return
     isSupported().then(setSupported)
-    checkNotificationSupport().then(setUnsupportedReasons)
   }, [])
 
   async function enable() {

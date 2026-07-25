@@ -5,6 +5,13 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.3.3
+
+- Fixed the new unsupported-notifications diagnostic (v1.3.2) not actually
+  showing reasons on devices where the Notification API itself is missing
+  — it was gated behind the same check it was meant to diagnose, so the
+  most likely real-world case fell through to the old generic message
+
 ## v1.3.2
 
 - Push notifications: when unsupported, Settings now shows *why* (missing
