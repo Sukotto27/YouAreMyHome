@@ -5,6 +5,17 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.3.6
+
+- Fixed "Submit my words" in Mad Libs silently doing nothing — the write
+  to Firestore actually succeeded, but it used a dotted string key
+  (`answers.${uid}`) with `setDoc(..., { merge: true })`, which (unlike
+  `updateDoc`) stores that as one literal field named `answers.<uid>`
+  instead of nesting into the `answers` map. The app reads
+  `round.answers[uid]`, which never matched, so the screen never advanced
+  even though the answers were saved. Fixed by writing a real nested
+  object (`{ answers: { [uid]: answers } }`) instead
+
 ## v1.3.5
 
 - Jump-to-latest-messages button in Chat is now white/translucent and

@@ -118,7 +118,7 @@ export function useMadLibs() {
     await Promise.all([
       setDoc(
         doc(db, 'madLibs', storyId),
-        { [`answers.${user.uid}`]: answers, updatedAt: serverTimestamp() },
+        { answers: { [user.uid]: answers }, updatedAt: serverTimestamp() },
         { merge: true },
       ),
       addDoc(collection(db, 'journalEvents'), {
