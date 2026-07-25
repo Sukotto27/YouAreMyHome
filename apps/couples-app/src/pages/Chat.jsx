@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   addDoc,
   collection,
@@ -256,38 +256,48 @@ export default function Chat() {
     if (changed) rememberAutoDownloadedIds(seen)
   }, [messages, user.uid])
 
-  // Tracks whether the bottom sentinel is currently in view within the
-  // scrolling message list — drives both the "jump to bottom" button and
-  // whether a new message should auto-scroll (don't yank someone back down
-  // if they've scrolled up to read history, unless it's their own message).
-  // Keyed on hasKey — on first mount the encryption key is still loading
-  // (async), so this page renders EncryptionGate instead of the real chat
-  // UI and listRef/bottomRef don't exist yet. Without this dependency the
-  // effect would bail out once on that first pass and never run again once
-  // the real UI actually mounts.
-  useEffect(() => {
+  // Drives both the "jump to bottom" button and whether a new message should
+  // auto-scroll (don't yank someone back down if they've scrolled up to read
+  // history, unless it's their own message). Computed directly from scroll
+  // position rather than an IntersectionObserver on the bottom sentinel —
+  // simpler to reason about and avoids relying on the sentinel's real-world
+  // visibility, which proved unreliable.
+  const NEAR_BOTTOM_PX = 48
+  function handleListScroll() {
     const list = listRef.current
-    const sentinel = bottomRef.current
-    if (!list || !sentinel) return
-    const observer = new IntersectionObserver(([entry]) => setAtBottom(entry.isIntersecting), {
-      root: list,
-      threshold: 1,
-    })
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [hasKey])
+    if (!list) return
+    const distance = list.scrollHeight - list.scrollTop - list.clientHeight
+    setAtBottom(distance < NEAR_BOTTOM_PX)
+  }
 
+  // Keyed on hasKey too, not just messages.length — on first mount the
+  // encryption key is still loading (async), so this page renders
+  // EncryptionGate instead of the real chat UI and listRef/bottomRef don't
+  // exist yet. Messages often finish loading from Firestore before that gate
+  // clears, so without also depending on hasKey this effect fires once while
+  // the sentinel ref is still null (a no-op) and never fires again once the
+  // real UI actually mounts, leaving Chat scrolled to the top on open.
   const prevMessageCountRef = useRef(0)
-  useEffect(() => {
+  const initialScrollDoneRef = useRef(false)
+  useLayoutEffect(() => {
+    if (!hasKey) return
     const isNewMessage = messages.length > prevMessageCountRef.current
     prevMessageCountRef.current = messages.length
     if (!isNewMessage) return
+
+    if (!initialScrollDoneRef.current) {
+      initialScrollDoneRef.current = true
+      bottomRef.current?.scrollIntoView({ behavior: 'instant' })
+      handleListScroll()
+      return
+    }
+
     const lastMessage = messages[messages.length - 1]
     const isMine = lastMessage?.senderUid === user.uid
     if (atBottomRef.current || isMine) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-  }, [messages.length])
+  }, [hasKey, messages.length])
 
   function scrollToBottom() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -660,56 +670,59 @@ export default function Chat() {
         />
       )}
 
-      <div
-        ref={listRef}
-        className="relative flex-1 space-y-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6"
-        style={backgroundStyle}
-      >
-        {messages.length === 0 && (
-          <p className="pt-10 text-center font-hand text-xl text-ink-soft">
-            say something sweet... (algo doce)
-          </p>
-        )}
-        {timeline.map((item) =>
-          item.type === 'separator' ? (
-            <div key={item.key} className="flex justify-center py-2">
-              <span className="rounded-full bg-white/60 px-3 py-1 font-body text-xs text-ink-soft">
-                {item.label}
-              </span>
-            </div>
-          ) : (
-            <MessageBubble
-              key={item.key}
-              message={item.message}
-              isOwn={item.message.senderUid === user.uid}
-              tight={item.tight}
-              onOpenMenu={openMessageMenu}
-              chatSettings={chatSettings}
-              onRegister={registerMessageEl}
-              onJumpToMessage={jumpToMessage}
-              onRevealVanishing={revealVanishingImage}
-              onOpenSettings={() => navigate('/settings')}
-              onExpandImage={setLightboxImage}
-              highlighted={highlightedId === item.message.id}
-              read={
-                item.message.senderUid === user.uid &&
-                !!partnerSeenAt &&
-                toDate(item.message.createdAt).getTime() <= partnerSeenAt.toMillis()
-              }
-            />
-          ),
-        )}
-        {partnerTyping && (
-          <p className="px-1 font-hand text-lg text-ink-soft">{partnerName} is typing…</p>
-        )}
-        <div ref={bottomRef} />
+      <div className="relative flex-1 overflow-hidden">
+        <div
+          ref={listRef}
+          onScroll={handleListScroll}
+          className="h-full space-y-1 overflow-x-hidden overflow-y-auto px-4 py-4 sm:px-6"
+          style={backgroundStyle}
+        >
+          {messages.length === 0 && (
+            <p className="pt-10 text-center font-hand text-xl text-ink-soft">
+              say something sweet... (algo doce)
+            </p>
+          )}
+          {timeline.map((item) =>
+            item.type === 'separator' ? (
+              <div key={item.key} className="flex justify-center py-2">
+                <span className="rounded-full bg-white/60 px-3 py-1 font-body text-xs text-ink-soft">
+                  {item.label}
+                </span>
+              </div>
+            ) : (
+              <MessageBubble
+                key={item.key}
+                message={item.message}
+                isOwn={item.message.senderUid === user.uid}
+                tight={item.tight}
+                onOpenMenu={openMessageMenu}
+                chatSettings={chatSettings}
+                onRegister={registerMessageEl}
+                onJumpToMessage={jumpToMessage}
+                onRevealVanishing={revealVanishingImage}
+                onOpenSettings={() => navigate('/settings')}
+                onExpandImage={setLightboxImage}
+                highlighted={highlightedId === item.message.id}
+                read={
+                  item.message.senderUid === user.uid &&
+                  !!partnerSeenAt &&
+                  toDate(item.message.createdAt).getTime() <= partnerSeenAt.toMillis()
+                }
+              />
+            ),
+          )}
+          {partnerTyping && (
+            <p className="px-1 font-hand text-lg text-ink-soft">{partnerName} is typing…</p>
+          )}
+          <div ref={bottomRef} />
+        </div>
 
         {!atBottom && (
           <button
             type="button"
             onClick={scrollToBottom}
             aria-label="Jump to latest messages"
-            className="absolute bottom-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-rose text-paper shadow-lg transition-transform hover:-translate-y-0.5 sm:right-6"
+            className="absolute bottom-4 left-1/2 z-10 flex h-10 w-10 -translate-x-1/2 items-center justify-center rounded-full bg-white/60 text-ink-soft shadow-lg backdrop-blur-sm transition-transform hover:-translate-y-0.5"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
               <path d="M12 5v14" />

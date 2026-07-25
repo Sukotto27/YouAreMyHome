@@ -5,6 +5,24 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.3.5
+
+- Jump-to-latest-messages button in Chat is now white/translucent and
+  centered at the bottom instead of a solid rose circle in the corner
+
+## v1.3.4
+
+- Fixed Chat opening scrolled to the top instead of the bottom — the
+  auto-scroll-on-load only fired when the message count changed, but
+  messages often finish loading before the encryption gate clears, so by
+  the time the real chat UI (and its scroll target) actually mounted, the
+  count had already stopped changing and nothing scrolled it
+- Fixed the "jump to latest messages" button never appearing when scrolled
+  up — it was a child of the scrolling message list itself, so it scrolled
+  out of view along with everything else instead of staying pinned to the
+  visible corner; also replaced the IntersectionObserver-based visibility
+  check with a direct scroll-position check, which proved more reliable
+
 ## v1.3.3
 
 - Fixed the new unsupported-notifications diagnostic (v1.3.2) not actually
