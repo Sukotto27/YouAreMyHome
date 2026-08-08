@@ -121,6 +121,81 @@ function mirrorToJournal(fields) {
   return db.collection('journalEvents').add({ createdAt: FieldValue.serverTimestamp(), ...fields })
 }
 
+// Together since 3/30/24, 8:16pm — must stay in sync with
+// src/lib/relationship.js's ANNIVERSARY. Duplicated rather than shared
+// across the two separate deployable packages (this is CommonJS, the client
+// is ESM); it's one constant, not worth a cross-package import.
+const ANNIVERSARY = new Date(2024, 2, 30, 20, 16, 0)
+
+// Which anniversary-year "section" of the Tree of Union a date falls into
+// (0 = the first year together, 1 = the second, etc.) — matches the `years`
+// component of the client's getElapsedBreakdown(ANNIVERSARY, date).
+function yearIndexFor(date) {
+  let years = date.getFullYear() - ANNIVERSARY.getFullYear()
+  const anniversaryThisYear = new Date(
+    date.getFullYear(),
+    ANNIVERSARY.getMonth(),
+    ANNIVERSARY.getDate(),
+    ANNIVERSARY.getHours(),
+    ANNIVERSARY.getMinutes(),
+    ANNIVERSARY.getSeconds(),
+  )
+  if (date < anniversaryThisYear) years -= 1
+  return Math.max(0, years)
+}
+
+function treeEventDate(timestamp) {
+  if (!timestamp) return new Date()
+  return typeof timestamp.toDate === 'function' ? timestamp.toDate() : new Date(timestamp)
+}
+
+function dateKey(date) {
+  return date.toISOString().slice(0, 10)
+}
+
+// Tree of Union — every feature's milestone-level interactions (never
+// individual dice rolls/card plays, see the per-trigger comments below)
+// land here as one doc each, keyed by a deterministic id so retried
+// triggers and the one-time history backfill can both safely re-write the
+// same doc without duplicating a branch. `parentEventId` nests a smaller
+// "twig" (e.g. a comment) under the interaction branch it belongs to; leave
+// it null for a top-level branch off a feature's main stem.
+async function logTreeEvent(id, { createdAt, ...fields }) {
+  const date = treeEventDate(createdAt)
+  await db
+    .collection('treeEvents')
+    .doc(id)
+    .set(
+      {
+        ...fields,
+        createdAt: createdAt || FieldValue.serverTimestamp(),
+        yearIndex: yearIndexFor(date),
+      },
+      { merge: true },
+    )
+}
+
+// For high-frequency, low-distinctiveness interactions (kisses, thumbkiss
+// connects) — same-day events collapse into one doc with a running count
+// instead of one branch per tap, so a heavy day of "sending love" doesn't
+// bury the tree in identical twigs. Callers pass a day-scoped `id`.
+async function logAggregatedTreeEvent(id, { createdAt, summary, ...fields }) {
+  const date = treeEventDate(createdAt)
+  await db
+    .collection('treeEvents')
+    .doc(id)
+    .set(
+      {
+        ...fields,
+        lastSummary: summary,
+        lastAt: createdAt || FieldValue.serverTimestamp(),
+        yearIndex: yearIndexFor(date),
+        count: FieldValue.increment(1),
+      },
+      { merge: true },
+    )
+}
+
 // Chat is end-to-end encrypted client-side — `data.text` doesn't exist
 // server-side (it's inside `encryptedContent`, which this function never
 // touches), so the body is generic by type rather than a content preview.
@@ -185,6 +260,27 @@ exports.notifyOnQaRound = onDocumentCreated('qaRounds/{id}', async (event) => {
   })
 })
 
+// The Tree of Union branch is "both of us answered this" (see QA.jsx's own
+// isComplete), not either individual answer — so this only fires the moment
+// a round crosses from one answer to two, never on creation (which always
+// starts at zero or one answer).
+exports.logTreeOnQaComplete = onDocumentUpdated('qaRounds/{id}', async (event) => {
+  const before = event.data.before.data()
+  const after = event.data.after.data()
+  const beforeCount = Object.keys(before.answers || {}).length
+  const afterCount = Object.keys(after.answers || {}).length
+  if (beforeCount >= 2 || afterCount < 2) return
+  await logTreeEvent(`qa_${event.params.id}`, {
+    feature: 'qa',
+    kind: 'answered',
+    refId: event.params.id,
+    byUids: Object.keys(after.answers),
+    category: after.category || null,
+    summary: `You both answered "${truncate(after.questionText, 100)}"`,
+    createdAt: after.lastActivityAt || FieldValue.serverTimestamp(),
+  })
+})
+
 exports.notifyOnScrapbook = onDocumentCreated('scrapbook/{id}', async (event) => {
   const data = event.data.data()
   await Promise.all([
@@ -199,6 +295,15 @@ exports.notifyOnScrapbook = onDocumentCreated('scrapbook/{id}', async (event) =>
       imageDataUrl: data.imageDataUrl,
       authorUid: data.savedBy,
       authorName: data.savedByName,
+    }),
+    logTreeEvent(`games_draw_${event.params.id}`, {
+      feature: 'games',
+      kind: 'draw',
+      gameName: 'draw',
+      refId: event.params.id,
+      byUid: data.savedBy,
+      summary: `${data.savedByName || 'They'} saved a drawing to the scrapbook`,
+      createdAt: data.createdAt,
     }),
   ])
 })
@@ -222,6 +327,14 @@ exports.notifyOnGallery = onDocumentCreated('gallery/{id}', async (event) => {
       authorUid: data.uploadedBy,
       authorName: data.uploadedByName,
       ...(data.encryptedImage ? { encryptedImage: data.encryptedImage } : { imageDataUrl: data.imageDataUrl }),
+    }),
+    logTreeEvent(`gallery_${event.params.id}`, {
+      feature: 'gallery',
+      kind: 'uploaded',
+      refId: event.params.id,
+      byUid: data.uploadedBy,
+      summary: `${data.uploadedByName || 'They'} added a photo to the gallery`,
+      createdAt: data.createdAt,
     }),
   ])
 })
@@ -248,6 +361,16 @@ exports.notifyOnMail = onDocumentCreated('loveLetters/{id}', async (event) => {
       isCard,
       occasion: data.occasion || null,
     }),
+    logTreeEvent(`mail_${event.params.id}`, {
+      feature: 'mail',
+      kind: isCard ? 'card' : 'letter',
+      refId: event.params.id,
+      byUid: data.fromUid,
+      summary: isCard
+        ? `${data.fromName || 'They'} sent a card for ${data.occasion}`
+        : `${data.fromName || 'They'} sent a love letter`,
+      createdAt: data.createdAt,
+    }),
   ])
 })
 
@@ -258,6 +381,18 @@ exports.notifyOnMilestone = onDocumentCreated('milestones/{id}', async (event) =
     body: truncate(data.title) || 'Added a new milestone',
     url: '/YouAreMyHome/#/calendar',
   })
+  // migrations.js seeds a couple of milestones (anniversary, birthdays) with
+  // addedBy: null — no real actor, so nothing to hang a branch on.
+  if (data.addedBy) {
+    await logTreeEvent(`calendar_${event.params.id}`, {
+      feature: 'calendar',
+      kind: data.category || 'milestone',
+      refId: event.params.id,
+      byUid: data.addedBy,
+      summary: `${data.addedByName || 'They'} added "${truncate(data.title, 60)}"`,
+      createdAt: data.createdAt,
+    })
+  }
 })
 
 // A Date Night doc tracks its own upcoming occurrence (`nextOccurrenceDate`)
@@ -362,7 +497,7 @@ exports.expireVanishingImages = onSchedule('* * * * *', async () => {
 })
 
 // Shared by every game's "Invite partner" button (Draw, Mad Libs,
-// Never-Ending Story, Farkle, Obstacle Drop) rather than each having its own
+// Never-Ending Story, Farkle, Uno, Obstacle Drop) rather than each having its own
 // invite collection/trigger — see the client's useGameInvite hook. Like the
 // old per-game invite docs, this one exists purely to cause a notification:
 // useGameInvite's onSnapshot listener on the same collection does double
@@ -391,6 +526,24 @@ exports.notifyOnStoryTurn = onDocumentCreated('storyTurns/{id}', async (event) =
   })
 })
 
+// A turn is two writes (create the blank, then update it once the *other*
+// partner fills it in) — the tree branch represents the completed pair, not
+// either half alone, so this only fires on the fill-in update.
+exports.logTreeOnStoryTurn = onDocumentUpdated('storyTurns/{id}', async (event) => {
+  const before = event.data.before.data()
+  const after = event.data.after.data()
+  if (before.filledWord || !after.filledWord) return
+  await logTreeEvent(`games_story_${event.params.id}`, {
+    feature: 'games',
+    kind: 'story',
+    gameName: 'story',
+    refId: event.params.id,
+    byUids: [after.authorUid, after.filledByUid].filter(Boolean),
+    summary: `${after.authorName || 'They'} left a blank, and it got filled in`,
+    createdAt: after.filledAt || FieldValue.serverTimestamp(),
+  })
+})
+
 // farkleGame/match is a single ever-live doc (see useFarkle), so a turn
 // change is an update, not a create — startGame's initial write leaves
 // currentTurnUid pointed at the starter themself (no notification needed),
@@ -403,10 +556,49 @@ exports.notifyOnStoryTurn = onDocumentCreated('storyTurns/{id}', async (event) =
 exports.notifyOnFarkleTurn = onDocumentUpdated('farkleGame/{id}', async (event) => {
   const before = event.data.before.data()
   const after = event.data.after.data()
+  // farkleGame/match is a single ever-live doc, so there's no stable
+  // per-match id to key a tree event on — event.id (unique per trigger
+  // invocation, stable across Cloud Functions' at-least-once retries of the
+  // SAME invocation) stands in instead.
+  if (after.status === 'finished' && before.status !== 'finished') {
+    await logTreeEvent(`games_farkle_${event.id}`, {
+      feature: 'games',
+      kind: 'farkle',
+      gameName: 'farkle',
+      refId: event.params.id,
+      byUids: Object.keys(after.scores || {}),
+      summary: 'Finished a game of Farkle',
+      createdAt: FieldValue.serverTimestamp(),
+    })
+  }
   if (after.status !== 'playing' || before.currentTurnUid === after.currentTurnUid) return
   await sendToUid(after.currentTurnUid, {
     title: 'Farkle',
     body: 'Your turn to roll!',
+    url: '/YouAreMyHome/#/games',
+  })
+})
+
+// Same pattern as notifyOnFarkleTurn above, for unoGame/match (see useUno).
+exports.notifyOnUnoTurn = onDocumentUpdated('unoGame/{id}', async (event) => {
+  const before = event.data.before.data()
+  const after = event.data.after.data()
+  // See notifyOnFarkleTurn above for why event.id stands in for a match id.
+  if (after.status === 'finished' && before.status !== 'finished') {
+    await logTreeEvent(`games_uno_${event.id}`, {
+      feature: 'games',
+      kind: 'uno',
+      gameName: 'uno',
+      refId: event.params.id,
+      byUids: Object.keys(after.hands || {}),
+      summary: 'Finished a game of Uno',
+      createdAt: FieldValue.serverTimestamp(),
+    })
+  }
+  if (after.status !== 'playing' || before.currentTurnUid === after.currentTurnUid) return
+  await sendToUid(after.currentTurnUid, {
+    title: 'Uno',
+    body: 'Your turn to play!',
     url: '/YouAreMyHome/#/games',
   })
 })
@@ -421,6 +613,19 @@ exports.notifyOnLoveNote = onDocumentCreated('loveNotes/{id}', async (event) => 
     body: data.message,
     url: '/YouAreMyHome/#/',
   })
+  // Kisses especially can happen many times a day — day-aggregated so the
+  // tree gets one growing twig per person per day instead of one per tap.
+  const day = dateKey(treeEventDate(data.createdAt))
+  await logAggregatedTreeEvent(`love_${data.category || 'note'}_${data.fromUid}_${day}`, {
+    feature: 'love',
+    kind: data.category === 'kiss' ? 'kiss' : 'note',
+    byUid: data.fromUid,
+    summary:
+      data.category === 'kiss'
+        ? `${data.fromName || 'They'} sent a kiss`
+        : `${data.fromName || 'They'} sent: ${truncate(data.message)}`,
+    createdAt: data.createdAt,
+  })
 })
 
 // Each new comment bumps its parent doc's lastActivityAt/lastActivityByUid
@@ -430,6 +635,17 @@ exports.notifyOnLoveNote = onDocumentCreated('loveNotes/{id}', async (event) => 
 // contentEncrypted: true (only gallery comments, so far) means
 // `comment.text` doesn't exist server-side — it's inside encryptedContent,
 // which this function never touches — so the body drops the text preview.
+// Maps each commentable collection to the Tree of Union feature/parent-event
+// id its comments should nest under — must match the deterministic ids used
+// by that collection's own logTreeEvent call above (calendar_/qa_/
+// games_draw_/gallery_), since there's no lookup, just string-building.
+const COMMENT_TREE_TARGET = {
+  milestones: { feature: 'calendar', parentEventId: (id) => `calendar_${id}` },
+  qaRounds: { feature: 'qa', parentEventId: (id) => `qa_${id}` },
+  scrapbook: { feature: 'games', parentEventId: (id) => `games_draw_${id}` },
+  gallery: { feature: 'gallery', parentEventId: (id) => `gallery_${id}` },
+}
+
 function notifyOnComment(parentCollection, { title, url, contentEncrypted = false }) {
   return onDocumentCreated(`${parentCollection}/{parentId}/comments/{commentId}`, async (event) => {
     const comment = event.data.data()
@@ -445,6 +661,23 @@ function notifyOnComment(parentCollection, { title, url, contentEncrypted = fals
       body: contentEncrypted ? `${authorName} commented` : `${authorName} commented: ${truncate(comment.text)}`,
       url,
     })
+
+    // Nests as a small twig under the branch it's replying to — if that
+    // branch doesn't exist yet (e.g. a comment on a Q&A round only one of
+    // you has answered so far), this just leaves an orphaned doc the tree
+    // renderer skips rather than erroring; not worth a lookup to prevent.
+    const target = COMMENT_TREE_TARGET[parentCollection]
+    if (target) {
+      await logTreeEvent(`${parentCollection}_${event.params.parentId}_c_${event.params.commentId}`, {
+        feature: target.feature,
+        kind: 'comment',
+        refId: event.params.commentId,
+        byUid: comment.authorUid,
+        parentEventId: target.parentEventId(event.params.parentId),
+        summary: contentEncrypted ? `${authorName} commented` : `${authorName} commented: ${truncate(comment.text)}`,
+        createdAt: comment.createdAt,
+      })
+    }
   })
 }
 
@@ -498,6 +731,72 @@ exports.notifyOnJournalEvent = onDocumentCreated('journalEvents/{id}', async (ev
     title: titles[data.type] || 'New journal entry',
     body,
     url: data.type === 'madlib' ? '/YouAreMyHome/#/games' : '/YouAreMyHome/#/journal',
+  })
+})
+
+function journalTreeSummary(data) {
+  switch (data.type) {
+    case 'mood':
+      return `${data.authorName || 'They'} logged feeling ${data.label || data.emoji || 'a mood'}`
+    case 'gratitude':
+      return `${data.authorName || 'They'} wrote a gratitude entry`
+    case 'checkin':
+      return `${data.authorName || 'They'} checked in`
+    case 'assessment':
+      return `${data.authorName || 'They'} completed the ${data.title || ''} assessment`.trim()
+    default:
+      return `${data.authorName || 'They'} added a journal entry`
+  }
+}
+
+// journalEvents is a mixed bag (see JOURNAL_NOTIFY_TYPES above): mirrors of
+// scrapbook/gallery/mail/dateNight (already logged to the tree at their own
+// source, so skipped here), a mutual thumbkiss connect (no single author —
+// day-aggregated under "love" the same way kisses are), a Mad Libs
+// submission (only becomes a tree branch once BOTH of you have submitted,
+// same "joint completion" rule as Q&A — checked by reading the underlying
+// madLibs doc), and genuinely-authored journal entries.
+const JOURNAL_TREE_SKIP_TYPES = new Set(['scrapbook', 'gallery', 'mail', 'dateNight'])
+
+exports.logTreeOnJournalEvent = onDocumentCreated('journalEvents/{id}', async (event) => {
+  const data = event.data.data()
+  if (JOURNAL_TREE_SKIP_TYPES.has(data.type)) return
+
+  if (data.type === 'thumbkiss') {
+    const day = dateKey(treeEventDate(data.createdAt))
+    await logAggregatedTreeEvent(`love_thumbkiss_${day}`, {
+      feature: 'love',
+      kind: 'thumbkiss',
+      byUid: null,
+      summary: 'You both connected with a thumbkiss',
+      createdAt: data.createdAt,
+    })
+    return
+  }
+
+  if (data.type === 'madlib') {
+    if (!data.storyId) return
+    const storySnap = await db.doc(`madLibs/${data.storyId}`).get()
+    const answers = storySnap.exists ? storySnap.data().answers || {} : {}
+    if (Object.keys(answers).length < 2) return
+    await logTreeEvent(`games_madlibs_${data.storyId}`, {
+      feature: 'games',
+      kind: 'madlibs',
+      gameName: 'madlibs',
+      refId: data.storyId,
+      summary: `You both finished "${data.title || 'a Mad Libs story'}"`,
+      createdAt: data.createdAt,
+    })
+    return
+  }
+
+  await logTreeEvent(`journal_${event.params.id}`, {
+    feature: 'journal',
+    kind: data.type,
+    refId: event.params.id,
+    byUid: data.authorUid || null,
+    summary: journalTreeSummary(data),
+    createdAt: data.createdAt,
   })
 })
 

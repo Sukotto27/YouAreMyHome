@@ -31,6 +31,7 @@ const NAV_ITEMS = [
   { key: 'calendar', to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
   { key: 'thumbkiss', action: 'sendLove', label: 'Send Love', icon: 'thumbkiss' },
   { key: 'journal', to: '/journal', label: 'Journal', icon: 'journal', badgeKey: 'journal' },
+  { key: 'tree', to: '/tree', label: 'Tree', icon: 'tree' },
 ]
 
 const GREETED_KEY = 'you-are-my-home:greeted'

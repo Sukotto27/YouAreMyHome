@@ -5,6 +5,25 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.5.0
+
+- Added the Tree of Union — a new tab that grows a stylized branching tree
+  from everything the two of you do in the app (besides Chat): one main
+  branch per feature, sized and colored consistently, with smaller branches
+  for each interaction and twigs for comments on them. The trunk is sectioned
+  by anniversary year, tallest at the base (the first year together) and
+  still visibly growing in the current one. Tap or hover any branch to see
+  what it was. Backed by a new `treeEvents` collection that Cloud Functions
+  write to at each feature's existing milestone moments (both answering a
+  Q&A, a finished game, a photo upload, and so on — never every small step
+  within one, so years of daily use stay legible instead of cluttered); a
+  one-time "Rebuild from history" action on the page reconstructs everything
+  that already happened before this shipped. Known gap: Farkle and Uno keep
+  only their current match, not a history of past ones, so past finished
+  games can't be reconstructed — only new ones from here on will show
+- Q&A: added an "Answered by Both" category showing every question you've
+  both answered, tagged with its original category
+
 ## v1.4.0
 
 - Added Uno to Games — the standard 108-card deck, played 2-player on a

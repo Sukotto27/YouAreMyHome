@@ -62,6 +62,15 @@ const PATHS = {
       <path d="M8.5 16h4" />
     </>
   ),
+  tree: (
+    <>
+      <path d="M12 21v-7" />
+      <path d="M12 14c0-3-3-3-4-5.5" />
+      <path d="M12 14c0-3 3-3 4-5.5" />
+      <path d="M12 10.5c0-2.5-2.2-2.5-3-4.5" />
+      <path d="M12 10.5c0-2.5 2.2-2.5 3-4.5" />
+    </>
+  ),
 }
 
 export default function NavIcon({ name, className }) {

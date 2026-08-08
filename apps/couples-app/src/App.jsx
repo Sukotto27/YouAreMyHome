@@ -12,6 +12,7 @@ import Gallery from './pages/Gallery'
 import Mail from './pages/Mail'
 import Calendar from './pages/Calendar'
 import Journal from './pages/Journal'
+import Tree from './pages/Tree'
 import ShareTarget from './pages/ShareTarget'
 import Settings from './pages/Settings'
 
@@ -37,6 +38,7 @@ function App() {
             <Route path="/mail" element={<Mail />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/journal" element={<Journal />} />
+            <Route path="/tree" element={<Tree />} />
             <Route path="/share-target" element={<ShareTarget />} />
             <Route path="/settings" element={<Settings />} />
           </Route>

@@ -89,6 +89,10 @@ export default function QA() {
     [rounds, effectivePartnerUid, user.uid],
   )
 
+  // Every round both of you have answered, library or Custom alike — its
+  // original category tags along for display (see showCategoryTag below).
+  const bothAnsweredRounds = useMemo(() => rounds.filter(isComplete), [rounds])
+
   // Library questions neither of you has answered yet — the pool the
   // featured "random question" card and its shuffle button draw from.
   const freshPool = useMemo(
@@ -145,6 +149,14 @@ export default function QA() {
     if (cat === 'Custom') {
       return customRounds.map((round) =>
         enrichQuestion({ id: round.id, text: round.questionText, category: 'Custom', options: round.options }, null),
+      )
+    }
+    if (cat === 'both') {
+      return bothAnsweredRounds.map((round) =>
+        enrichQuestion(
+          { id: round.questionId || round.id, text: round.questionText, category: round.category, options: round.options },
+          round.questionId,
+        ),
       )
     }
     return QUESTION_LIBRARY.filter((q) => q.category === cat).map((q) => enrichQuestion(q, q.id))
@@ -311,7 +323,13 @@ export default function QA() {
 
   if (view === 'category' && activeCategory) {
     const categoryTitle =
-      activeCategory === 'awaiting' ? 'Awaiting Your Answer' : activeCategory === 'Custom' ? 'Custom' : activeCategory
+      activeCategory === 'awaiting'
+        ? 'Awaiting Your Answer'
+        : activeCategory === 'both'
+          ? 'Answered by Both'
+          : activeCategory === 'Custom'
+            ? 'Custom'
+            : activeCategory
     return (
       <QuestionList
         title={categoryTitle}
@@ -319,7 +337,7 @@ export default function QA() {
         mineLabel={mineLabel}
         partnerLabel={partnerName}
         avatars={chatSettings.avatars}
-        showCategoryTag={activeCategory === 'awaiting'}
+        showCategoryTag={activeCategory === 'awaiting' || activeCategory === 'both'}
         onSelectQuestion={openQuestion}
         onBack={() => setView('menu')}
         onAskCustom={activeCategory === 'Custom' ? askCustomQuestion : null}
@@ -341,6 +359,10 @@ export default function QA() {
         setActiveCategory('awaiting')
         setView('category')
       }}
+      onSelectBoth={() => {
+        setActiveCategory('both')
+        setView('category')
+      }}
       onSelectCustom={() => {
         setActiveCategory('Custom')
         setView('category')
@@ -348,6 +370,7 @@ export default function QA() {
       onSelectAssessments={() => setView('assessments')}
       onRewind={() => setRewinding(true)}
       awaitingCount={awaitingRounds.length}
+      bothAnsweredCount={bothAnsweredRounds.length}
     />
   )
 }

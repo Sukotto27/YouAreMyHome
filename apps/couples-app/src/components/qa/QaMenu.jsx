@@ -11,10 +11,12 @@ export default function QaMenu({
   onAnswerRandom,
   onSelectCategory,
   onSelectAwaiting,
+  onSelectBoth,
   onSelectCustom,
   onSelectAssessments,
   onRewind,
   awaitingCount,
+  bothAnsweredCount,
 }) {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-8 sm:px-6">
@@ -67,6 +69,18 @@ export default function QaMenu({
           {awaitingCount > 0 && (
             <span className="absolute right-3 top-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose px-1.5 font-body text-xs font-semibold text-paper">
               {awaitingCount}
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
+          onClick={onSelectBoth}
+          className="relative rounded-2xl border border-rose/30 bg-blush-soft/50 px-4 py-3 text-left font-body font-medium text-ink transition-colors hover:border-rose"
+        >
+          Answered by Both
+          {bothAnsweredCount > 0 && (
+            <span className="absolute right-3 top-3 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose px-1.5 font-body text-xs font-semibold text-paper">
+              {bothAnsweredCount}
             </span>
           )}
         </button>
