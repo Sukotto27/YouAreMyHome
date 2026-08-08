@@ -5,6 +5,13 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.4.0
+
+- Added Uno to Games — the standard 108-card deck, played 2-player on a
+  single ever-live shared match (same pattern as Farkle): match color or
+  number or play a Wild, Skip/Reverse hand the turn right back to you since
+  there's only the two of you, first to empty their hand wins
+
 ## v1.3.6
 
 - Fixed "Submit my words" in Mad Libs silently doing nothing — the write

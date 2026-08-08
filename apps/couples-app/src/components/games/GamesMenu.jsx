@@ -5,7 +5,7 @@
 // "You Are My Home — The Game" is its own installable PWA (separate Vite
 // app under apps/home-game, deployed alongside this one at /game/) rather
 // than a component here, so it's a plain link out instead of a view.
-export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory, onSelectFarkle, onSelectObstacleDrop }) {
+export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory, onSelectFarkle, onSelectUno, onSelectObstacleDrop }) {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-8 sm:px-6">
       <div className="text-center">
@@ -57,6 +57,14 @@ export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory
         >
           <p className="font-body font-medium text-ink">Farkle</p>
           <p className="mt-1 font-body text-xs text-ink-soft">Roll for points, but don't push your luck too far</p>
+        </button>
+        <button
+          type="button"
+          onClick={onSelectUno}
+          className="rounded-2xl border border-teal/30 bg-white/60 px-4 py-4 text-left transition-colors hover:border-rose"
+        >
+          <p className="font-body font-medium text-ink">Uno</p>
+          <p className="mt-1 font-body text-xs text-ink-soft">Match colors and numbers, race to empty your hand first</p>
         </button>
         <button
           type="button"
