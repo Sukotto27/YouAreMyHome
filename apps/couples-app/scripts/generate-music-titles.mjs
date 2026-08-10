@@ -6,13 +6,13 @@ import { parseFile } from 'music-metadata'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const root = path.resolve(__dirname, '..')
 
-// music/ (monorepo root, top level only — the game's tracks live in the
-// music/game/ subfolder and are irrelevant here) is the single shared
-// source for the couple's songs. Browsers can't read ID3 tags on their own,
-// and reading them at runtime would mean fetching every track's bytes just
-// to populate the picker list — so this reads each file's embedded Title
-// tag once, at build time, and writes a small lookup lib/musicLibrary.js
-// merges with the actual playable URLs (from a build-time glob).
+// music/ (monorepo root) is the single shared source for every track — the
+// same files also serve as apps/home-game's background music. Browsers
+// can't read ID3 tags on their own, and reading them at runtime would mean
+// fetching every track's bytes just to populate the picker list — so this
+// reads each file's embedded Title tag once, at build time, and writes a
+// small lookup lib/musicLibrary.js merges with the actual playable URLs
+// (from a build-time glob).
 const musicDir = path.resolve(root, '../../music')
 const outFile = path.join(root, 'src/lib/musicTitles.generated.json')
 

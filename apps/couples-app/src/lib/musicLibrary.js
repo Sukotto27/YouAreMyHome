@@ -1,14 +1,16 @@
 import titles from './musicTitles.generated.json'
 
-// music/ (monorepo root, top level) is the single shared source for the
-// couple's songs — scripts/generate-music-titles.mjs reads each file's
-// embedded ID3 Title tag at build/dev time into musicTitles.generated.json
-// (browsers can't read ID3 tags themselves, and doing it at runtime would
-// mean fetching every track's bytes just to populate the picker list). This
-// glob only supplies the actual playable URL per file. music/game/ (the RPG
-// soundtrack — a sibling folder of fixed, systematic names with no
-// meaningful titles) is excluded automatically, since `*` doesn't match
-// into subfolders.
+// music/ (monorepo root) is the single shared source for every track — the
+// same files also serve as apps/home-game's background music (see
+// apps/home-game/scripts/sync-music.mjs), so filenames here stay whatever
+// that game's code needs (fixed, systematic names like `dungeon3.mp3`, see
+// src/main.js there); this app ignores filenames entirely and titles each
+// track from its embedded ID3 Title tag instead. scripts/generate-music-
+// titles.mjs reads those tags at build/dev time into
+// musicTitles.generated.json (browsers can't read ID3 tags themselves, and
+// doing it at runtime would mean fetching every track's bytes just to
+// populate the picker list). This glob only supplies the actual playable
+// URL per file.
 const trackModules = import.meta.glob('../../../../music/*.mp3', {
   eager: true,
   import: 'default',

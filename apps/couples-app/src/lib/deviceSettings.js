@@ -5,6 +5,7 @@
 
 const SOUNDS_KEY = 'you-are-my-home:sounds-enabled'
 const AUTO_DOWNLOAD_KEY = 'you-are-my-home:auto-download-images'
+const MUSIC_VOLUME_KEY = 'you-are-my-home:music-volume'
 
 function readBool(key, fallback) {
   try {
@@ -16,6 +17,24 @@ function readBool(key, fallback) {
 }
 
 function writeBool(key, value) {
+  try {
+    localStorage.setItem(key, String(value))
+  } catch {
+    // storage full/unavailable — setting just won't persist this session
+  }
+}
+
+function readNumber(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed = raw === null ? NaN : Number(raw)
+    return Number.isFinite(parsed) ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeNumber(key, value) {
   try {
     localStorage.setItem(key, String(value))
   } catch {
@@ -40,4 +59,15 @@ export function autoDownloadImagesEnabled() {
 
 export function setAutoDownloadImagesEnabled(enabled) {
   writeBool(AUTO_DOWNLOAD_KEY, enabled)
+}
+
+// Deliberately per-device, unlike the rest of the Music tab's playback
+// state (track/play-pause/shuffle) — two people sharing a synced listening
+// session still want independent volume for their own speakers/headphones.
+export function musicVolume() {
+  return Math.max(0, Math.min(1, readNumber(MUSIC_VOLUME_KEY, 1)))
+}
+
+export function setMusicVolume(volume) {
+  writeNumber(MUSIC_VOLUME_KEY, Math.max(0, Math.min(1, volume)))
 }

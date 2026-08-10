@@ -5,6 +5,24 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.10.0
+
+- Fixed the Music tab only showing 7 of 58 songs — the rest had been
+  incorrectly split off into a separate folder for the game. All 58 tracks
+  now live in one shared source and serve double duty as both the game's
+  background music and the Music tab's library.
+- Larger, easier-to-read title text on the spinning record.
+- Added shuffle (on by default, shared between you both — same as the rest
+  of playback).
+- Added a volume slider, in both the mini bar and the Music tab — deliberately
+  per-device, not synced, so you can each set your own listening volume.
+- Added favorites: tap the heart on the mini bar or in the Music tab, and a
+  new Favorites view lists every song either of you has favorited, showing
+  whose it is.
+- Added a sleep timer (Music tab, 15/30/45/60 min) that pauses playback on
+  your device only, without interrupting your partner if they're still
+  listening.
+
 ## v1.9.0
 
 - Added a "See all tracks & comment on them" link to the Music tab — opens a
