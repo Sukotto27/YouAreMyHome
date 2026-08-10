@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, Outlet } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { MusicPlayerProvider, useMusicPlayer } from '../../context/MusicPlayerContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
 import { seedHistoryMilestones, seedBirthdays } from '../../lib/migrations'
@@ -14,7 +15,7 @@ import CheckInReminder from '../CheckInReminder'
 import GameInvitePopup from '../GameInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
 import SendLoveMenu from '../SendLoveMenu'
-import IncomingLoveNotePopup from '../IncomingLoveNotePopup'
+import MusicBar from '../MusicBar'
 import SwipeableNav from './SwipeableNav'
 import Wordmark from './Wordmark'
 import heartLeft from '../../assets/images/heart-left.png'
@@ -37,10 +38,19 @@ const NAV_ITEMS = [
 const GREETED_KEY = 'you-are-my-home:greeted'
 
 export default function Shell() {
+  return (
+    <MusicPlayerProvider>
+      <ShellContent />
+    </MusicPlayerProvider>
+  )
+}
+
+function ShellContent() {
   const { user } = useAuth()
+  const { currentTrack } = useMusicPlayer()
   const [greeting, setGreeting] = useState(null)
   const [sendLoveOpen, setSendLoveOpen] = useState(false)
-  const unread = useUnreadBadges()
+  const { unread } = useUnreadBadges()
   useNotificationSounds(unread)
   const thumbkiss = useThumbkiss()
   useThumbkissGesture(thumbkiss.startPress, thumbkiss.endPress)
@@ -79,7 +89,6 @@ export default function Shell() {
       <NamePrompt />
       <CheckInReminder />
       <GameInvitePopup />
-      <IncomingLoveNotePopup />
       <SendLoveMenu
         open={sendLoveOpen}
         onClose={() => setSendLoveOpen(false)}
@@ -127,11 +136,14 @@ export default function Shell() {
         </Link>
       </header>
 
-      <main className="flex flex-1 flex-col overflow-hidden pb-16 sm:pb-0">
+      <main className={`flex flex-1 flex-col overflow-hidden sm:pb-0 ${currentTrack ? 'pb-28' : 'pb-16'}`}>
         <Outlet />
       </main>
 
-      <SwipeableNav items={NAV_ITEMS} unread={unread} onOpenSendLove={() => setSendLoveOpen(true)} />
+      <div className="fixed inset-x-0 bottom-0 z-10 sm:static">
+        <MusicBar />
+        <SwipeableNav items={NAV_ITEMS} unread={unread} onOpenSendLove={() => setSendLoveOpen(true)} />
+      </div>
     </div>
   )
 }

@@ -1,6 +1,15 @@
 export const CATEGORIES = ['milestone', 'plan', 'goal', 'dateNight']
 export const RECURRENCE_TYPES = ['none', 'weekly', 'biweekly', 'monthly', 'yearly']
 
+// Shared by Calendar.jsx (subcategory tab badges) and Home.jsx (the Calendar
+// avatar badge's deep link) — which tab a given category lives under.
+export const CALENDAR_TAB_FOR_CATEGORY = {
+  milestone: 'milestones',
+  dateNight: 'dateNights',
+  plan: 'plans',
+  goal: 'goals',
+}
+
 function startOfDay(date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }

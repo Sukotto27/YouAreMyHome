@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   addDoc,
   collection,
@@ -12,8 +13,9 @@ import {
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
-import { nextOccurrence } from '../lib/milestones'
+import { nextOccurrence, CALENDAR_TAB_FOR_CATEGORY } from '../lib/milestones'
 import { useMarkSeen } from '../hooks/useMarkSeen'
+import { useUnreadBadges } from '../hooks/useUnreadBadges'
 import EventForm from '../components/calendar/EventForm'
 import EventRow from '../components/calendar/EventRow'
 import CalendarGrid from '../components/calendar/CalendarGrid'
@@ -47,10 +49,13 @@ function sortItems(items) {
 export default function Calendar() {
   const { user } = useAuth()
   useMarkSeen('milestones')
+  const location = useLocation()
   const [all, setAll] = useState(firebaseReady ? [] : readDemoList('milestones'))
-  const [tab, setTab] = useState('milestones')
+  const [tab, setTab] = useState(location.state?.tab || 'milestones')
   const [adding, setAdding] = useState(false)
   const [saving, setSaving] = useState(false)
+  const { unread, detail } = useUnreadBadges()
+  const unreadTab = unread.milestones ? CALENDAR_TAB_FOR_CATEGORY[detail.milestones] || 'milestones' : null
 
   useEffect(() => {
     if (!firebaseReady) return
@@ -151,11 +156,12 @@ export default function Calendar() {
               setTab(t.id)
               setAdding(false)
             }}
-            className={`rounded-full px-3 py-1.5 font-body text-xs font-medium transition-colors ${
+            className={`flex items-center gap-1 rounded-full px-3 py-1.5 font-body text-xs font-medium transition-colors ${
               tab === t.id ? 'bg-paper text-rose shadow-sm' : 'text-ink-soft'
             }`}
           >
             {t.label}
+            {unreadTab === t.id && <span className="h-1.5 w-1.5 rounded-full bg-rose" />}
           </button>
         ))}
       </div>

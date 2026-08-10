@@ -26,6 +26,15 @@ export default defineConfig({
   // .env.local lives at the monorepo root and is shared with apps/home-game
   // (both apps read the same Firebase project config).
   envDir: fileURLToPath(new URL('../..', import.meta.url)),
+  server: {
+    fs: {
+      // The dev server otherwise 403s on anything outside this app's own
+      // root — needed since lib/musicLibrary.js's glob reaches up to the
+      // monorepo-root music/ folder, the single shared audio source both
+      // apps in this repo draw from.
+      allow: [fileURLToPath(new URL('../..', import.meta.url))],
+    },
+  },
   define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(packageVersion),
     'import.meta.env.VITE_BUILD_COMMIT': JSON.stringify(gitCommit()),
@@ -76,6 +85,10 @@ export default defineConfig({
           },
         },
       },
+      // Deliberately no `mp3` here — the shared music/*.mp3 (see
+      // lib/musicLibrary.js) must stay out of the eager precache, or every
+      // install/update would force-download the entire song library instead
+      // of fetching tracks on demand when actually played.
       injectManifest: {
         globPatterns: ['**/*.{js,css,html,png,jpg,svg,woff2}'],
       },

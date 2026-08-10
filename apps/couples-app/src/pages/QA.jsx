@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { addDoc, collection, doc, onSnapshot, orderBy, query, limit, serverTimestamp, updateDoc } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
@@ -25,6 +26,7 @@ export default function QA() {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
   const [chatSettings] = useChatSettings()
+  const location = useLocation()
   useMarkSeen('qa')
 
   // In demo mode there's never a real partner to discover via presence, but
@@ -51,8 +53,9 @@ export default function QA() {
   // "awaiting"/"Custom" ones) is the primary way to find a question to
   // answer, with the featured random pick as a shortcut into the same detail
   // view. A placeholder ahead of a bigger Q&A rework.
-  const [view, setView] = useState('menu')
-  const [activeCategory, setActiveCategory] = useState(null) // string | 'awaiting' | 'Custom'
+  const deepLinkCategory = location.state?.category === 'awaiting' ? 'awaiting' : null
+  const [view, setView] = useState(deepLinkCategory ? 'category' : 'menu')
+  const [activeCategory, setActiveCategory] = useState(deepLinkCategory) // string | 'awaiting' | 'Custom'
   const [activeQuestion, setActiveQuestion] = useState(null)
   const [randomPick, setRandomPick] = useState(null)
 

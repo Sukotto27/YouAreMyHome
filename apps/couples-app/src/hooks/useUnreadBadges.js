@@ -27,14 +27,43 @@ const TRACKED_FEATURES = [
     activityField: 'lastActivityAt',
     activityAuthorField: 'lastActivityByUid',
   },
-  { key: 'mail', collectionName: 'loveLetters', activityField: 'createdAt', activityAuthorField: 'fromUid' },
+  {
+    key: 'mail',
+    collectionName: 'loveLetters',
+    activityField: 'createdAt',
+    activityAuthorField: 'fromUid',
+    // Lets the avatar badge show 💐 vs 💌 without a separate query — mirrors
+    // the same `entry.isCard` branch JournalEntry.jsx already reads.
+    detailField: 'isCard',
+  },
+  {
+    key: 'loveNotes',
+    collectionName: 'loveNotes',
+    activityField: 'createdAt',
+    activityAuthorField: 'fromUid',
+    // Surfaces the actual emoji sent so the avatar badge can show it directly.
+    detailField: 'emoji',
+  },
   {
     key: 'milestones',
     collectionName: 'milestones',
     activityField: 'lastActivityAt',
     activityAuthorField: 'lastActivityByUid',
+    // Milestones/Date Nights/Plans/Goals all share this one collection —
+    // `detail` carries the `category` of the latest unread item so pages
+    // can point at the specific tab it's in, not just "something's new".
+    detailField: 'category',
   },
-  { key: 'journal', collectionName: 'journalEvents', activityField: 'createdAt', activityAuthorField: 'authorUid' },
+  {
+    key: 'journal',
+    collectionName: 'journalEvents',
+    activityField: 'createdAt',
+    activityAuthorField: 'authorUid',
+    // journalEvents mirrors activity from lots of features (checkin,
+    // gratitude, mood, mail, ...) — `detail` carries the entry `type` so
+    // Journal can point at Status/Goals/Timeline specifically.
+    detailField: 'type',
+  },
 ]
 
 export function useUnreadBadges() {
@@ -57,14 +86,18 @@ export function useUnreadBadges() {
 
   useEffect(() => {
     if (!firebaseReady || !user) return
-    const unsubscribers = TRACKED_FEATURES.map(({ key, collectionName, activityField, activityAuthorField }) => {
+    const unsubscribers = TRACKED_FEATURES.map(({ key, collectionName, activityField, activityAuthorField, detailField }) => {
       const latestQuery = query(collection(db, collectionName), orderBy(activityField, 'desc'), limit(1))
       return onSnapshot(latestQuery, (snapshot) => {
         const latestDoc = snapshot.docs[0]
         setLatest((prev) => ({
           ...prev,
           [key]: latestDoc
-            ? { authorUid: latestDoc.data()[activityAuthorField], activityAt: latestDoc.data()[activityField] }
+            ? {
+                authorUid: latestDoc.data()[activityAuthorField],
+                activityAt: latestDoc.data()[activityField],
+                detail: detailField ? latestDoc.data()[detailField] : null,
+              }
             : null,
         }))
       })
@@ -73,14 +106,18 @@ export function useUnreadBadges() {
   }, [user])
 
   const unread = {}
+  const detail = {}
   for (const { key } of TRACKED_FEATURES) {
     const item = latest[key]
     if (!item || !item.activityAt || item.authorUid === user?.uid) {
       unread[key] = false
+      detail[key] = null
       continue
     }
     const seenAt = presence?.[key]
-    unread[key] = !seenAt || item.activityAt.toMillis() > seenAt.toMillis()
+    const isUnread = !seenAt || item.activityAt.toMillis() > seenAt.toMillis()
+    unread[key] = isUnread
+    detail[key] = isUnread ? item.detail : null
   }
-  return unread
+  return { unread, detail }
 }

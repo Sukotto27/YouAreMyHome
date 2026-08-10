@@ -66,7 +66,7 @@ export default function SwipeableNav({ items, unread, onOpenSendLove }) {
   }
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-10 border-t border-ink/10 bg-paper/95 backdrop-blur sm:static sm:border-t-0 sm:bg-transparent sm:py-2">
+    <nav className="border-t border-ink/10 bg-paper/95 backdrop-blur sm:border-t-0 sm:bg-transparent sm:py-2">
       {pages.length > 1 && (
         <div className="flex justify-center gap-1 pt-1.5">
           {pages.map((_, i) => (

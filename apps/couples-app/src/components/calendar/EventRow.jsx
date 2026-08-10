@@ -5,6 +5,7 @@ import { zonedTimeToUtc } from '../../lib/timezone'
 import CommentThread from '../CommentThread'
 import EventForm from './EventForm'
 import SendCardModal from './SendCardModal'
+import DateNightSyncUp from './DateNightSyncUp'
 
 const RECURRENCE_LABELS = {
   weekly: 'Repeats every week',
@@ -150,6 +151,8 @@ export default function EventRow({ item, category, onSave, onDelete }) {
           <span className="text-ink-soft/60">{RECURRENCE_LABELS[recurrenceType]}</span>
         )}
       </div>
+
+      {category === 'dateNight' && <DateNightSyncUp item={item} />}
 
       {showComments && (
         <div className="mt-3 border-t border-ink/10 pt-3">

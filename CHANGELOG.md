@@ -5,6 +5,67 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.9.0
+
+- Added a "See all tracks & comment on them" link to the Music tab — opens a
+  full list of every song, each with its own comment thread (same
+  add-a-comment pattern already used on Calendar events, Q&A rounds, and
+  Gallery photos), so you can leave a note on a specific song without it
+  crowding the main now-playing screen.
+
+## v1.8.1
+
+- Fixed Music tab track titles: they now come from each file's embedded ID3
+  Title tag (read once at build time) instead of the filename — so files
+  that share a filename pattern but are genuinely different songs (or are
+  named with technical/internal names) show their real titles. Also
+  consolidated audio storage: both this app and the game now draw every
+  track from one shared `music/` folder at the repo root instead of each
+  keeping its own copy, so there's exactly one place to add or update a
+  file going forward.
+
+## v1.8.0
+
+- Added a real Music tab: drop a retitled `.mp3` into `src/assets/music/` and
+  it shows up automatically (the filename is the title, no extra setup).
+  Playback is synced between the two of you — whoever starts a song
+  establishes a shared session, and opening the app later on the other side
+  picks up right where it should be, automatically, no need to both be
+  looking at the app at the same time. A thin control bar (play/pause/next/
+  previous) stays visible above the bottom nav on every page while a song is
+  active. On the Music page itself, the spinning record shows the current
+  track's title arced around the label, and only spins while actually
+  playing.
+
+## v1.7.0
+
+- Replaced missed-activity dialogs with passive avatar badges. Send Love no
+  longer pops up a modal (live or otherwise) — like every other feature now,
+  it's a small icon that waits patiently instead of ambushing you when you
+  open the app. Each notification type has its own fixed position around the
+  avatars (a consistent six-slot ring): Chat, Mail, Send Love, Calendar
+  (something's coming up in the next week), Q&A (a question is awaiting your
+  answer), and Journal (your partner checked in and you haven't yet). Mail
+  and Send Love badges show on your partner's avatar; Q&A and Journal show on
+  your own; Calendar shows on both.
+
+## v1.6.0
+
+- Journal and Calendar now surface unread activity at the sub-tab level, not
+  just as a single badge on the nav icon — Journal points at Status or Daily
+  Goals when that's specifically where the new activity is (everything else
+  defaults to Timeline), and Calendar points at whichever of
+  Milestones/Date Night/Plans/Goals the latest unseen item belongs to.
+- Added Date Night "Sync-Up": once a scheduled Date Night is within an hour
+  of starting, its Calendar row shows a live countdown and, once the time
+  arrives, a "Start Together" button. Each of you tapping ready shows both
+  your local start times and a ready indicator for the other; once you're
+  both ready, a synchronized 5-second countdown counts you both into
+  starting something (a movie, etc.) at the same moment.
+- The Home page now shows a small countdown icon near the avatars whenever a
+  Date Night is about to start (same one-hour window as Sync-Up), tapping it
+  jumps straight to the Date Night tab in Calendar.
+
 ## v1.5.0
 
 - Added the Tree of Union — a new tab that grows a stylized branching tree

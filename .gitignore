@@ -22,6 +22,14 @@ journal.docx
 # Original sound uploads — app-used copies live in src/assets/sounds.
 sounds/*.mp3
 
+# music/ (repo root) is the single committed source for all audio — both
+# apps regenerate their own runtime copy from it at build/dev time (see
+# apps/home-game/scripts/sync-music.mjs and
+# apps/couples-app/scripts/generate-music-titles.mjs), so these are build
+# artifacts, not a second place to hand-maintain the same files.
+apps/home-game/public/src/music
+apps/couples-app/src/lib/musicTitles.generated.json
+
 # Editor directories and files
 .claude
 .vscode/*

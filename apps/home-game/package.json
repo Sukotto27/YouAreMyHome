@@ -4,7 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/sync-music.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/sync-music.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "generate-icons": "node scripts/generate-icons.mjs"

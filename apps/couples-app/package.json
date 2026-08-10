@@ -1,10 +1,12 @@
 {
   "name": "you-are-my-home",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.9.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/generate-music-titles.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/generate-music-titles.mjs",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -23,6 +25,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "jimp": "^1.6.1",
+    "music-metadata": "^11.14.0",
     "oxlint": "^1.71.0",
     "vite": "^8.1.1",
     "vite-plugin-pwa": "^1.3.0",

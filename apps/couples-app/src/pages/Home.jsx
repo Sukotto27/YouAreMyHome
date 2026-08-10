@@ -1,15 +1,26 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import RelationshipCounter from '../components/counter/RelationshipCounter'
 import InstallBanner from '../components/InstallBanner'
 import NotificationBanner from '../components/NotificationBanner'
 import LocationClocks from '../components/LocationClocks'
 import MoodBubble from '../components/MoodBubble'
+import AvatarBadge from '../components/AvatarBadge'
+import LoveNoteCard from '../components/LoveNoteCard'
 import { useAuth } from '../context/AuthContext'
 import { useMoods } from '../hooks/useMoods'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { useUnreadBadges } from '../hooks/useUnreadBadges'
+import { useUpcomingDateNight } from '../hooks/useUpcomingDateNight'
+import { useUpcomingCalendarItems } from '../hooks/useUpcomingCalendarItems'
+import { useAwaitingQa } from '../hooks/useAwaitingQa'
+import { useCheckIn } from '../hooks/useCheckIn'
+import { useLoveNotes } from '../hooks/useLoveNotes'
+import { markSeenNow } from '../hooks/useMarkSeen'
 import { avatarFor, preferredNameFor } from '../lib/avatars'
+import { CALENDAR_TAB_FOR_CATEGORY } from '../lib/milestones'
 import { APP_VERSION_LABEL } from '../lib/appVersion'
+import { formatCountdown } from '../lib/countdown'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 
@@ -18,7 +29,80 @@ export default function Home() {
   const { user } = useAuth()
   const { moods, setMyMood } = useMoods()
   const [chatSettings] = useChatSettings()
-  const unread = useUnreadBadges()
+  const { unread, detail } = useUnreadBadges()
+  const upcomingDateNight = useUpcomingDateNight()
+  const upcomingCalendarCategory = useUpcomingCalendarItems()
+  const awaitingQa = useAwaitingQa()
+  const { myCheckIn, partnerCheckIn } = useCheckIn()
+  const { incoming: incomingLoveNote, sendReply } = useLoveNotes()
+  const [loveNoteOpen, setLoveNoteOpen] = useState(false)
+  const [loveNoteReplied, setLoveNoteReplied] = useState(false)
+
+  function openLoveNote() {
+    markSeenNow(user, 'loveNotes')
+    setLoveNoteOpen(true)
+  }
+
+  function closeLoveNote() {
+    setLoveNoteOpen(false)
+    setLoveNoteReplied(false)
+  }
+
+  function replyToLoveNote() {
+    sendReply(incomingLoveNote)
+    setLoveNoteReplied(true)
+  }
+
+  function badgesFor(isMine) {
+    const badges = []
+    if (!isMine) {
+      if (unread.chat) {
+        badges.push({ type: 'chat', emoji: '💬', label: 'Unread messages — open chat', onClick: () => navigate('/chat') })
+      }
+      if (unread.mail) {
+        badges.push({
+          type: 'mail',
+          emoji: detail.mail ? '💐' : '💌',
+          label: 'New mail — open Mail',
+          onClick: () => navigate('/mail'),
+        })
+      }
+      if (unread.loveNotes) {
+        badges.push({
+          type: 'sendLove',
+          emoji: detail.loveNotes || '💕',
+          label: 'They sent you love — tap to view',
+          onClick: openLoveNote,
+        })
+      }
+    } else {
+      if (awaitingQa) {
+        badges.push({
+          type: 'qa',
+          emoji: '❓',
+          label: 'A question is awaiting your answer',
+          onClick: () => navigate('/qa', { state: { category: 'awaiting' } }),
+        })
+      }
+      if (partnerCheckIn && !myCheckIn) {
+        badges.push({
+          type: 'journal',
+          emoji: '📝',
+          label: 'Your partner checked in — check in too',
+          onClick: () => navigate('/journal', { state: { tab: 'status' } }),
+        })
+      }
+    }
+    if (upcomingCalendarCategory) {
+      badges.push({
+        type: 'calendar',
+        emoji: '📅',
+        label: 'Something is coming up soon — open Calendar',
+        onClick: () => navigate('/calendar', { state: { tab: CALENDAR_TAB_FOR_CATEGORY[upcomingCalendarCategory] } }),
+      })
+    }
+    return badges
+  }
 
   return (
     <div className="relative flex flex-1 flex-col overflow-y-auto">
@@ -62,7 +146,17 @@ export default function Home() {
 
         <RelationshipCounter />
 
-        <div className="flex items-start gap-6 sm:gap-10">
+        <div className="relative flex items-start gap-6 sm:gap-10">
+          {upcomingDateNight && (
+            <button
+              type="button"
+              onClick={() => navigate('/calendar', { state: { tab: 'dateNights' } })}
+              aria-label={`Date Night "${upcomingDateNight.item.title}" is about to start — open Calendar`}
+              className="absolute -top-6 left-1/2 flex -translate-x-1/2 animate-bounce items-center gap-1 whitespace-nowrap rounded-full bg-rose px-3 py-1 font-body text-xs font-medium text-paper shadow-md transition-transform hover:scale-105"
+            >
+              🎬 {formatCountdown(upcomingDateNight.msUntil)}
+            </button>
+          )}
           <Avatar
             src={avatarFor('Cristina', chatSettings.avatars)}
             name={preferredNameFor('Cristina', chatSettings.preferredNames)}
@@ -71,8 +165,7 @@ export default function Home() {
             isMine={user.displayName === 'Cristina'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
-            showUnreadChat={user.displayName !== 'Cristina' && unread.chat}
-            onOpenChat={() => navigate('/chat')}
+            badges={badgesFor(user.displayName === 'Cristina')}
           />
           <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
           <Avatar
@@ -83,13 +176,16 @@ export default function Home() {
             isMine={user.displayName === 'Scott'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
-            showUnreadChat={user.displayName !== 'Scott' && unread.chat}
-            onOpenChat={() => navigate('/chat')}
+            badges={badgesFor(user.displayName === 'Scott')}
           />
         </div>
 
         <LocationClocks />
       </div>
+
+      {loveNoteOpen && incomingLoveNote && (
+        <LoveNoteCard note={incomingLoveNote} replied={loveNoteReplied} onReply={replyToLoveNote} onClose={closeLoveNote} />
+      )}
 
       <footer className="relative pb-6 text-center">
         <p className="font-hand text-lg text-ink-soft">
@@ -107,7 +203,7 @@ function moodFor(name, user, moods) {
   return partnerEntry?.[1]
 }
 
-function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, showUnreadChat, onOpenChat }) {
+function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, badges }) {
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative">
@@ -119,16 +215,9 @@ function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, show
             isMine ? 'cursor-pointer transition-transform hover:scale-105' : ''
           }`}
         />
-        {showUnreadChat && (
-          <button
-            type="button"
-            onClick={onOpenChat}
-            aria-label={`Unread messages from ${name} — open chat`}
-            className="absolute -right-1 -top-1 flex h-6 w-6 animate-bounce items-center justify-center rounded-full bg-rose text-xs shadow-md ring-2 ring-paper transition-transform hover:scale-110"
-          >
-            💬
-          </button>
-        )}
+        {badges.map((badge) => (
+          <AvatarBadge key={badge.type} type={badge.type} emoji={badge.emoji} label={badge.label} onClick={badge.onClick} />
+        ))}
       </div>
       <span className="font-body text-sm text-ink-soft">{name}</span>
       <MoodBubble mood={mood} isMine={isMine} onSetMood={onSetMood} />
