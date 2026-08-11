@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useMusicPlayer } from '../context/MusicPlayerContext'
 import { useAuth } from '../context/AuthContext'
+import { useChatSettings } from '../hooks/useChatSettings'
+import { avatarFor, preferredNameFor } from '../lib/avatars'
 import CommentThread from '../components/CommentThread'
+import MusicIntro from '../components/MusicIntro'
 
 // SVG can't auto-shrink text to fit a path, so longer titles get a smaller
 // font size — rough length-based clamp rather than exact glyph measurement.
@@ -28,6 +31,8 @@ export default function Music() {
     toggleShuffle,
     volume,
     setVolume,
+    muted,
+    toggleMute,
     myFavorites,
     partnerFavorites,
     toggleFavorite,
@@ -37,57 +42,48 @@ export default function Music() {
     endSession,
   } = useMusicPlayer()
   const { user } = useAuth()
-  const [view, setView] = useState('player')
-
-  if (view === 'tracks') {
-    return (
-      <AllTracksView
-        tracks={tracks}
-        currentTrack={currentTrack}
-        playing={playing}
-        onSelect={selectTrack}
-        onBack={() => setView('player')}
-      />
-    )
-  }
-
-  if (view === 'favorites') {
-    return (
-      <FavoritesView
-        tracks={tracks}
-        currentTrack={currentTrack}
-        playing={playing}
-        myFavorites={myFavorites}
-        partnerFavorites={partnerFavorites}
-        onSelect={selectTrack}
-        onBack={() => setView('player')}
-      />
-    )
-  }
+  const [chatSettings] = useChatSettings()
 
   const isFavorite = !!(currentTrack && myFavorites[currentTrack.id])
   const fraction = duration > 0 ? Math.min(1, position / duration) : 0
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
-  const hostName = isHost ? 'You' : partnerName
+  const myName = user.displayName
+  const partnerName = myName === 'Scott' ? 'Cristina' : 'Scott'
+  const hostName = isHost ? 'You' : preferredNameFor(partnerName, chatSettings.preferredNames)
+  const hostDisplayName = isHost ? myName : partnerName
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center gap-6 overflow-y-auto px-4 py-8 text-center sm:px-6">
+      <MusicIntro />
       <Record track={currentTrack} playing={playing} fraction={fraction} />
 
       <div>
         <h1 className="font-display text-2xl italic text-ink">Music</h1>
         {currentTrack ? (
-          <>
-            <p className="mt-1 font-hand text-xl text-rose">{currentTrack.title}</p>
-            <p className="mt-1 font-body text-xs text-ink-soft/70">📻 live session · hosted by {hostName}</p>
-          </>
+          <p className="mt-1 font-hand text-xl text-rose">{currentTrack.title}</p>
         ) : (
-          <>
-            <p className="mt-2 font-hand text-2xl text-rose">coming soon...</p>
-            <p className="mt-1 font-body text-sm text-ink-soft">listen to something together, someday 🎶</p>
-          </>
+          <p className="mt-2 font-body text-sm text-ink-soft">pick a song below to start listening together 🎶</p>
         )}
       </div>
+
+      {currentTrack && (
+        <div className="flex items-center gap-3">
+          <img
+            src={avatarFor(hostDisplayName, chatSettings.avatars)}
+            alt={hostName}
+            className="h-8 w-8 rounded-full object-cover ring-2 ring-rose ring-offset-2 ring-offset-paper"
+          />
+          <p className="font-body text-xs text-ink-soft/70">📻 hosted by {hostName}</p>
+          {isHost && (
+            <button
+              type="button"
+              onClick={endSession}
+              className="rounded-full border border-rose/30 bg-rose/10 px-3 py-1 font-body text-xs font-medium text-rose transition-colors hover:bg-rose hover:text-paper"
+            >
+              End Session
+            </button>
+          )}
+        </div>
+      )}
 
       {currentTrack && (
         <div className="flex items-center gap-4">
@@ -123,7 +119,14 @@ export default function Music() {
       )}
 
       <div className="flex w-full max-w-xs items-center gap-2">
-        <span className="text-sm text-ink-soft/70">🔈</span>
+        <button
+          type="button"
+          onClick={toggleMute}
+          aria-label={muted ? 'Unmute' : 'Mute'}
+          className="shrink-0 text-sm text-ink-soft/70 transition-colors hover:text-rose"
+        >
+          {muted ? '🔇' : '🔈'}
+        </button>
         <input
           type="range"
           min="0"
@@ -137,35 +140,28 @@ export default function Music() {
         <span className="text-sm text-ink-soft/70">🔊</span>
       </div>
 
-      {tracks.length > 0 && (
-        <div className="flex flex-wrap items-center justify-center gap-4">
-          <button
-            type="button"
-            onClick={() => setView('tracks')}
-            className="font-body text-sm font-medium text-rose underline-offset-2 hover:underline"
-          >
-            See all tracks & comment on them →
-          </button>
-          <button
-            type="button"
-            onClick={() => setView('favorites')}
-            className="font-body text-sm font-medium text-rose underline-offset-2 hover:underline"
-          >
-            ❤ Favorites →
-          </button>
-        </div>
-      )}
-
       <SleepTimerControl />
 
-      {currentTrack && isHost && (
-        <button
-          type="button"
-          onClick={endSession}
-          className="font-body text-xs text-ink-soft/60 underline-offset-2 hover:text-rose hover:underline"
-        >
-          End listening session
-        </button>
+      {tracks.length > 0 && (
+        <div className="w-full space-y-2 pb-4 text-left">
+          <h2 className="text-center font-display text-lg italic text-ink">All Tracks</h2>
+          {tracks.map((track) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              isCurrent={currentTrack?.id === track.id}
+              playing={playing}
+              onSelect={() => selectTrack(track.id)}
+              isMine={!!myFavorites[track.id]}
+              isPartners={!!partnerFavorites[track.id]}
+              onToggleFavorite={() => toggleFavorite(track.id)}
+              myAvatarSrc={avatarFor(myName, chatSettings.avatars)}
+              myName={preferredNameFor(myName, chatSettings.preferredNames)}
+              partnerAvatarSrc={avatarFor(partnerName, chatSettings.avatars)}
+              partnerName={preferredNameFor(partnerName, chatSettings.preferredNames)}
+            />
+          ))}
+        </div>
       )}
     </div>
   )
@@ -237,33 +233,7 @@ function SleepTimerControl() {
   )
 }
 
-function AllTracksView({ tracks, currentTrack, playing, onSelect, onBack }) {
-  return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-8 sm:px-6">
-      <button
-        type="button"
-        onClick={onBack}
-        className="self-start font-body text-sm text-ink-soft transition-colors hover:text-rose"
-      >
-        ← Back
-      </button>
-      <h1 className="font-display text-2xl italic text-ink">All Tracks</h1>
-      <div className="space-y-2 pb-4">
-        {tracks.map((track) => (
-          <TrackRow
-            key={track.id}
-            track={track}
-            isCurrent={currentTrack?.id === track.id}
-            playing={playing}
-            onSelect={() => onSelect(track.id)}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function TrackRow({ track, isCurrent, playing, onSelect }) {
+function TrackRow({ track, isCurrent, playing, onSelect, isMine, isPartners, onToggleFavorite, myAvatarSrc, myName, partnerAvatarSrc, partnerName }) {
   const [showComments, setShowComments] = useState(false)
 
   return (
@@ -272,7 +242,15 @@ function TrackRow({ track, isCurrent, playing, onSelect }) {
         isCurrent ? 'border-rose bg-blush-soft/50' : 'border-ink/10 bg-white/50'
       }`}
     >
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleFavorite}
+          aria-label={isMine ? 'Remove from favorites' : 'Add to favorites'}
+          className={`shrink-0 text-sm transition-transform hover:scale-110 ${isMine ? '' : 'opacity-30 grayscale'}`}
+        >
+          ❤️
+        </button>
         <button
           type="button"
           onClick={onSelect}
@@ -281,12 +259,17 @@ function TrackRow({ track, isCurrent, playing, onSelect }) {
           {isCurrent && playing ? '🎵 ' : ''}
           {track.title}
         </button>
+        <div className="flex shrink-0 items-center gap-1">
+          {isMine && <FavoriteAvatar src={myAvatarSrc} name={myName} />}
+          {isPartners && <FavoriteAvatar src={partnerAvatarSrc} name={partnerName} />}
+        </div>
         <button
           type="button"
           onClick={() => setShowComments((v) => !v)}
+          aria-label={showComments ? 'Hide comments' : 'Comment on this track'}
           className="shrink-0 font-body text-xs text-ink-soft hover:text-rose"
         >
-          💬 {showComments ? 'Hide' : 'Comment'}
+          💬
         </button>
       </div>
 
@@ -299,57 +282,12 @@ function TrackRow({ track, isCurrent, playing, onSelect }) {
   )
 }
 
-function FavoritesView({ tracks, currentTrack, playing, myFavorites, partnerFavorites, onSelect, onBack }) {
-  const { user } = useAuth()
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
-  const favoriteTracks = tracks.filter((track) => myFavorites[track.id] || partnerFavorites[track.id])
-
+function FavoriteAvatar({ src, name }) {
   return (
-    <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-8 sm:px-6">
-      <button
-        type="button"
-        onClick={onBack}
-        className="self-start font-body text-sm text-ink-soft transition-colors hover:text-rose"
-      >
-        ← Back
-      </button>
-      <h1 className="font-display text-2xl italic text-ink">Favorites</h1>
-
-      {favoriteTracks.length === 0 ? (
-        <p className="pt-6 text-center font-hand text-xl text-ink-soft">
-          no favorites yet — tap the heart on a song to add one
-        </p>
-      ) : (
-        <div className="space-y-2 pb-4">
-          {favoriteTracks.map((track) => {
-            const isCurrent = currentTrack?.id === track.id
-            const mine = !!myFavorites[track.id]
-            const partners = !!partnerFavorites[track.id]
-            return (
-              <div
-                key={track.id}
-                className={`flex items-center justify-between gap-2 rounded-2xl border px-3 py-2 ${
-                  isCurrent ? 'border-rose bg-blush-soft/50' : 'border-ink/10 bg-white/50'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelect(track.id)}
-                  className={`min-w-0 flex-1 truncate text-left font-body text-sm ${isCurrent ? 'text-rose' : 'text-ink'}`}
-                >
-                  {isCurrent && playing ? '🎵 ' : ''}
-                  {track.title}
-                </button>
-                <div className="flex shrink-0 items-center gap-1.5 font-body text-xs text-ink-soft">
-                  {mine && <span title="Your favorite">❤️ You</span>}
-                  {partners && <span title={`${partnerName}'s favorite`}>❤️ {partnerName}</span>}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
+    <span className="relative inline-flex h-5 w-5 shrink-0" title={`${name}'s favorite`}>
+      <img src={src} alt={name} className="h-5 w-5 rounded-full object-cover ring-1 ring-paper" />
+      <span className="absolute -bottom-0.5 -right-0.5 text-[8px] leading-none">❤️</span>
+    </span>
   )
 }
 

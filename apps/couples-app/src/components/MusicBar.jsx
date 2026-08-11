@@ -16,6 +16,8 @@ export default function MusicBar() {
     resume,
     volume,
     setVolume,
+    muted,
+    toggleMute,
     myFavorites,
     toggleFavorite,
     position,
@@ -75,6 +77,14 @@ export default function MusicBar() {
 
       {showVolume && (
         <div className="absolute bottom-full right-3 mb-1 flex items-center gap-2 rounded-full bg-paper px-4 py-2 shadow-lg ring-1 ring-ink/10">
+          <button
+            type="button"
+            onClick={toggleMute}
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            className="shrink-0 text-sm text-ink-soft transition-colors hover:text-rose"
+          >
+            {muted ? '🔇' : '🔈'}
+          </button>
           <input
             type="range"
             min="0"

@@ -74,10 +74,16 @@ export function MusicPlayerProvider({ children }) {
   // once (mount), so a plain closure over `volume` would go stale.
   const [volume, setVolumeState] = useState(() => musicVolume())
   const volumeRef = useRef(volume)
+  // Mute is deliberately separate from `volume` (not just "set volume to
+  // 0") so the slider keeps showing your real level and unmuting restores
+  // it exactly — also per-device, same as volume itself.
+  const [muted, setMutedState] = useState(false)
+  const mutedRef = useRef(false)
   useEffect(() => {
     volumeRef.current = volume
-    if (audioRef.current) audioRef.current.volume = volume
-  }, [volume])
+    mutedRef.current = muted
+    if (audioRef.current) audioRef.current.volume = muted ? 0 : volume
+  }, [volume, muted])
 
   // Both of these are "this device has stopped listening" — a manual pause
   // and a sleep-timer pause — but neither is shared playback state (see
@@ -165,7 +171,7 @@ export function MusicPlayerProvider({ children }) {
     if (loadedTrackIdRef.current !== currentState.trackId) {
       setDuration(0)
       audio.src = track.url
-      audio.volume = volumeRef.current
+      audio.volume = mutedRef.current ? 0 : volumeRef.current
       loadedTrackIdRef.current = currentState.trackId
       audio.currentTime = expectedPosition(currentState, Date.now())
     } else {
@@ -326,6 +332,10 @@ export function MusicPlayerProvider({ children }) {
     setMusicVolume(clamped)
   }
 
+  function toggleMute() {
+    setMutedState((m) => !m)
+  }
+
   function startSleepTimer(minutes) {
     if (sleepTimeoutRef.current) clearTimeout(sleepTimeoutRef.current)
     const ms = minutes * 60 * 1000
@@ -365,6 +375,8 @@ export function MusicPlayerProvider({ children }) {
     toggleShuffle,
     volume,
     setVolume,
+    muted,
+    toggleMute,
     sleepTimerEndsAt,
     startSleepTimer,
     cancelSleepTimer,

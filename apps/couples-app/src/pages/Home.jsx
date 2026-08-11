@@ -8,6 +8,7 @@ import MoodBubble from '../components/MoodBubble'
 import AvatarBadge from '../components/AvatarBadge'
 import LoveNoteCard from '../components/LoveNoteCard'
 import { useAuth } from '../context/AuthContext'
+import { useMusicPlayer } from '../context/MusicPlayerContext'
 import { useMoods } from '../hooks/useMoods'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { useUnreadBadges } from '../hooks/useUnreadBadges'
@@ -28,6 +29,7 @@ export default function Home() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { moods, setMyMood } = useMoods()
+  const { currentTrack: liveTrack, isHost: hostingMusic } = useMusicPlayer()
   const [chatSettings] = useChatSettings()
   const { unread, detail } = useUnreadBadges()
   const upcomingDateNight = useUpcomingDateNight()
@@ -92,6 +94,14 @@ export default function Home() {
           onClick: () => navigate('/journal', { state: { tab: 'status' } }),
         })
       }
+    }
+    if (liveTrack && (isMine ? hostingMusic : !hostingMusic)) {
+      badges.push({
+        type: 'music',
+        emoji: '🎵',
+        label: 'Hosting a live music session — tap to open',
+        onClick: () => navigate('/music'),
+      })
     }
     if (upcomingCalendarCategory) {
       badges.push({

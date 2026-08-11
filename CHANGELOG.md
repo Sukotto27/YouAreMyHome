@@ -5,6 +5,19 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.12.0
+
+- Music tab: every track now lists inline on the page itself (no more
+  separate "all tracks" or "Favorites" screens) — tap the heart on any row
+  to favorite it, and see whose favorite it is by their avatar.
+- Added a one-time popup explaining how live music sessions work, shown the
+  first time either of us opens the Music tab.
+- The host's avatar now shows next to "hosted by" on the Music tab; a 🎵
+  badge appears on whichever of us is hosting a live session, right on the
+  Home page avatars.
+- Added a mute button (Music tab and mini bar), separate from the volume
+  slider — mutes without losing your volume level.
+
 ## v1.11.0
 
 - Music is now a shared "radio station": whoever starts a session is the

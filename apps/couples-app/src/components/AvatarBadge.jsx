@@ -8,6 +8,7 @@ export const BADGE_ANGLE = {
   calendar: 180,
   qa: 240,
   journal: 300,
+  music: 0,
 }
 
 export default function AvatarBadge({ type, emoji, label, onClick }) {
