@@ -1,12 +1,20 @@
 rules_version = '2';
 
-// This app has no public sign-up — the only two accounts are created by hand
-// in the Firebase console, so gating on "signed in" is equivalent to gating
-// on "one of the two of us."
+// This app has no in-app sign-up — the only two accounts are meant to be
+// created by hand in the Firebase console — but the project's API key is
+// public (it ships in the client bundle), so anyone who has it could still
+// call Firebase Auth's signup endpoint directly and mint themselves a valid
+// "signed in" user. Pinning to these two exact UIDs closes that gap: gating
+// on "signed in" alone is not equivalent to "one of the two of us," gating
+// on these UIDs is.
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isUs() {
+      return request.auth != null &&
+        request.auth.uid in ['s4paZwepVtbpjFH4703rIyWoYmx2', 'VdgsIIL7sRbDSNfj6Ln7TEqg4Nw1'];
+    }
     match /{document=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if isUs();
     }
   }
 }
