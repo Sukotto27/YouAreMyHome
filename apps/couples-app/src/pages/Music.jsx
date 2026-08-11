@@ -358,9 +358,9 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
 function Record({ track, playing, fraction }) {
   return (
-    <div className="relative h-56 w-56 sm:h-64 sm:w-64">
-      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
-        <circle cx="50" cy="50" r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth="3" className="text-ink/10" />
+    <div className="relative h-56 w-56 shrink-0 sm:h-64 sm:w-64">
+      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full" aria-hidden="true">
+        <circle cx="50" cy="50" r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth="3" className="text-ink/15" />
         {track && (
           <circle
             cx="50"
@@ -373,10 +373,11 @@ function Record({ track, playing, fraction }) {
             className="text-rose transition-[stroke-dashoffset] duration-500 ease-linear"
             strokeDasharray={RING_CIRCUMFERENCE}
             strokeDashoffset={RING_CIRCUMFERENCE * (1 - fraction)}
+            transform="rotate(-90 50 50)"
           />
         )}
       </svg>
-      <div className="absolute inset-4">
+      <div className="absolute inset-2.5">
         <div
           className={`relative h-full w-full rounded-full shadow-xl ${playing ? 'animate-spin [animation-duration:3s]' : ''}`}
           style={{
