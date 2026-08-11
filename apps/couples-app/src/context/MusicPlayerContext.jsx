@@ -4,16 +4,27 @@ import { rtdb, firebaseReady } from '../firebase'
 import { TRACKS, trackById } from '../lib/musicLibrary'
 import { musicVolume, setMusicVolume } from '../lib/deviceSettings'
 import { useMusicFavorites } from '../hooks/useMusicFavorites'
+import { useAuth } from './AuthContext'
+import { usePartnerUid } from '../hooks/usePartnerUid'
 
 const DRIFT_TOLERANCE_SECONDS = 1.5
 const RECHECK_MS = 10_000
+const POSITION_TICK_MS = 500
+const BOTH_PAUSED_CHECK_MS = 30_000
+const BOTH_PAUSED_TIMEOUT_MS = 10 * 60 * 1000
 
 const MusicPlayerContext = createContext(null)
 
+// The shared session is a "radio station": once active it keeps advancing
+// (base + elapsed) regardless of whether either device is actually playing
+// audio locally — pausing is a per-device decision (see `manualPaused`
+// below) and never touches this shared anchor. That's what makes "pause
+// here, still playing there, resume back in sync" possible: resuming just
+// re-reads this same always-advancing position instead of a frozen one.
 function expectedPosition(state, now) {
   if (!state || !state.trackId) return 0
   const base = state.positionAtStart || 0
-  if (!state.playing) return base
+  if (!state.active) return base
   return base + (now - state.startedAt) / 1000
 }
 
@@ -48,6 +59,8 @@ function resolveNextTrackId(current, delta) {
 // computes "where should playback be right now" from — so a device opening
 // the app late reconciles through the exact same code path as a live update.
 export function MusicPlayerProvider({ children }) {
+  const { user } = useAuth()
+  const partnerUid = usePartnerUid()
   const audioRef = useRef(null)
   const loadedTrackIdRef = useRef(null)
   const [remoteState, setRemoteState] = useState(null)
@@ -66,17 +79,24 @@ export function MusicPlayerProvider({ children }) {
     if (audioRef.current) audioRef.current.volume = volume
   }, [volume])
 
-  // Sleep timer is also local-only, on purpose — it must not pause a
-  // partner who's still listening. `sleeping` overrides reconcile()'s
-  // auto-play so a local pause sticks instead of being un-paused by the
-  // next drift-correction tick (which otherwise re-asserts shared state).
+  // Both of these are "this device has stopped listening" — a manual pause
+  // and a sleep-timer pause — but neither is shared playback state (see
+  // expectedPosition above): they only stop *this* device's <audio>, so the
+  // partner's stream is untouched. Combined into `locallyPaused` for every
+  // check below; the ref mirror exists because reconcile() runs from
+  // mount-only effects that would otherwise close over a stale value.
+  const [manualPaused, setManualPaused] = useState(false)
   const [sleeping, setSleeping] = useState(false)
-  const sleepingRef = useRef(false)
+  const locallyPaused = manualPaused || sleeping
+  const locallyPausedRef = useRef(false)
+  useEffect(() => {
+    locallyPausedRef.current = locallyPaused
+  }, [locallyPaused])
   const [sleepTimerEndsAt, setSleepTimerEndsAt] = useState(null)
   const sleepTimeoutRef = useRef(null)
-  useEffect(() => {
-    sleepingRef.current = sleeping
-  }, [sleeping])
+
+  const [duration, setDuration] = useState(0)
+  const [position, setPosition] = useState(0)
 
   const favorites = useMusicFavorites()
 
@@ -92,26 +112,58 @@ export function MusicPlayerProvider({ children }) {
     })
   }, [])
 
-  // Always carries the current shuffle setting forward — every caller here
-  // (play/pause/selectTrack/skip) only ever specifies trackId/playing/
-  // positionAtStart, so without this a plain set() would silently wipe
-  // shuffle back to unset on every unrelated action.
-  function writeState(next) {
+  // Starts a brand-new session — the caller becomes host, and the session
+  // plays as a radio station (see expectedPosition) until the host ends it
+  // or both of you sit paused past BOTH_PAUSED_TIMEOUT_MS.
+  function startSession(trackId) {
     const shuffle = remoteStateRef.current?.shuffle ?? true
     if (!firebaseReady) {
-      setLocalState({ ...next, shuffle, startedAt: Date.now() })
+      setLocalState({ trackId, positionAtStart: 0, startedAt: Date.now(), shuffle, active: true, hostId: 'local' })
       return
     }
-    set(ref(rtdb, 'musicPlayer'), { ...next, shuffle, startedAt: serverTimestamp() })
+    set(ref(rtdb, 'musicPlayer'), {
+      active: true,
+      hostId: user?.uid ?? null,
+      trackId,
+      positionAtStart: 0,
+      startedAt: serverTimestamp(),
+      shuffle,
+    })
+  }
+
+  // Moves an already-active session to a new track (skip/select/auto-advance)
+  // via update() rather than set(), so it never clobbers hostId/active/
+  // pausedAt — only writeState-equivalent fields change here.
+  function updateTrack(trackId, positionAtStart) {
+    if (!firebaseReady) {
+      setLocalState((prev) => (prev ? { ...prev, trackId, positionAtStart, startedAt: Date.now() } : prev))
+      return
+    }
+    update(ref(rtdb, 'musicPlayer'), { trackId, positionAtStart, startedAt: serverTimestamp() })
+  }
+
+  function endSession() {
+    if (!firebaseReady) {
+      setLocalState(null)
+      return
+    }
+    set(ref(rtdb, 'musicPlayer'), null)
   }
 
   function reconcile(currentState) {
     const audio = audioRef.current
-    if (!audio || !currentState || !currentState.trackId) return
+    if (!audio) return
+
+    if (!currentState || !currentState.active || !currentState.trackId) {
+      if (!audio.paused) audio.pause()
+      return
+    }
+
     const track = trackById(currentState.trackId)
     if (!track) return
 
     if (loadedTrackIdRef.current !== currentState.trackId) {
+      setDuration(0)
       audio.src = track.url
       audio.volume = volumeRef.current
       loadedTrackIdRef.current = currentState.trackId
@@ -123,8 +175,8 @@ export function MusicPlayerProvider({ children }) {
       }
     }
 
-    if (currentState.playing) {
-      if (audio.paused && !sleepingRef.current) {
+    if (!locallyPausedRef.current) {
+      if (audio.paused) {
         audio
           .play()
           .then(() => setNeedsGesture(false))
@@ -148,12 +200,18 @@ export function MusicPlayerProvider({ children }) {
       const current = remoteStateRef.current
       if (!current || current.trackId !== loadedTrackIdRef.current) return
       const nextId = resolveNextTrackId(current, 1)
-      if (nextId) writeState({ trackId: nextId, playing: true, positionAtStart: 0 })
+      if (nextId) updateTrack(nextId, 0)
+    }
+
+    function handleLoadedMetadata() {
+      setDuration(audio.duration || 0)
     }
 
     audio.addEventListener('ended', handleEnded)
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata)
     return () => {
       audio.removeEventListener('ended', handleEnded)
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata)
       audio.pause()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -162,7 +220,15 @@ export function MusicPlayerProvider({ children }) {
   useEffect(() => {
     reconcile(state)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state?.trackId, state?.playing, state?.startedAt, state?.positionAtStart])
+  }, [state?.trackId, state?.active, state?.startedAt, state?.positionAtStart])
+
+  // Local pause/resume needs to take effect immediately (not wait for the
+  // next drift-correction tick), so it re-runs reconcile() as soon as either
+  // flag flips.
+  useEffect(() => {
+    reconcile(remoteStateRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locallyPaused])
 
   // Corrects for each device's own audio-clock drift over a long track —
   // RTDB only pushes updates on writes, so nothing else re-checks this
@@ -172,22 +238,64 @@ export function MusicPlayerProvider({ children }) {
     return () => clearInterval(id)
   }, [])
 
+  // Drives the progress bars off the shared session anchor, not this
+  // device's <audio>.currentTime — so a locally-paused listener still sees
+  // the track advance in real time, matching what's actually playing for
+  // their partner.
+  useEffect(() => {
+    const id = setInterval(() => {
+      setPosition(expectedPosition(remoteStateRef.current, Date.now()))
+    }, POSITION_TICK_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  // Publishes "I've stopped listening, as of this moment" so any device can
+  // detect "both of you are paused" below — presence-keyed by uid the same
+  // way useDateNightSyncUp.js's ready-state is.
+  useEffect(() => {
+    if (!firebaseReady || !user || !state?.active) return
+    set(ref(rtdb, `musicPlayer/pausedAt/${user.uid}`), locallyPaused ? serverTimestamp() : null)
+  }, [user, state?.active, locallyPaused])
+
+  // Ends the session if both of you have been paused for too long — a radio
+  // station nobody's listening to. Whichever device's tick notices first
+  // just ends it; a near-simultaneous double-write from both devices is
+  // harmless since they'd both write the same `null`.
+  useEffect(() => {
+    if (!firebaseReady) return
+    const id = setInterval(() => {
+      const current = remoteStateRef.current
+      if (!current?.active || !user || !partnerUid) return
+      const mine = current.pausedAt?.[user.uid]
+      const theirs = current.pausedAt?.[partnerUid]
+      if (!mine || !theirs) return
+      const bothPausedSince = Math.max(mine, theirs)
+      if (Date.now() - bothPausedSince > BOTH_PAUSED_TIMEOUT_MS) {
+        set(ref(rtdb, 'musicPlayer'), null)
+      }
+    }, BOTH_PAUSED_CHECK_MS)
+    return () => clearInterval(id)
+  }, [user, partnerUid])
+
   function play() {
+    setManualPaused(false)
     setSleeping(false)
-    const current = remoteStateRef.current
-    if (!current || !current.trackId) return
-    writeState({ trackId: current.trackId, playing: true, positionAtStart: expectedPosition(current, Date.now()) })
+    reconcile(remoteStateRef.current)
   }
 
   function pause() {
-    const current = remoteStateRef.current
-    if (!current || !current.trackId) return
-    writeState({ trackId: current.trackId, playing: false, positionAtStart: expectedPosition(current, Date.now()) })
+    setManualPaused(true)
+    audioRef.current?.pause()
   }
 
   function selectTrack(id) {
+    setManualPaused(false)
     setSleeping(false)
-    writeState({ trackId: id, playing: true, positionAtStart: 0 })
+    if (remoteStateRef.current?.active) {
+      updateTrack(id, 0)
+    } else {
+      startSession(id)
+    }
   }
 
   function skip(delta) {
@@ -241,11 +349,11 @@ export function MusicPlayerProvider({ children }) {
   const value = {
     tracks: TRACKS,
     currentTrack: state?.trackId ? trackById(state.trackId) : null,
-    // Reflects actual local playback, not just the shared intent — while a
-    // sleep timer has this device intentionally paused, the play/pause
-    // button should show "play" (tap to resume) rather than implying it's
-    // still audibly playing, even though shared state still says it is.
-    playing: !!state?.playing && !sleeping,
+    // Reflects actual local playback, not just the shared session — while
+    // this device is locally paused (manually or via sleep timer) the
+    // play/pause button should show "play" (tap to resume) even though the
+    // session is still live and audible for the partner.
+    playing: !!state?.active && !!state?.trackId && !locallyPaused,
     needsGesture,
     play,
     pause,
@@ -260,6 +368,10 @@ export function MusicPlayerProvider({ children }) {
     sleepTimerEndsAt,
     startSleepTimer,
     cancelSleepTimer,
+    isHost: firebaseReady ? !!user && state?.hostId === user.uid : true,
+    endSession,
+    duration,
+    position,
     ...favorites,
   }
 

@@ -18,15 +18,22 @@ export default function MusicBar() {
     setVolume,
     myFavorites,
     toggleFavorite,
+    position,
+    duration,
   } = useMusicPlayer()
   const [showVolume, setShowVolume] = useState(false)
 
   if (!currentTrack) return null
 
   const isFavorite = !!myFavorites[currentTrack.id]
+  const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0
 
   return (
     <div className="relative flex items-center gap-2 border-t border-ink/10 bg-paper/95 px-3 py-2 backdrop-blur">
+      <div className="absolute inset-x-0 top-0 h-[2px] overflow-hidden bg-ink/10" aria-hidden="true">
+        <div className="h-full bg-rose transition-[width] duration-500 ease-linear" style={{ width: `${progressPct}%` }} />
+      </div>
+
       <button
         type="button"
         onClick={() => toggleFavorite(currentTrack.id)}

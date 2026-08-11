@@ -5,6 +5,19 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.11.0
+
+- Music is now a shared "radio station": whoever starts a session is the
+  host, and it keeps playing as if live until the host ends it. Pausing on
+  your device no longer pauses it for your partner — it just stops your own
+  audio, and resuming snaps you back in sync with wherever the session
+  actually is.
+- If you're both paused for more than 10 minutes, the session ends
+  automatically, and the mini bar disappears until someone starts a new one.
+- Added a circular progress ring around the spinning record, and a thin
+  progress bar across the top of the mini bar, both showing how far into the
+  current track the session is.
+
 ## v1.10.0
 
 - Fixed the Music tab only showing 7 of 58 songs — the rest had been

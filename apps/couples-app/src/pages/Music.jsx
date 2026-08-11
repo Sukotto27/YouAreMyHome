@@ -31,7 +31,12 @@ export default function Music() {
     myFavorites,
     partnerFavorites,
     toggleFavorite,
+    position,
+    duration,
+    isHost,
+    endSession,
   } = useMusicPlayer()
+  const { user } = useAuth()
   const [view, setView] = useState('player')
 
   if (view === 'tracks') {
@@ -61,15 +66,21 @@ export default function Music() {
   }
 
   const isFavorite = !!(currentTrack && myFavorites[currentTrack.id])
+  const fraction = duration > 0 ? Math.min(1, position / duration) : 0
+  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const hostName = isHost ? 'You' : partnerName
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center gap-6 overflow-y-auto px-4 py-8 text-center sm:px-6">
-      <Record track={currentTrack} playing={playing} />
+      <Record track={currentTrack} playing={playing} fraction={fraction} />
 
       <div>
         <h1 className="font-display text-2xl italic text-ink">Music</h1>
         {currentTrack ? (
-          <p className="mt-1 font-hand text-xl text-rose">{currentTrack.title}</p>
+          <>
+            <p className="mt-1 font-hand text-xl text-rose">{currentTrack.title}</p>
+            <p className="mt-1 font-body text-xs text-ink-soft/70">📻 live session · hosted by {hostName}</p>
+          </>
         ) : (
           <>
             <p className="mt-2 font-hand text-2xl text-rose">coming soon...</p>
@@ -146,6 +157,16 @@ export default function Music() {
       )}
 
       <SleepTimerControl />
+
+      {currentTrack && isHost && (
+        <button
+          type="button"
+          onClick={endSession}
+          className="font-body text-xs text-ink-soft/60 underline-offset-2 hover:text-rose hover:underline"
+        >
+          End listening session
+        </button>
+      )}
     </div>
   )
 }
@@ -332,30 +353,52 @@ function FavoritesView({ tracks, currentTrack, playing, myFavorites, partnerFavo
   )
 }
 
-function Record({ track, playing }) {
+const RING_RADIUS = 47
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
+function Record({ track, playing, fraction }) {
   return (
-    <div className="relative h-48 w-48 sm:h-56 sm:w-56">
-      <div
-        className={`relative h-full w-full rounded-full shadow-xl ${playing ? 'animate-spin [animation-duration:3s]' : ''}`}
-        style={{
-          background:
-            'repeating-radial-gradient(circle at center, #1c1c1c 0px, #1c1c1c 3px, #2b2b2b 4px, #2b2b2b 5px)',
-        }}
-      >
+    <div className="relative h-56 w-56 sm:h-64 sm:w-64">
+      <svg viewBox="0 0 100 100" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
+        <circle cx="50" cy="50" r={RING_RADIUS} fill="none" stroke="currentColor" strokeWidth="3" className="text-ink/10" />
         {track && (
-          <svg viewBox="0 0 200 200" className="absolute inset-0 h-full w-full" aria-hidden="true">
-            <defs>
-              <path id="music-title-arc" d="M 20,100 A 80,80 0 1,1 180,100" fill="none" />
-            </defs>
-            <text className="fill-paper font-body" style={{ fontSize: arcFontSize(track.title) }} letterSpacing="1">
-              <textPath href="#music-title-arc" startOffset="50%" textAnchor="middle">
-                {track.title}
-              </textPath>
-            </text>
-          </svg>
+          <circle
+            cx="50"
+            cy="50"
+            r={RING_RADIUS}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            className="text-rose transition-[stroke-dashoffset] duration-500 ease-linear"
+            strokeDasharray={RING_CIRCUMFERENCE}
+            strokeDashoffset={RING_CIRCUMFERENCE * (1 - fraction)}
+          />
         )}
-        <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose shadow-inner" />
-        <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-paper" />
+      </svg>
+      <div className="absolute inset-4">
+        <div
+          className={`relative h-full w-full rounded-full shadow-xl ${playing ? 'animate-spin [animation-duration:3s]' : ''}`}
+          style={{
+            background:
+              'repeating-radial-gradient(circle at center, #1c1c1c 0px, #1c1c1c 3px, #2b2b2b 4px, #2b2b2b 5px)',
+          }}
+        >
+          {track && (
+            <svg viewBox="0 0 200 200" className="absolute inset-0 h-full w-full" aria-hidden="true">
+              <defs>
+                <path id="music-title-arc" d="M 20,100 A 80,80 0 1,1 180,100" fill="none" />
+              </defs>
+              <text className="fill-paper font-body" style={{ fontSize: arcFontSize(track.title) }} letterSpacing="1">
+                <textPath href="#music-title-arc" startOffset="50%" textAnchor="middle">
+                  {track.title}
+                </textPath>
+              </text>
+            </svg>
+          )}
+          <div className="absolute left-1/2 top-1/2 h-16 w-16 -translate-x-1/2 -translate-y-1/2 rounded-full bg-rose shadow-inner" />
+          <div className="absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-paper" />
+        </div>
       </div>
     </div>
   )
