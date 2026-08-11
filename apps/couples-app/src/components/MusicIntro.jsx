@@ -20,9 +20,9 @@ export default function MusicIntro() {
       <div className="w-full max-w-sm rounded-2xl bg-paper p-6 text-center shadow-xl">
         <h2 className="font-display text-2xl italic text-ink">Live Music Sessions</h2>
         <p className="mt-2 font-body text-sm text-ink-soft">
-          Choose a song below to host a session. The session will be available to you and your partner
-          simultaneously. Like a radio station, it will play uninterrupted for both parties, keeping you in-sync
-          until the session is ended by the host, even if one of you pauses the music.
+          Choose a song below to host a session — your partner will get a prompt to join in, whenever they're ready.
+          Once you're both in, it plays like a radio station: uninterrupted and in-sync for both of you until the
+          host ends it, even if one of you pauses the music.
         </p>
         <button
           type="button"

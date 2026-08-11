@@ -13,6 +13,7 @@ import CompactCounter from '../counter/CompactCounter'
 import NamePrompt from '../NamePrompt'
 import CheckInReminder from '../CheckInReminder'
 import GameInvitePopup from '../GameInvitePopup'
+import MusicInvitePopup from '../MusicInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
 import SendLoveMenu from '../SendLoveMenu'
 import MusicBar from '../MusicBar'
@@ -26,7 +27,7 @@ const NAV_ITEMS = [
   { key: 'chat', to: '/chat', label: 'Chat', icon: 'chat', badgeKey: 'chat' },
   { key: 'qa', to: '/qa', label: 'Q&A', icon: 'qa', badgeKey: 'qa' },
   { key: 'games', to: '/games', label: 'Games', icon: 'games', badgeKey: 'scrapbook' },
-  { key: 'music', to: '/music', label: 'Music', icon: 'music' },
+  { key: 'music', to: '/music', label: 'Music', icon: 'music', badgeKey: 'music' },
   { key: 'gallery', to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
   { key: 'mail', to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
   { key: 'calendar', to: '/calendar', label: 'Calendar', icon: 'calendar', badgeKey: 'milestones' },
@@ -47,10 +48,15 @@ export default function Shell() {
 
 function ShellContent() {
   const { user } = useAuth()
-  const { currentTrack } = useMusicPlayer()
+  const { currentTrack, sessionActive, hasJoined } = useMusicPlayer()
   const [greeting, setGreeting] = useState(null)
   const [sendLoveOpen, setSendLoveOpen] = useState(false)
   const { unread } = useUnreadBadges()
+  // Music isn't tracked by useUnreadBadges (it's live RTDB session state, not
+  // a Firestore "seen/unseen" feed) — merged in here so the Music nav item
+  // gets the same badge dot as everything else while a session you haven't
+  // joined is live.
+  const unreadWithMusic = { ...unread, music: sessionActive && !hasJoined }
   useNotificationSounds(unread)
   const thumbkiss = useThumbkiss()
   useThumbkissGesture(thumbkiss.startPress, thumbkiss.endPress)
@@ -89,6 +95,7 @@ function ShellContent() {
       <NamePrompt />
       <CheckInReminder />
       <GameInvitePopup />
+      <MusicInvitePopup />
       <SendLoveMenu
         open={sendLoveOpen}
         onClose={() => setSendLoveOpen(false)}
@@ -136,13 +143,13 @@ function ShellContent() {
         </Link>
       </header>
 
-      <main className={`flex flex-1 flex-col overflow-hidden sm:pb-0 ${currentTrack ? 'pb-28' : 'pb-16'}`}>
+      <main className={`flex flex-1 flex-col overflow-hidden sm:pb-0 ${currentTrack && hasJoined ? 'pb-28' : 'pb-16'}`}>
         <Outlet />
       </main>
 
       <div className="fixed inset-x-0 bottom-0 z-10 sm:static">
         <MusicBar />
-        <SwipeableNav items={NAV_ITEMS} unread={unread} onOpenSendLove={() => setSendLoveOpen(true)} />
+        <SwipeableNav items={NAV_ITEMS} unread={unreadWithMusic} onOpenSendLove={() => setSendLoveOpen(true)} />
       </div>
     </div>
   )

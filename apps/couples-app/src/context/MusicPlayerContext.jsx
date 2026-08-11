@@ -67,6 +67,14 @@ export function MusicPlayerProvider({ children }) {
   const [localState, setLocalState] = useState(null)
   const [needsGesture, setNeedsGesture] = useState(false)
   const remoteStateRef = useRef(null)
+  // Mirrors `user` for reconcile() below, which is only ever (re)closed over
+  // at mount time (see the empty-deps interval effect further down) — same
+  // staleness problem volumeRef/mutedRef/locallyPausedRef solve for their
+  // values.
+  const userRef = useRef(user)
+  useEffect(() => {
+    userRef.current = user
+  }, [user])
 
   // Volume is deliberately per-device (see lib/deviceSettings.js) — never
   // written to shared state, unlike everything else here. The ref mirror is
@@ -111,6 +119,10 @@ export function MusicPlayerProvider({ children }) {
     remoteStateRef.current = state
   }, [state])
 
+  const sessionActive = !!state?.active && !!state?.trackId
+  const isHost = firebaseReady ? !!user && state?.hostId === user.uid : true
+  const hasJoined = isHost || !!(user && state?.joined?.[user.uid])
+
   useEffect(() => {
     if (!firebaseReady) return
     return onValue(ref(rtdb, 'musicPlayer'), (snap) => {
@@ -120,11 +132,25 @@ export function MusicPlayerProvider({ children }) {
 
   // Starts a brand-new session — the caller becomes host, and the session
   // plays as a radio station (see expectedPosition) until the host ends it
-  // or both of you sit paused past BOTH_PAUSED_TIMEOUT_MS.
+  // or both of you sit paused past BOTH_PAUSED_TIMEOUT_MS. `sessionId` is a
+  // fresh id every time (not derived from startedAt, which resolves
+  // asynchronously via serverTimestamp) so listeners — and the invite popup
+  // — can tell "brand-new session" apart from "same session, track changed"
+  // (see updateTrack, which never touches it). Starting fresh also resets
+  // `joined` to just the host — everyone else has to opt back in.
   function startSession(trackId) {
     const shuffle = remoteStateRef.current?.shuffle ?? true
     if (!firebaseReady) {
-      setLocalState({ trackId, positionAtStart: 0, startedAt: Date.now(), shuffle, active: true, hostId: 'local' })
+      setLocalState({
+        trackId,
+        positionAtStart: 0,
+        startedAt: Date.now(),
+        shuffle,
+        active: true,
+        hostId: 'local',
+        sessionId: `local-${Date.now()}`,
+        joined: { local: true },
+      })
       return
     }
     set(ref(rtdb, 'musicPlayer'), {
@@ -134,6 +160,8 @@ export function MusicPlayerProvider({ children }) {
       positionAtStart: 0,
       startedAt: serverTimestamp(),
       shuffle,
+      sessionId: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      joined: user?.uid ? { [user.uid]: true } : {},
     })
   }
 
@@ -156,6 +184,14 @@ export function MusicPlayerProvider({ children }) {
     set(ref(rtdb, 'musicPlayer'), null)
   }
 
+  // Opts this device into the currently active session — the host is
+  // implicitly joined (see startSession), everyone else has to call this
+  // before reconcile() will touch their <audio> element at all (see below).
+  function joinSession() {
+    if (!firebaseReady || !user) return
+    set(ref(rtdb, `musicPlayer/joined/${user.uid}`), true)
+  }
+
   function reconcile(currentState) {
     const audio = audioRef.current
     if (!audio) return
@@ -167,6 +203,20 @@ export function MusicPlayerProvider({ children }) {
 
     const track = trackById(currentState.trackId)
     if (!track) return
+
+    // Non-host listeners don't get pulled into audio playback just because a
+    // session exists — they have to explicitly joinSession() first (see
+    // Music.jsx's join gate). Uses userRef/currentState rather than the
+    // component-scope `user`/`isHost` because this function is also invoked
+    // from the empty-deps interval effect below, which only ever closes over
+    // its first-render values.
+    const uid = userRef.current?.uid
+    const isHostNow = !firebaseReady || (!!uid && currentState.hostId === uid)
+    const hasJoinedNow = isHostNow || !!(uid && currentState.joined?.[uid])
+    if (!hasJoinedNow) {
+      if (!audio.paused) audio.pause()
+      return
+    }
 
     if (loadedTrackIdRef.current !== currentState.trackId) {
       setDuration(0)
@@ -235,6 +285,15 @@ export function MusicPlayerProvider({ children }) {
     reconcile(remoteStateRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [locallyPaused])
+
+  // Same idea for joining: the reconcile() gate above only lets audio start
+  // once `joined` includes this uid, so re-run it the moment that flips
+  // (rather than waiting up to RECHECK_MS) — otherwise tapping "Join
+  // session" would sit silent until the next drift-correction tick.
+  useEffect(() => {
+    reconcile(remoteStateRef.current)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasJoined])
 
   // Corrects for each device's own audio-clock drift over a long track —
   // RTDB only pushes updates on writes, so nothing else re-checks this
@@ -362,8 +421,9 @@ export function MusicPlayerProvider({ children }) {
     // Reflects actual local playback, not just the shared session — while
     // this device is locally paused (manually or via sleep timer) the
     // play/pause button should show "play" (tap to resume) even though the
-    // session is still live and audible for the partner.
-    playing: !!state?.active && !!state?.trackId && !locallyPaused,
+    // session is still live and audible for the partner. Also false while
+    // this device hasn't joined someone else's session yet (see hasJoined).
+    playing: sessionActive && hasJoined && !locallyPaused,
     needsGesture,
     play,
     pause,
@@ -380,7 +440,12 @@ export function MusicPlayerProvider({ children }) {
     sleepTimerEndsAt,
     startSleepTimer,
     cancelSleepTimer,
-    isHost: firebaseReady ? !!user && state?.hostId === user.uid : true,
+    isHost,
+    hostId: state?.hostId ?? null,
+    sessionId: state?.sessionId ?? null,
+    sessionActive,
+    hasJoined,
+    joinSession,
     endSession,
     duration,
     position,

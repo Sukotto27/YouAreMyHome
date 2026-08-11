@@ -22,10 +22,15 @@ export default function MusicBar() {
     toggleFavorite,
     position,
     duration,
+    hasJoined,
   } = useMusicPlayer()
   const [showVolume, setShowVolume] = useState(false)
 
-  if (!currentTrack) return null
+  // Hidden until this device has actually joined the session (host or
+  // opted-in) — see context/MusicPlayerContext.jsx's hasJoined. Otherwise
+  // this bar's transport controls would imply you're listening when you're
+  // not; the join prompt lives on the Music page instead.
+  if (!currentTrack || !hasJoined) return null
 
   const isFavorite = !!myFavorites[currentTrack.id]
   const progressPct = duration > 0 ? Math.min(100, (position / duration) * 100) : 0

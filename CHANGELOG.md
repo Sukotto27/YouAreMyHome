@@ -5,6 +5,15 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.13.0
+
+- Music sessions no longer auto-play on your partner's device the moment you
+  start one — they now get a "Join session" prompt on the Music tab instead
+  (plus a badge on the Music tab and the existing 🎵 avatar badge if the
+  session was already going when they opened the app).
+- If you're both already in the app when one of you starts a session, the
+  other now gets a live popup asking if they want to join.
+
 ## v1.12.0
 
 - Music tab: every track now lists inline on the page itself (no more

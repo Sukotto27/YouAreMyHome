@@ -39,6 +39,9 @@ export default function Music() {
     position,
     duration,
     isHost,
+    sessionActive,
+    hasJoined,
+    joinSession,
     endSession,
   } = useMusicPlayer()
   const { user } = useAuth()
@@ -50,6 +53,37 @@ export default function Music() {
   const partnerName = myName === 'Scott' ? 'Cristina' : 'Scott'
   const hostName = isHost ? 'You' : preferredNameFor(partnerName, chatSettings.preferredNames)
   const hostDisplayName = isHost ? myName : partnerName
+
+  // A session is live but this device hasn't opted in yet — offer to join
+  // rather than auto-playing (see context/MusicPlayerContext.jsx's
+  // hasJoined). No track list/transport here; those imply you're already
+  // listening.
+  if (sessionActive && !hasJoined) {
+    return (
+      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-6 px-4 py-8 text-center sm:px-6">
+        <Record track={currentTrack} playing={false} fraction={fraction} />
+        <div>
+          <h1 className="font-display text-2xl italic text-ink">Music</h1>
+          <p className="mt-1 font-hand text-xl text-rose">{currentTrack?.title}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <img
+            src={avatarFor(hostDisplayName, chatSettings.avatars)}
+            alt={hostName}
+            className="h-8 w-8 rounded-full object-cover ring-2 ring-rose ring-offset-2 ring-offset-paper"
+          />
+          <p className="font-body text-sm text-ink-soft">📻 {hostName} is hosting a session</p>
+        </div>
+        <button
+          type="button"
+          onClick={joinSession}
+          className="rounded-full bg-rose px-8 py-3 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
+        >
+          🎧 Join session
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center gap-6 overflow-y-auto px-4 py-8 text-center sm:px-6">
