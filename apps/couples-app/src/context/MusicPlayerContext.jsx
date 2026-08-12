@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
-import { onValue, ref, serverTimestamp, set, update } from 'firebase/database'
+import { onValue, ref, runTransaction, serverTimestamp, set, update } from 'firebase/database'
 import { rtdb, firebaseReady } from '../firebase'
 import { TRACKS, trackById } from '../lib/musicLibrary'
-import { musicVolume, setMusicVolume } from '../lib/deviceSettings'
+import { musicVolume, setMusicVolume, musicPausedFor, setMusicPausedFor } from '../lib/deviceSettings'
 import { useMusicFavorites } from '../hooks/useMusicFavorites'
 import { useAuth } from './AuthContext'
 import { usePartnerUid } from '../hooks/usePartnerUid'
@@ -10,8 +10,18 @@ import { usePartnerUid } from '../hooks/usePartnerUid'
 const DRIFT_TOLERANCE_SECONDS = 1.5
 const RECHECK_MS = 10_000
 const POSITION_TICK_MS = 500
-const BOTH_PAUSED_CHECK_MS = 30_000
-const BOTH_PAUSED_TIMEOUT_MS = 10 * 60 * 1000
+const HEARTBEAT_MS = 30_000
+// Grace window beyond one heartbeat interval before a device counts as
+// "gone" rather than just between beats — absorbs a missed tick from tab
+// throttling/network blips without misreading it as inactivity.
+const ACTIVITY_STALE_MS = HEARTBEAT_MS * 3
+const ACTIVITY_CHECK_MS = 30_000
+const INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000
+const TOGETHER_TICK_MS = 30_000
+
+function isHeartbeatFresh(lastActive, now) {
+  return !!lastActive && now - lastActive < ACTIVITY_STALE_MS
+}
 
 const MusicPlayerContext = createContext(null)
 
@@ -123,6 +133,18 @@ export function MusicPlayerProvider({ children }) {
   const isHost = firebaseReady ? !!user && state?.hostId === user.uid : true
   const hasJoined = isHost || !!(user && state?.joined?.[user.uid])
 
+  // "Actually listening right now", not just joined — reads the same
+  // lastActiveAt heartbeat the inactivity-timeout effect below writes and
+  // checks. Recomputed on every render, which the position-tick interval
+  // (below) already drives every 500ms while a session is active, so this
+  // stays fresh without a dedicated interval of its own.
+  function isRecentlyActive(uid) {
+    return !!uid && isHeartbeatFresh(state?.lastActiveAt?.[uid], Date.now())
+  }
+  const meActive = isRecentlyActive(user?.uid)
+  const partnerActive = isRecentlyActive(partnerUid)
+  const [togetherSeconds, setTogetherSeconds] = useState(0)
+
   useEffect(() => {
     if (!firebaseReady) return
     return onValue(ref(rtdb, 'musicPlayer'), (snap) => {
@@ -130,9 +152,34 @@ export function MusicPlayerProvider({ children }) {
     })
   }, [])
 
+  // Cumulative "listened together" time — lives outside the musicPlayer
+  // node (and outside any one session) since it should keep growing across
+  // every session ever, not reset when a session ends. See the accounting
+  // effect further down for how it's incremented.
+  useEffect(() => {
+    if (!firebaseReady) return
+    return onValue(ref(rtdb, 'musicStats/togetherSeconds'), (snap) => {
+      setTogetherSeconds(snap.val() || 0)
+    })
+  }, [])
+
+  // Restores this device's own pause, the moment its session becomes known
+  // — reopening the app (or just reloading) onto an already-active session
+  // otherwise always resumed playback, regardless of how you'd left it,
+  // since manualPaused starts back at its default every time the provider
+  // remounts. Only fires again when the session id itself changes (a new
+  // session, which always starts unpaused unless this exact id was stored
+  // paused), not on every unrelated session update.
+  useEffect(() => {
+    const sessionId = state?.sessionId
+    if (!sessionId) return
+    setManualPaused(musicPausedFor(sessionId))
+  }, [state?.sessionId])
+
   // Starts a brand-new session — the caller becomes host, and the session
   // plays as a radio station (see expectedPosition) until the host ends it
-  // or both of you sit paused past BOTH_PAUSED_TIMEOUT_MS. `sessionId` is a
+  // or everyone currently joined has gone inactive (paused, backgrounded, or
+  // just gone) past INACTIVITY_TIMEOUT_MS. `sessionId` is a
   // fresh id every time (not derived from startedAt, which resolves
   // asynchronously via serverTimestamp) so listeners — and the invite popup
   // — can tell "brand-new session" apart from "same session, track changed"
@@ -167,7 +214,7 @@ export function MusicPlayerProvider({ children }) {
 
   // Moves an already-active session to a new track (skip/select/auto-advance)
   // via update() rather than set(), so it never clobbers hostId/active/
-  // pausedAt — only writeState-equivalent fields change here.
+  // lastActiveAt — only writeState-equivalent fields change here.
   function updateTrack(trackId, positionAtStart) {
     if (!firebaseReady) {
       setLocalState((prev) => (prev ? { ...prev, trackId, positionAtStart, startedAt: Date.now() } : prev))
@@ -226,8 +273,13 @@ export function MusicPlayerProvider({ children }) {
       audio.currentTime = expectedPosition(currentState, Date.now())
     } else {
       const expected = expectedPosition(currentState, Date.now())
-      if (Math.abs(audio.currentTime - expected) > DRIFT_TOLERANCE_SECONDS) {
-        audio.currentTime = expected
+      // Clamp below the real duration once it's known — a session that sat
+      // idle a while can compute an `expected` past the track's end, and
+      // seeking straight to (or past) duration fires a false 'ended' that
+      // auto-advances to a new track instead of just settling at the end.
+      const target = audio.duration ? Math.min(expected, Math.max(0, audio.duration - 0.25)) : expected
+      if (Math.abs(audio.currentTime - target) > DRIFT_TOLERANCE_SECONDS) {
+        audio.currentTime = target
       }
     }
 
@@ -261,6 +313,14 @@ export function MusicPlayerProvider({ children }) {
 
     function handleLoadedMetadata() {
       setDuration(audio.duration || 0)
+      // The initial-load seek in reconcile() runs before duration is known
+      // (see the comment on the drift-correction clamp below it), so a
+      // stale session's overshot target only becomes clampable once this
+      // fires — re-clamp here rather than let it sit past the end and fire
+      // a false 'ended'.
+      if (audio.duration && audio.currentTime > audio.duration - 0.25) {
+        audio.currentTime = Math.max(0, audio.duration - 0.25)
+      }
     }
 
     audio.addEventListener('ended', handleEnded)
@@ -314,48 +374,92 @@ export function MusicPlayerProvider({ children }) {
     return () => clearInterval(id)
   }, [])
 
-  // Publishes "I've stopped listening, as of this moment" so any device can
-  // detect "both of you are paused" below — presence-keyed by uid the same
-  // way useDateNightSyncUp.js's ready-state is.
+  // Publishes "I'm actually listening, as of this moment" — a heartbeat
+  // rather than a one-shot flag, so it also catches the cases a manual-pause
+  // flag can't: a locked/backgrounded phone, a killed tab, or a dropped
+  // connection. Those all just stop this write from firing, same as an
+  // explicit pause would (see the effect below, which treats a stale
+  // heartbeat and an explicit pause identically). Only beats while actually
+  // trying to play — paused/sleeping devices let their last beat age out on
+  // its own instead of writing anything.
   useEffect(() => {
-    if (!firebaseReady || !user || !state?.active) return
-    set(ref(rtdb, `musicPlayer/pausedAt/${user.uid}`), locallyPaused ? serverTimestamp() : null)
-  }, [user, state?.active, locallyPaused])
+    if (!firebaseReady || !user || !state?.active || !hasJoined || locallyPaused) return
+    function beat() {
+      set(ref(rtdb, `musicPlayer/lastActiveAt/${user.uid}`), serverTimestamp())
+    }
+    beat()
+    const id = setInterval(beat, HEARTBEAT_MS)
+    return () => clearInterval(id)
+  }, [user, state?.active, hasJoined, locallyPaused])
 
-  // Ends the session if both of you have been paused for too long — a radio
-  // station nobody's listening to. Whichever device's tick notices first
-  // just ends it; a near-simultaneous double-write from both devices is
-  // harmless since they'd both write the same `null`.
+  // Ends the session once everyone currently joined has gone inactive for
+  // too long — a radio station nobody's listening to. "Inactive" covers both
+  // an explicit pause and a heartbeat that's simply stopped arriving (phone
+  // locked, app closed, connection lost) — see the heartbeat effect above.
+  // Whichever device's tick notices first just ends it; a near-simultaneous
+  // double-write from both devices is harmless since they'd both write the
+  // same `null`.
   useEffect(() => {
     if (!firebaseReady) return
     const id = setInterval(() => {
       const current = remoteStateRef.current
-      if (!current?.active || !user || !partnerUid) return
-      const mine = current.pausedAt?.[user.uid]
-      const theirs = current.pausedAt?.[partnerUid]
-      if (!mine || !theirs) return
-      const bothPausedSince = Math.max(mine, theirs)
-      if (Date.now() - bothPausedSince > BOTH_PAUSED_TIMEOUT_MS) {
+      const joinedUids = Object.keys(current?.joined || {})
+      if (!current?.active || joinedUids.length === 0) return
+      const now = Date.now()
+      const inactiveSinceTimes = joinedUids.map((uid) => {
+        const lastActive = current.lastActiveAt?.[uid]
+        if (lastActive && now - lastActive < ACTIVITY_STALE_MS) return null
+        return lastActive || current.startedAt || now
+      })
+      if (inactiveSinceTimes.some((t) => t === null)) return
+      const allInactiveSince = Math.max(...inactiveSinceTimes)
+      if (now - allInactiveSince > INACTIVITY_TIMEOUT_MS) {
         set(ref(rtdb, 'musicPlayer'), null)
       }
-    }, BOTH_PAUSED_CHECK_MS)
+    }, ACTIVITY_CHECK_MS)
+    return () => clearInterval(id)
+  }, [])
+
+  // Credits musicStats/togetherSeconds every tick both of us are actually
+  // active (see the heartbeat effect above) — cumulative across every
+  // session ever, for the "listened together" stat on the Music page. Only
+  // one of us ever does the crediting (whichever uid sorts first,
+  // string-wise — arbitrary but deterministic) so both devices noticing
+  // "we're both active" at the same moment don't double-credit the same
+  // 30 seconds; the other device just reads the shared total live via the
+  // onValue listener above.
+  useEffect(() => {
+    if (!firebaseReady || !user || !partnerUid || user.uid > partnerUid) return
+    const id = setInterval(() => {
+      const current = remoteStateRef.current
+      if (!current?.active) return
+      const now = Date.now()
+      const bothActiveNow =
+        isHeartbeatFresh(current.lastActiveAt?.[user.uid], now) &&
+        isHeartbeatFresh(current.lastActiveAt?.[partnerUid], now)
+      if (!bothActiveNow) return
+      runTransaction(ref(rtdb, 'musicStats/togetherSeconds'), (secondsSoFar) => (secondsSoFar || 0) + TOGETHER_TICK_MS / 1000)
+    }, TOGETHER_TICK_MS)
     return () => clearInterval(id)
   }, [user, partnerUid])
 
   function play() {
     setManualPaused(false)
     setSleeping(false)
+    setMusicPausedFor(remoteStateRef.current?.sessionId, false)
     reconcile(remoteStateRef.current)
   }
 
   function pause() {
     setManualPaused(true)
+    setMusicPausedFor(remoteStateRef.current?.sessionId, true)
     audioRef.current?.pause()
   }
 
   function selectTrack(id) {
     setManualPaused(false)
     setSleeping(false)
+    setMusicPausedFor(remoteStateRef.current?.sessionId, false)
     if (remoteStateRef.current?.active) {
       updateTrack(id, 0)
     } else {
@@ -449,6 +553,9 @@ export function MusicPlayerProvider({ children }) {
     endSession,
     duration,
     position,
+    meActive,
+    partnerActive,
+    togetherSeconds,
     ...favorites,
   }
 

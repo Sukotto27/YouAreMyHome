@@ -5,6 +5,7 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { resizeImageFile } from '../lib/image'
 import { encryptJson } from '../lib/e2ee'
+import { recordChatDayActivity } from '../lib/chatStats'
 import { useEncryptionKey } from '../hooks/useEncryptionKey'
 import EncryptionGate from '../components/EncryptionGate'
 
@@ -95,6 +96,7 @@ export default function ShareTarget() {
           senderName,
           createdAt: serverTimestamp(),
         })
+        recordChatDayActivity()
         await addDoc(collection(db, 'gallery'), {
           encryptedImage,
           uploadedBy: user.uid,
@@ -123,6 +125,7 @@ export default function ShareTarget() {
           senderName,
           createdAt: serverTimestamp(),
         })
+        recordChatDayActivity()
       }
       navigate('/chat')
     } finally {

@@ -15,6 +15,13 @@ function arcFontSize(title) {
 
 const SLEEP_TIMER_OPTIONS = [15, 30, 45, 60]
 
+function formatTogetherTime(seconds) {
+  const totalMinutes = Math.floor(seconds / 60)
+  const hours = Math.floor(totalMinutes / 60)
+  const minutes = totalMinutes % 60
+  return hours === 0 ? `${minutes}m` : `${hours}h ${minutes}m`
+}
+
 export default function Music() {
   const {
     tracks,
@@ -43,6 +50,9 @@ export default function Music() {
     hasJoined,
     joinSession,
     endSession,
+    meActive,
+    partnerActive,
+    togetherSeconds,
   } = useMusicPlayer()
   const { user } = useAuth()
   const [chatSettings] = useChatSettings()
@@ -53,6 +63,12 @@ export default function Music() {
   const partnerName = myName === 'Scott' ? 'Cristina' : 'Scott'
   const hostName = isHost ? 'You' : preferredNameFor(partnerName, chatSettings.preferredNames)
   const hostDisplayName = isHost ? myName : partnerName
+  // The non-host participant — whoever that is relative to the viewer — so
+  // "both listening" always shows the *other* avatar next to the host's
+  // rather than duplicating it.
+  const joinerDisplayName = isHost ? partnerName : myName
+  const joinerName = isHost ? preferredNameFor(partnerName, chatSettings.preferredNames) : 'You'
+  const bothListening = meActive && partnerActive
 
   // A session is live but this device hasn't opted in yet — offer to join
   // rather than auto-playing (see context/MusicPlayerContext.jsx's
@@ -97,16 +113,34 @@ export default function Music() {
         ) : (
           <p className="mt-2 font-body text-sm text-ink-soft">pick a song below to start listening together 🎶</p>
         )}
+        {togetherSeconds > 0 && (
+          <p className="mt-1 font-body text-xs text-ink-soft/70">
+            🎧 {formatTogetherTime(togetherSeconds)} listened together
+          </p>
+        )}
       </div>
 
       {currentTrack && (
         <div className="flex items-center gap-3">
-          <img
-            src={avatarFor(hostDisplayName, chatSettings.avatars)}
-            alt={hostName}
-            className="h-8 w-8 rounded-full object-cover ring-2 ring-rose ring-offset-2 ring-offset-paper"
-          />
-          <p className="font-body text-xs text-ink-soft/70">📻 hosted by {hostName}</p>
+          <div className="flex items-center -space-x-2">
+            <img
+              src={avatarFor(hostDisplayName, chatSettings.avatars)}
+              alt={hostName}
+              className="h-8 w-8 rounded-full object-cover ring-2 ring-rose ring-offset-2 ring-offset-paper"
+            />
+            {bothListening && (
+              <img
+                src={avatarFor(joinerDisplayName, chatSettings.avatars)}
+                alt={joinerName}
+                title={`${joinerName === 'You' ? 'You' : joinerName} listening together right now`}
+                className="h-7 w-7 rounded-full object-cover ring-2 ring-emerald-400 ring-offset-2 ring-offset-paper"
+              />
+            )}
+          </div>
+          <p className="font-body text-xs text-ink-soft/70">
+            📻 hosted by {hostName}
+            {bothListening ? ' · listening together' : ''}
+          </p>
           {isHost && (
             <button
               type="button"

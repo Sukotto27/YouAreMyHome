@@ -5,6 +5,25 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.14.0
+
+- Fixed live music sessions not auto-ending when a phone locks, the app gets
+  closed, or the connection drops — the 10-minutes-both-inactive cleanup used
+  to only notice an explicit pause, so a session could get "stuck" showing as
+  live (and, on reopening, unexpectedly jump to a random new track) forever.
+  It now also treats a device that's gone silent as inactive.
+- The Music tab now shows the other person's avatar right next to the host's
+  whenever you're both actually listening at the same moment, not just both
+  "in" the session.
+- Fixed pausing music, closing the app, and reopening it later resuming
+  playback anyway — your pause now persists for that session and is restored
+  the moment the app reconnects to it.
+- Chat settings now shows how many texts we've exchanged in total, plus our
+  daily chatting streak (going since Jan 18, 2024 — the day it all started).
+- The Music tab now shows a running total of how much time we've spent
+  actually listening together (both of us active at once), across every
+  session ever.
+
 ## v1.13.0
 
 - Music sessions no longer auto-play on your partner's device the moment you

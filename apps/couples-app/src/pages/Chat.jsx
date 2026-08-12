@@ -24,6 +24,7 @@ import { chatFontClassName } from '../lib/chatFonts'
 import { textColorFor } from '../lib/bubbleColors'
 import { avatarFor } from '../lib/avatars'
 import { playSound } from '../lib/sounds'
+import { recordChatDayActivity } from '../lib/chatStats'
 import { decryptJson, encryptJson } from '../lib/e2ee'
 import { downloadDataUrl } from '../lib/downloadImage'
 import { autoDownloadImagesEnabled } from '../lib/deviceSettings'
@@ -485,6 +486,7 @@ export default function Chat() {
         lastActivityAt: serverTimestamp(),
         lastActivityByUid: user.uid,
       })
+      recordChatDayActivity()
     } finally {
       setSending(false)
     }
@@ -557,6 +559,7 @@ export default function Chat() {
           lastActivityAt: serverTimestamp(),
           lastActivityByUid: user.uid,
         })
+        recordChatDayActivity()
         if (!vanishing) {
           const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
           await addDoc(collection(db, 'gallery'), {

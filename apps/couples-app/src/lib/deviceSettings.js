@@ -6,6 +6,7 @@
 const SOUNDS_KEY = 'you-are-my-home:sounds-enabled'
 const AUTO_DOWNLOAD_KEY = 'you-are-my-home:auto-download-images'
 const MUSIC_VOLUME_KEY = 'you-are-my-home:music-volume'
+const MUSIC_PAUSED_KEY = 'you-are-my-home:music-paused'
 
 function readBool(key, fallback) {
   try {
@@ -70,4 +71,31 @@ export function musicVolume() {
 
 export function setMusicVolume(volume) {
   writeNumber(MUSIC_VOLUME_KEY, Math.max(0, Math.min(1, volume)))
+}
+
+// Whether *this device* had itself paused out of the given live session —
+// keyed by sessionId (not just a bare bool) so the preference only applies
+// to the session it was set during; reopening the app onto a brand-new
+// session always starts playing regardless of how a previous one was left.
+// Without this, closing and reopening the app while paused mid-session
+// resumed playback every time, since manualPaused is otherwise plain
+// component state that doesn't survive a reload.
+export function musicPausedFor(sessionId) {
+  try {
+    const raw = localStorage.getItem(MUSIC_PAUSED_KEY)
+    if (!raw || !sessionId) return false
+    const parsed = JSON.parse(raw)
+    return parsed?.sessionId === sessionId && !!parsed?.paused
+  } catch {
+    return false
+  }
+}
+
+export function setMusicPausedFor(sessionId, paused) {
+  if (!sessionId) return
+  try {
+    localStorage.setItem(MUSIC_PAUSED_KEY, JSON.stringify({ sessionId, paused }))
+  } catch {
+    // storage full/unavailable — setting just won't persist this session
+  }
 }

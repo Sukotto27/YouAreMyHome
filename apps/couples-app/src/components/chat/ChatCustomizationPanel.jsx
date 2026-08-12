@@ -7,8 +7,14 @@ import { CHAT_BACKGROUNDS } from '../../lib/chatBackgrounds'
 import { CHAT_FONTS } from '../../lib/chatFonts'
 import { BUBBLE_COLORS } from '../../lib/bubbleColors'
 import { decryptJson } from '../../lib/e2ee'
+import { useChatStats } from '../../hooks/useChatStats'
 
 const GALLERY_LIMIT = 18
+
+function formatStreakStart(dateKey) {
+  const [y, m, d] = dateKey.split('-').map(Number)
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
 
 // A doc without encryptedImage is legacy pre-migration plaintext and passes
 // through unchanged; one that can't be decrypted (no key yet) is dropped
@@ -39,6 +45,7 @@ export default function ChatCustomizationPanel({ settings, onUpdateSettings, cry
   const { user } = useAuth()
   const [tab, setTab] = useState('background')
   const [galleryPhotos, setGalleryPhotos] = useState([])
+  const { totalMessages, streakDays, streakStart } = useChatStats()
 
   useEffect(() => {
     let cancelled = false
@@ -63,6 +70,13 @@ export default function ChatCustomizationPanel({ settings, onUpdateSettings, cry
 
   return (
     <div>
+      <div className="mb-3 flex items-center justify-center gap-4 rounded-xl bg-blush-soft/40 px-3 py-2 font-body text-xs text-ink-soft">
+        <span>💬 {totalMessages === null ? '…' : totalMessages.toLocaleString()} texts</span>
+        <span title={`Streak started ${formatStreakStart(streakStart)}`}>
+          🔥 {streakDays.toLocaleString()}-day streak
+        </span>
+      </div>
+
       <div className="mb-3 flex gap-1 rounded-full bg-ink/5 p-1">
         {TABS.map((t) => (
           <button
