@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link, Outlet } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { MusicPlayerProvider, useMusicPlayer } from '../../context/MusicPlayerContext'
+import { NavigationHistoryProvider, useNavigationHistory } from '../../context/NavigationHistoryContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
 import { seedHistoryMilestones, seedBirthdays } from '../../lib/migrations'
@@ -40,14 +41,18 @@ const GREETED_KEY = 'you-are-my-home:greeted'
 
 export default function Shell() {
   return (
-    <MusicPlayerProvider>
-      <ShellContent />
-    </MusicPlayerProvider>
+    <NavigationHistoryProvider>
+      <MusicPlayerProvider>
+        <ShellContent />
+      </MusicPlayerProvider>
+    </NavigationHistoryProvider>
   )
 }
 
 function ShellContent() {
   const { user } = useAuth()
+  const location = useLocation()
+  const { goBack } = useNavigationHistory()
   const { currentTrack, sessionActive, hasJoined } = useMusicPlayer()
   const [greeting, setGreeting] = useState(null)
   const [sendLoveOpen, setSendLoveOpen] = useState(false)
@@ -119,15 +124,29 @@ function ShellContent() {
         </div>
       )}
       <header className="flex items-center justify-between gap-3 border-b border-ink/10 px-4 py-2 sm:px-6">
-        <Link to="/" className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-70">
-          <span className="relative inline-block h-5 w-5 shrink-0">
-            <img src={heartLeft} alt="" className="absolute inset-0 h-full w-full object-contain" />
-            <img src={heartRight} alt="" className="absolute inset-0 h-full w-full object-contain" />
-          </span>
-          <span className="hidden sm:inline">
-            <Wordmark />
-          </span>
-        </Link>
+        <div className="flex min-w-0 items-center gap-1">
+          {location.pathname !== '/' && (
+            <button
+              type="button"
+              onClick={() => goBack()}
+              aria-label="Back"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:text-rose"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            </button>
+          )}
+          <Link to="/" className="flex min-w-0 items-center gap-2 transition-opacity hover:opacity-70">
+            <span className="relative inline-block h-5 w-5 shrink-0">
+              <img src={heartLeft} alt="" className="absolute inset-0 h-full w-full object-contain" />
+              <img src={heartRight} alt="" className="absolute inset-0 h-full w-full object-contain" />
+            </span>
+            <span className="hidden sm:inline">
+              <Wordmark />
+            </span>
+          </Link>
+        </div>
 
         <CompactCounter />
 

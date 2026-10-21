@@ -5,7 +5,7 @@
 // "You Are My Home — The Game" is its own installable PWA (separate Vite
 // app under apps/home-game, deployed alongside this one at /game/) rather
 // than a component here, so it's a plain link out instead of a view.
-export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory, onSelectFarkle, onSelectUno, onSelectObstacleDrop }) {
+export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory, onSelectSong, onSelectFarkle, onSelectUno, onSelectObstacleDrop }) {
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-6 overflow-y-auto px-4 py-8 sm:px-6">
       <div className="text-center">
@@ -48,6 +48,16 @@ export default function GamesMenu({ onSelectDraw, onSelectMadLibs, onSelectStory
           <p className="font-body font-medium text-ink">Never-Ending Story</p>
           <p className="mt-1 font-body text-xs text-ink-soft">
             Take turns leaving a blank for each other — pick it back up anytime
+          </p>
+        </button>
+        <button
+          type="button"
+          onClick={onSelectSong}
+          className="rounded-2xl border border-teal/30 bg-white/60 px-4 py-4 text-left transition-colors hover:border-rose"
+        >
+          <p className="font-body font-medium text-ink">The Never-Ending Song</p>
+          <p className="mt-1 font-body text-xs text-ink-soft">
+            Like the story, but every line has to be a real song title
           </p>
         </button>
         <button

@@ -2,15 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { QUICK_REACTIONS } from '../../data/emojis'
 
 const MENU_WIDTH = 240
-// Worst case: reactions row + Reply + Copy + Edit all shown — an
+// Worst case: reactions row + Reply + Bookmark + Copy + Edit all shown — an
 // overestimate here just means extra clearance above the tap point, which
 // is safer than the menu clipping off the bottom of the screen.
-const MENU_HEIGHT = 200
+const MENU_HEIGHT = 240
 
 // Positioned `fixed` (viewport-relative) rather than absolute-inside-bubble
 // — the message list is overflow-y-auto and would clip an absolutely
 // positioned popup. Dismisses on any outside pointerdown.
-export default function MessageActionMenu({ x, y, message, isOwn, onSelectReaction, onReply, onEdit, onClose }) {
+export default function MessageActionMenu({ x, y, message, isOwn, onSelectReaction, onReply, onEdit, bookmarked, onToggleBookmark, onClose }) {
   const ref = useRef(null)
   const [copied, setCopied] = useState(false)
 
@@ -64,6 +64,13 @@ export default function MessageActionMenu({ x, y, message, isOwn, onSelectReacti
         className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-body text-sm text-ink-soft transition-colors hover:text-rose"
       >
         ↩ Reply
+      </button>
+      <button
+        type="button"
+        onClick={onToggleBookmark}
+        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 font-body text-sm text-ink-soft transition-colors hover:text-rose"
+      >
+        {bookmarked ? '🔖 Remove bookmark' : '🔖 Bookmark'}
       </button>
       {canCopy && (
         <button

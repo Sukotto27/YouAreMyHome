@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { addDoc, collection, onSnapshot, orderBy, query, serverTimestamp } from 'firebase/firestore'
+import { addDoc, collection, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
@@ -32,6 +32,8 @@ export default function Gallery() {
   const [selected, setSelected] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState('')
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
@@ -89,6 +91,30 @@ export default function Gallery() {
     }
   }
 
+  // Deletes for both partners — the photo doc (and its comments) is shared,
+  // not per-uid, so there's nothing to remove on just one side.
+  async function handleDelete() {
+    if (!selected) return
+    setDeleting(true)
+    try {
+      if (firebaseReady) {
+        const commentsSnap = await getDocs(collection(db, 'gallery', selected.id, 'comments'))
+        const batch = writeBatch(db)
+        commentsSnap.docs.forEach((commentDoc) => batch.delete(commentDoc.ref))
+        batch.delete(doc(db, 'gallery', selected.id))
+        await batch.commit()
+      } else {
+        const next = photos.filter((photo) => photo.id !== selected.id)
+        setPhotos(next)
+        writeDemoList('gallery', next)
+      }
+      setSelected(null)
+      setConfirmingDelete(false)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (!hasKey) {
     return <EncryptionGate saveKey={saveKey} />
   }
@@ -96,13 +122,37 @@ export default function Gallery() {
   if (selected) {
     return (
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
-        <button
-          type="button"
-          onClick={() => setSelected(null)}
-          className="self-start font-body text-sm text-ink-soft transition-colors hover:text-rose"
-        >
-          ← Back to gallery
-        </button>
+        <div className="flex items-center justify-between">
+          <button
+            type="button"
+            onClick={() => {
+              setSelected(null)
+              setConfirmingDelete(false)
+            }}
+            className="font-body text-sm text-ink-soft transition-colors hover:text-rose"
+          >
+            ← Back to gallery
+          </button>
+          {confirmingDelete ? (
+            <div className="flex items-center gap-2 font-body text-sm">
+              <span className="text-ink-soft">Delete this?</span>
+              <button type="button" onClick={handleDelete} disabled={deleting} className="font-medium text-rose">
+                {deleting ? 'Deleting…' : 'Yes'}
+              </button>
+              <button type="button" onClick={() => setConfirmingDelete(false)} className="text-ink-soft">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmingDelete(true)}
+              className="font-body text-sm text-ink-soft transition-colors hover:text-rose"
+            >
+              Delete
+            </button>
+          )}
+        </div>
         {selected._locked ? (
           <div className="flex aspect-square w-full items-center justify-center rounded-3xl border border-ink/10 bg-white/40">
             <p className="font-hand text-lg text-ink-soft">🔒 Encrypted — couldn't unlock with this device's key</p>

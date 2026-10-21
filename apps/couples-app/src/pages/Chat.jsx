@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import {
   addDoc,
   collection,
-  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -34,6 +33,8 @@ import ChatMenu from '../components/chat/ChatMenu'
 import EmojiPicker from '../components/chat/EmojiPicker'
 import MessageActionMenu from '../components/chat/MessageActionMenu'
 import SendImageModal from '../components/chat/SendImageModal'
+import BookmarkBanners from '../components/chat/BookmarkBanners'
+import { useChatBookmarks } from '../hooks/useChatBookmarks'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { useLongPress } from '../hooks/useLongPress'
 import { useMarkSeen } from '../hooks/useMarkSeen'
@@ -41,12 +42,13 @@ import { usePartnerSeenAt } from '../hooks/usePartnerSeenAt'
 import { useTypingIndicator } from '../hooks/useTypingIndicator'
 
 const RECENT_LIMIT = 200
+// Window widened to when a bookmark points at a message older than RECENT_LIMIT.
+const EXPANDED_LIMIT = 1000
 // Roughly 3 lines of the message textarea at this font size, plus its
 // vertical padding — CSS `max-h` + `overflow-y-auto` cap growth beyond this,
 // so no line-height math is needed to enforce the 3-line limit exactly.
 const MAX_INPUT_HEIGHT = 84
 const URL_PATTERN = /(https?:\/\/[^\s]+)/g
-const VANISH_MS = 60_000
 const AUTO_DOWNLOADED_KEY = 'you-are-my-home:auto-downloaded-image-ids'
 
 function readAutoDownloadedIds() {
@@ -113,6 +115,16 @@ async function decryptMessage(message, cryptoKey) {
   }
 }
 
+// Short text for a bookmark banner's tooltip / screen-reader label.
+function bookmarkPreview(message) {
+  if (!message) return 'Bookmarked message'
+  if (message._locked) return '🔒 Message'
+  const text =
+    message.type === 'image' ? '📷 Photo' : message.type === 'link' ? message.caption || message.previewTitle || message.url : message.text
+  const clean = (text || 'Bookmarked message').replace(/\s+/g, ' ').trim()
+  return clean.length > 60 ? `${clean.slice(0, 57)}…` : clean
+}
+
 export default function Chat() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -133,6 +145,15 @@ export default function Chat() {
   const [imageSendError, setImageSendError] = useState('')
   const [lightboxImage, setLightboxImage] = useState(null)
   const [activeMenu, setActiveMenu] = useState(null)
+  const { bookmarks, toggleBookmark, removeBookmark } = useChatBookmarks()
+  const [recentLimit, setRecentLimit] = useState(RECENT_LIMIT)
+  // The limit the *current* `messages` snapshot was actually loaded with —
+  // lags behind recentLimit right after it's widened, until the new
+  // snapshot arrives (see jumpToBookmark).
+  const [loadedLimit, setLoadedLimit] = useState(RECENT_LIMIT)
+  const [bookmarkNotice, setBookmarkNotice] = useState('')
+  const pendingBookmarkJumpRef = useRef(null)
+  const bookmarkNoticeTimerRef = useRef(null)
   const [atBottom, setAtBottomState] = useState(true)
   const bottomRef = useRef(null)
   const listRef = useRef(null)
@@ -184,7 +205,7 @@ export default function Chat() {
     const messagesQuery = query(
       collection(db, 'messages'),
       orderBy('createdAt', 'desc'),
-      limit(RECENT_LIMIT),
+      limit(recentLimit),
     )
     // Keyed on cryptoKey so the moment a key becomes available (first setup,
     // or switching from none to one), this re-subscribes and redecrypts
@@ -193,43 +214,11 @@ export default function Chat() {
       const raw = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })).reverse()
       const decrypted = await Promise.all(raw.map((message) => decryptMessage(message, cryptoKey)))
       setMessages(decrypted)
+      setLoadedLimit(recentLimit)
       setMessagesLoaded(true)
     })
     return unsubscribe
-  }, [cryptoKey])
-
-  // Deletes a vanishing image 1 minute after `viewedAt` is set (see
-  // revealVanishingImage) — scheduled on whichever device(s) currently have
-  // Chat open. If both devices are closed when the minute is up, whichever
-  // one opens Chat next re-runs this and fires the overdue deletion
-  // immediately (remaining <= 0), so nothing lingers forever. A scheduled
-  // Cloud Function (expireVanishingImages) backstops this for the case
-  // where neither device reopens Chat for a while.
-  const vanishTimersRef = useRef({})
-  useEffect(() => {
-    const scheduled = vanishTimersRef.current
-    for (const message of messages) {
-      if (!message.vanishing || !message.viewedAt || scheduled[message.id]) continue
-      const remaining = VANISH_MS - (Date.now() - toDate(message.viewedAt).getTime())
-      scheduled[message.id] = setTimeout(() => {
-        delete scheduled[message.id]
-        if (firebaseReady) {
-          deleteDoc(doc(db, 'messages', message.id)).catch(() => {})
-        } else {
-          setMessages((prev) => prev.filter((m) => m.id !== message.id))
-        }
-      }, Math.max(0, remaining))
-    }
-    const stillPresent = new Set(messages.map((m) => m.id))
-    for (const id of Object.keys(scheduled)) {
-      if (!stillPresent.has(id)) {
-        clearTimeout(scheduled[id])
-        delete scheduled[id]
-      }
-    }
-  }, [messages])
-
-  useEffect(() => () => Object.values(vanishTimersRef.current).forEach(clearTimeout), [])
+  }, [cryptoKey, recentLimit])
 
   // Auto-download is the recipient's own call (Settings → Photos in chat),
   // not something the sender sets per-image — checked fresh here since it
@@ -325,6 +314,51 @@ export default function Chat() {
     setHighlightedId(id)
     highlightTimerRef.current = setTimeout(() => setHighlightedId(null), 1500)
   }
+
+  function flashBookmarkNotice(text) {
+    clearTimeout(bookmarkNoticeTimerRef.current)
+    setBookmarkNotice(text)
+    bookmarkNoticeTimerRef.current = setTimeout(() => setBookmarkNotice(''), 3500)
+  }
+
+  // A banner can point at a message older than the recent window. If it's
+  // not rendered, either the whole history is already loaded (so it was
+  // deleted — drop the bookmark), or we widen the window once and finish the
+  // jump when the bigger snapshot lands (effect below).
+  function jumpToBookmark(id) {
+    if (messageElsRef.current[id]) {
+      jumpToMessage(id)
+      return
+    }
+    if (messages.length < loadedLimit) {
+      removeBookmark(id)
+      flashBookmarkNotice('That message no longer exists, so its bookmark was removed.')
+      return
+    }
+    if (loadedLimit >= EXPANDED_LIMIT) {
+      flashBookmarkNotice("That message is too far back to jump to.")
+      return
+    }
+    pendingBookmarkJumpRef.current = id
+    setRecentLimit(EXPANDED_LIMIT)
+  }
+
+  useEffect(() => {
+    const id = pendingBookmarkJumpRef.current
+    if (!id || loadedLimit < EXPANDED_LIMIT) return
+    pendingBookmarkJumpRef.current = null
+    if (messageElsRef.current[id]) {
+      jumpToMessage(id)
+    } else if (messages.length < loadedLimit) {
+      removeBookmark(id)
+      flashBookmarkNotice('That message no longer exists, so its bookmark was removed.')
+    } else {
+      flashBookmarkNotice("That message is too far back to jump to.")
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, loadedLimit])
+
+  useEffect(() => () => clearTimeout(bookmarkNoticeTimerRef.current), [])
 
   // Re-measures on every keystroke (and on emoji insertion, since that also
   // changes `draft` without going through the textarea's own onChange) —
@@ -492,10 +526,9 @@ export default function Chat() {
     }
   }
 
-  // Picking a file just opens the options modal — the actual send (and the
+  // Picking a file just opens a preview modal — the actual send (and the
   // reply snapshot, captured now so a reply started before picking still
-  // applies) happens in confirmSendImage once permanent/vanishing and
-  // auto-download are chosen.
+  // applies) happens in confirmSendImage once it's confirmed.
   function handleImageSelect(event) {
     const file = event.target.files?.[0]
     event.target.value = ''
@@ -513,7 +546,7 @@ export default function Chat() {
     setImageSendError('')
   }
 
-  async function confirmSendImage({ vanishing }) {
+  async function confirmSendImage() {
     const { file, previewUrl, replyTo, replyText } = pendingImage
     setUploadingImage(true)
     setImageSendError('')
@@ -529,7 +562,6 @@ export default function Chat() {
             type: 'image',
             imageDataUrl,
             replyTo: replyTo ? { ...replyTo, text: replyText } : null,
-            vanishing,
             senderUid: user.uid,
             senderName,
             createdAt: { toDate: () => new Date() },
@@ -537,22 +569,17 @@ export default function Chat() {
             lastActivityByUid: user.uid,
           },
         ])
-        // Vanishing images never go in the shared gallery — a permanent
-        // copy there would defeat the point.
-        if (!vanishing) {
-          const gallery = readDemoList('gallery')
-          writeDemoList('gallery', [
-            { id: crypto.randomUUID(), imageDataUrl, uploadedByName: senderName, createdAt: new Date().toISOString() },
-            ...gallery,
-          ])
-        }
+        const gallery = readDemoList('gallery')
+        writeDemoList('gallery', [
+          { id: crypto.randomUUID(), imageDataUrl, uploadedByName: senderName, createdAt: new Date().toISOString() },
+          ...gallery,
+        ])
       } else {
         const encryptedContent = await encryptJson({ imageDataUrl, replyText }, cryptoKey)
         await addDoc(collection(db, 'messages'), {
           type: 'image',
           encryptedContent,
           replyTo,
-          vanishing,
           senderUid: user.uid,
           senderName,
           createdAt: serverTimestamp(),
@@ -560,18 +587,16 @@ export default function Chat() {
           lastActivityByUid: user.uid,
         })
         recordChatDayActivity()
-        if (!vanishing) {
-          const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
-          await addDoc(collection(db, 'gallery'), {
-            encryptedImage,
-            uploadedBy: user.uid,
-            uploadedByName: senderName,
-            createdAt: serverTimestamp(),
-            lastActivityAt: serverTimestamp(),
-            lastActivityByUid: user.uid,
-            commentCount: 0,
-          })
-        }
+        const encryptedImage = await encryptJson({ imageDataUrl }, cryptoKey)
+        await addDoc(collection(db, 'gallery'), {
+          encryptedImage,
+          uploadedBy: user.uid,
+          uploadedByName: senderName,
+          createdAt: serverTimestamp(),
+          lastActivityAt: serverTimestamp(),
+          lastActivityByUid: user.uid,
+          commentCount: 0,
+        })
       }
 
       URL.revokeObjectURL(previewUrl)
@@ -587,20 +612,6 @@ export default function Chat() {
     } finally {
       setUploadingImage(false)
     }
-  }
-
-  // Only the recipient tapping to reveal starts the 1-minute countdown —
-  // the sender can already see what they sent, so isOwn is excluded at the
-  // MessageBubble/VanishingImage level, not here.
-  async function revealVanishingImage(message) {
-    if (message.viewedAt) return
-    if (!firebaseReady) {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === message.id ? { ...m, viewedAt: { toDate: () => new Date() } } : m)),
-      )
-      return
-    }
-    await updateDoc(doc(db, 'messages', message.id), { viewedAt: serverTimestamp() })
   }
 
   async function handleExportHistory() {
@@ -632,6 +643,15 @@ export default function Chat() {
 
   const backgroundStyle = backgroundStyleFor(chatSettings.background)
   const timeline = buildTimeline(messages)
+  const messagesById = new Map(messages.map((m) => [m.id, m]))
+  const bookmarkItems = Object.entries(bookmarks)
+    .map(([id, entry]) => ({
+      id,
+      color: entry?.color ?? 0,
+      at: entry?.at ?? 0,
+      preview: bookmarkPreview(messagesById.get(id)),
+    }))
+    .sort((a, b) => a.at - b.at)
 
   if (!hasKey) {
     return <EncryptionGate saveKey={saveKey} />
@@ -702,7 +722,6 @@ export default function Chat() {
                 chatSettings={chatSettings}
                 onRegister={registerMessageEl}
                 onJumpToMessage={jumpToMessage}
-                onRevealVanishing={revealVanishingImage}
                 onOpenSettings={() => navigate('/settings')}
                 onExpandImage={setLightboxImage}
                 highlighted={highlightedId === item.message.id}
@@ -719,6 +738,8 @@ export default function Chat() {
           )}
           <div ref={bottomRef} />
         </div>
+
+        <BookmarkBanners items={bookmarkItems} notice={bookmarkNotice} onJump={jumpToBookmark} />
 
         {!atBottom && (
           <button
@@ -748,6 +769,11 @@ export default function Chat() {
             setActiveMenu(null)
           }}
           onEdit={() => startEditing(activeMenu.message)}
+          bookmarked={!!bookmarks[activeMenu.message.id]}
+          onToggleBookmark={() => {
+            toggleBookmark(activeMenu.message)
+            setActiveMenu(null)
+          }}
           onClose={() => setActiveMenu(null)}
         />
       )}
@@ -891,7 +917,6 @@ function MessageBubble({
   chatSettings,
   onRegister,
   onJumpToMessage,
-  onRevealVanishing,
   onOpenSettings,
   onExpandImage,
   highlighted,
@@ -969,8 +994,6 @@ function MessageBubble({
             )}
             {message._locked ? (
               <p className="italic text-inherit opacity-80">🔒 Encrypted — couldn't unlock with this device's key</p>
-            ) : message.type === 'image' && message.vanishing ? (
-              <VanishingImage message={message} isOwn={isOwn} onReveal={onRevealVanishing} onExpand={onExpandImage} />
             ) : message.type === 'image' ? (
               <img
                 src={message.imageDataUrl}
@@ -1016,93 +1039,6 @@ function MessageBubble({
           </span>
         )}
       </div>
-    </div>
-  )
-}
-
-// Recipient sees a locked placeholder until they tap it (that tap is what
-// starts the 1-minute countdown, via onReveal → revealVanishingImage). The
-// sender can always see their own sent photo — isOwn skips the placeholder
-// — but still sees the live countdown ring once the recipient opens it,
-// since viewedAt syncs to both sides the same way any other field update
-// does. The slight transparency and "Unopened" caption are sender-only —
-// the recipient's own copy, once they've opened it, looks like any other
-// photo (just with the countdown ring, which both of you see identically).
-function VanishingImage({ message, isOwn, onReveal, onExpand }) {
-  const viewed = !!message.viewedAt
-  const revealed = isOwn || viewed
-  const [now, setNow] = useState(() => Date.now())
-
-  useEffect(() => {
-    if (!viewed) return
-    const interval = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(interval)
-  }, [viewed])
-
-  if (!revealed) {
-    return (
-      <button
-        type="button"
-        onClick={() => onReveal(message)}
-        className="flex h-40 w-full flex-col items-center justify-center gap-1 rounded-xl bg-ink/10 text-inherit transition-transform hover:scale-[1.02]"
-      >
-        <span className="text-2xl">⏳</span>
-        <span className="font-body text-xs">Vanishing Image. Tap to view</span>
-      </button>
-    )
-  }
-
-  const remainingSeconds = viewed ? Math.max(0, 60 - Math.floor((now - toDate(message.viewedAt).getTime()) / 1000)) : null
-
-  return (
-    <div>
-      <div className="relative">
-        <img
-          src={message.imageDataUrl}
-          alt=""
-          onClick={() => onExpand(message.imageDataUrl)}
-          className={`max-h-72 w-full cursor-pointer rounded-xl object-cover transition-transform hover:scale-[1.01] ${
-            isOwn ? 'opacity-80' : ''
-          }`}
-        />
-        {viewed && (
-          <div className="absolute bottom-1.5 right-1.5">
-            <CircularCountdown remainingSeconds={remainingSeconds} />
-          </div>
-        )}
-      </div>
-      {!viewed && isOwn && (
-        <p className="mt-1 text-center font-body text-[10px] italic text-inherit opacity-70">Unopened Vanishing Image.</p>
-      )}
-    </div>
-  )
-}
-
-const COUNTDOWN_TOTAL_SECONDS = 60
-const COUNTDOWN_RADIUS = 14
-const COUNTDOWN_CIRCUMFERENCE = 2 * Math.PI * COUNTDOWN_RADIUS
-
-function CircularCountdown({ remainingSeconds }) {
-  const progress = remainingSeconds / COUNTDOWN_TOTAL_SECONDS
-  const dashOffset = COUNTDOWN_CIRCUMFERENCE * (1 - progress)
-
-  return (
-    <div className="relative flex h-9 w-9 items-center justify-center" title={`Vanishes in ${remainingSeconds}s`}>
-      <svg viewBox="0 0 36 36" className="h-9 w-9 -rotate-90">
-        <circle cx="18" cy="18" r={COUNTDOWN_RADIUS} className="fill-ink/50" />
-        <circle
-          cx="18"
-          cy="18"
-          r={COUNTDOWN_RADIUS}
-          fill="none"
-          stroke="white"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeDasharray={COUNTDOWN_CIRCUMFERENCE}
-          strokeDashoffset={dashOffset}
-        />
-      </svg>
-      <span className="absolute font-body text-[10px] font-medium text-white">{remainingSeconds}</span>
     </div>
   )
 }

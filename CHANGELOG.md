@@ -5,6 +5,54 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.18.0
+
+- **Chat bookmarks.** Long-press any message and pick **Bookmark** — a little
+  colored ribbon appears down the right edge of Chat, and tapping it scrolls
+  straight to that message (even if it's older than what's loaded). Each new
+  bookmark gets a different color, and you take one off the same way you put
+  it on (long-press → **Remove bookmark**). Bookmarks are per-person: yours
+  only show up for you, hers only for her.
+- Fixed a dead music session lingering for months: a leftover music node with
+  a track but no host made the Home avatar show "hosting a live music
+  session" and the Music tab say your partner was hosting, and the auto-expiry
+  never cleaned it up because the node looked "not joined." The UI now only
+  treats a session as live when it's actually active, a stray write can no
+  longer recreate an ended session, and any leftover is swept automatically.
+- Removed vanishing images entirely — the send-photo dialog is now just a
+  preview with Send/Cancel, and the every-minute `expireVanishingImages`
+  Cloud Function is gone (it was the main source of the small Firebase
+  charges).
+
+## v1.17.0
+
+- New game: **The Never-Ending Song**. Same take-turns-forever shape as the
+  Never-Ending Story, but every line you add has to be a real song title (or
+  a few strung together) — you can only sprinkle in small filler words to
+  make it read grammatically, and you can't change the titles themselves.
+  Each turn also records which song(s) you used. Has its own "Invite
+  partner" ping and in-app popup like the other games.
+
+## v1.16.0
+
+- Every tab now has a consistent back button in the header, and it always
+  returns you to whichever tab you were actually on before — not hardcoded
+  to Home. (Settings, for instance, used to always dump you back on Home
+  even if you opened it from Chat or Music.) Tabs that had no back button at
+  all before (Chat, Music, Tree) now get one too.
+
+## v1.15.0
+
+- Mad Libs no longer blocks you from seeing your own filled-in story while
+  waiting on your partner — whoever finishes first sees theirs immediately,
+  with the other side's card appearing as soon as they submit too.
+- The Music tab now shows a play count on every track, and shuffle now
+  favors songs that have been played less — heavily-played tracks still come
+  up, just less often.
+- Gallery photos can now be deleted (with a confirm step) — removes the
+  photo and its comments for both of us, since there's nothing to keep on
+  just one side.
+
 ## v1.14.0
 
 - Fixed live music sessions not auto-ending when a phone locks, the app gets
