@@ -1,5 +1,4 @@
 import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useChatSettings } from '../hooks/useChatSettings'
 import { useEncryptionKey } from '../hooks/useEncryptionKey'
@@ -28,7 +27,6 @@ const SAVED_FEEDBACK_MS = 1400
 // lib/deviceSettings) — deliberately not shared, since what you want on
 // your phone has nothing to do with what your partner wants on theirs.
 export default function Settings() {
-  const navigate = useNavigate()
   const { user, logout } = useAuth()
   const { hasKey, cryptoKey, rawKeyBase64 } = useEncryptionKey()
   const { permission, supported, unsupportedReasons, enable } = usePushNotifications()
@@ -108,17 +106,6 @@ export default function Settings() {
   return (
     <div className="flex flex-1 flex-col overflow-y-auto px-4 py-6 sm:px-6">
       <div className="mx-auto w-full max-w-md">
-        <button
-          type="button"
-          onClick={() => navigate('/')}
-          className="mb-4 flex items-center gap-1 font-body text-sm text-ink-soft transition-colors hover:text-rose"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-          Back
-        </button>
-
         <h1 className="font-display text-2xl italic text-ink">Settings</h1>
 
         <section className="mt-6">

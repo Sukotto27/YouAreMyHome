@@ -43,17 +43,24 @@ function expectedPosition(state, now) {
 // shared state (never a relative "skip forward" instruction), so there's no
 // ordering-agreement problem between devices: whichever device acts first
 // just picks, and the other follows.
-function resolveNextTrackId(current, delta) {
+// Shuffle is weighted by play count — each candidate's weight is
+// 1/(plays+1), so a track that's been played a lot is still reachable, just
+// proportionally less likely to come up again than something rarely heard.
+function resolveNextTrackId(current, delta, playCounts = {}) {
   if (TRACKS.length === 0) return null
   const shuffle = current?.shuffle ?? true
   const idx = current?.trackId ? TRACKS.findIndex((track) => track.id === current.trackId) : -1
 
   if (shuffle && TRACKS.length > 1) {
-    let nextIdx
-    do {
-      nextIdx = Math.floor(Math.random() * TRACKS.length)
-    } while (nextIdx === idx)
-    return TRACKS[nextIdx].id
+    const candidates = TRACKS.filter((_, i) => i !== idx)
+    const weights = candidates.map((track) => 1 / ((playCounts[track.id] || 0) + 1))
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0)
+    let roll = Math.random() * totalWeight
+    for (let i = 0; i < candidates.length; i++) {
+      roll -= weights[i]
+      if (roll <= 0) return candidates[i].id
+    }
+    return candidates[candidates.length - 1].id
   }
 
   const nextIdx = (((idx === -1 ? 0 : idx + delta) % TRACKS.length) + TRACKS.length) % TRACKS.length
@@ -129,6 +136,32 @@ export function MusicPlayerProvider({ children }) {
     remoteStateRef.current = state
   }, [state])
 
+  // Cumulative per-track play counts, keyed by track id — lives alongside
+  // musicStats/togetherSeconds since both are "ever, across every session"
+  // stats rather than part of the live session node. The ref mirror exists
+  // because handleEnded (below) runs from a mount-only effect and would
+  // otherwise close over a stale, empty value.
+  const [playCounts, setPlayCounts] = useState({})
+  const playCountsRef = useRef(playCounts)
+  useEffect(() => {
+    playCountsRef.current = playCounts
+  }, [playCounts])
+
+  useEffect(() => {
+    if (!firebaseReady) return
+    return onValue(ref(rtdb, 'musicStats/playCounts'), (snap) => {
+      setPlayCounts(snap.val() || {})
+    })
+  }, [])
+
+  // Counts once per track-start event — called from the single write site
+  // that begins a given track (startSession/updateTrack), never from a
+  // per-device effect, so both partners sharing one session don't double it.
+  function incrementPlayCount(trackId) {
+    if (!firebaseReady || !trackId) return
+    runTransaction(ref(rtdb, `musicStats/playCounts/${trackId}`), (count) => (count || 0) + 1)
+  }
+
   const sessionActive = !!state?.active && !!state?.trackId
   const isHost = firebaseReady ? !!user && state?.hostId === user.uid : true
   const hasJoined = isHost || !!(user && state?.joined?.[user.uid])
@@ -187,6 +220,7 @@ export function MusicPlayerProvider({ children }) {
   // `joined` to just the host — everyone else has to opt back in.
   function startSession(trackId) {
     const shuffle = remoteStateRef.current?.shuffle ?? true
+    incrementPlayCount(trackId)
     if (!firebaseReady) {
       setLocalState({
         trackId,
@@ -216,6 +250,8 @@ export function MusicPlayerProvider({ children }) {
   // via update() rather than set(), so it never clobbers hostId/active/
   // lastActiveAt — only writeState-equivalent fields change here.
   function updateTrack(trackId, positionAtStart) {
+    if (firebaseReady && !remoteStateRef.current?.active) return
+    incrementPlayCount(trackId)
     if (!firebaseReady) {
       setLocalState((prev) => (prev ? { ...prev, trackId, positionAtStart, startedAt: Date.now() } : prev))
       return
@@ -306,8 +342,11 @@ export function MusicPlayerProvider({ children }) {
 
     function handleEnded() {
       const current = remoteStateRef.current
-      if (!current || current.trackId !== loadedTrackIdRef.current) return
-      const nextId = resolveNextTrackId(current, 1)
+      // Only advance a live session — update()-ing a track onto a node that
+      // was already ended would resurrect it as a hostless zombie (trackId
+      // but no `active`/`hostId`/`joined`) that nothing ever cleans up.
+      if (!current?.active || current.trackId !== loadedTrackIdRef.current) return
+      const nextId = resolveNextTrackId(current, 1, playCountsRef.current)
       if (nextId) updateTrack(nextId, 0)
     }
 
@@ -385,6 +424,8 @@ export function MusicPlayerProvider({ children }) {
   useEffect(() => {
     if (!firebaseReady || !user || !state?.active || !hasJoined || locallyPaused) return
     function beat() {
+      // Same zombie guard as updateTrack: never write into an ended session.
+      if (!remoteStateRef.current?.active) return
       set(ref(rtdb, `musicPlayer/lastActiveAt/${user.uid}`), serverTimestamp())
     }
     beat()
@@ -403,6 +444,14 @@ export function MusicPlayerProvider({ children }) {
     if (!firebaseReady) return
     const id = setInterval(() => {
       const current = remoteStateRef.current
+      // A node with a track/heartbeat but no `active` flag is a leftover
+      // from a write that landed after the session ended (a real session is
+      // always written whole by startSession). It never has anyone "joined",
+      // so the inactivity check below can't see it — sweep it here.
+      if (current && !current.active && (current.trackId || current.lastActiveAt)) {
+        set(ref(rtdb, 'musicPlayer'), null)
+        return
+      }
       const joinedUids = Object.keys(current?.joined || {})
       if (!current?.active || joinedUids.length === 0) return
       const now = Date.now()
@@ -468,7 +517,7 @@ export function MusicPlayerProvider({ children }) {
   }
 
   function skip(delta) {
-    const nextId = resolveNextTrackId(remoteStateRef.current, delta)
+    const nextId = resolveNextTrackId(remoteStateRef.current, delta, playCountsRef.current)
     if (nextId) selectTrack(nextId)
   }
 
@@ -521,7 +570,9 @@ export function MusicPlayerProvider({ children }) {
 
   const value = {
     tracks: TRACKS,
-    currentTrack: state?.trackId ? trackById(state.trackId) : null,
+    // Null unless the session is actually live — a stale node that still has
+    // a trackId must not look like "someone is hosting" in the UI.
+    currentTrack: sessionActive ? trackById(state.trackId) : null,
     // Reflects actual local playback, not just the shared session — while
     // this device is locally paused (manually or via sleep timer) the
     // play/pause button should show "play" (tap to resume) even though the
@@ -556,6 +607,7 @@ export function MusicPlayerProvider({ children }) {
     meActive,
     partnerActive,
     togetherSeconds,
+    playCounts,
     ...favorites,
   }
 

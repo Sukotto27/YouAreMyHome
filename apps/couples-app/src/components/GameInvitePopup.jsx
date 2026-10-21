@@ -10,6 +10,7 @@ const GAME_EMOJI = {
   draw: '🎨',
   madlibs: '📝',
   story: '📖',
+  song: '🎶',
   farkle: '🎲',
   obstacleDrop: '⚽',
 }

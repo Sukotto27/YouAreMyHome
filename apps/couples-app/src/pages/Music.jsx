@@ -53,6 +53,7 @@ export default function Music() {
     meActive,
     partnerActive,
     togetherSeconds,
+    playCounts,
   } = useMusicPlayer()
   const { user } = useAuth()
   const [chatSettings] = useChatSettings()
@@ -220,6 +221,7 @@ export default function Music() {
               isCurrent={currentTrack?.id === track.id}
               playing={playing}
               onSelect={() => selectTrack(track.id)}
+              playCount={playCounts[track.id] || 0}
               isMine={!!myFavorites[track.id]}
               isPartners={!!partnerFavorites[track.id]}
               onToggleFavorite={() => toggleFavorite(track.id)}
@@ -301,7 +303,7 @@ function SleepTimerControl() {
   )
 }
 
-function TrackRow({ track, isCurrent, playing, onSelect, isMine, isPartners, onToggleFavorite, myAvatarSrc, myName, partnerAvatarSrc, partnerName }) {
+function TrackRow({ track, isCurrent, playing, onSelect, playCount, isMine, isPartners, onToggleFavorite, myAvatarSrc, myName, partnerAvatarSrc, partnerName }) {
   const [showComments, setShowComments] = useState(false)
 
   return (
@@ -327,6 +329,14 @@ function TrackRow({ track, isCurrent, playing, onSelect, isMine, isPartners, onT
           {isCurrent && playing ? '🎵 ' : ''}
           {track.title}
         </button>
+        {playCount > 0 && (
+          <span
+            title={`played ${playCount} time${playCount === 1 ? '' : 's'}`}
+            className="shrink-0 font-body text-[11px] text-ink-soft/60"
+          >
+            ▶ {playCount}
+          </span>
+        )}
         <div className="flex shrink-0 items-center gap-1">
           {isMine && <FavoriteAvatar src={myAvatarSrc} name={myName} />}
           {isPartners && <FavoriteAvatar src={partnerAvatarSrc} name={partnerName} />}

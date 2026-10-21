@@ -222,7 +222,9 @@ function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmi
     }
   }
 
-  if (bothDone) {
+  // Each side's story is visible the moment that side has filled it in —
+  // no need to wait on the other before you can look back at your own.
+  if (myAnswers) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-6 sm:px-6">
         <button
@@ -235,31 +237,23 @@ function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmi
         <h1 className="font-display text-2xl italic text-ink">{story.title}</h1>
         <div className="space-y-4">
           <StoryCard label="Yours" text={renderMadLibText(story, myAnswers)} />
-          <StoryCard label={`${partnerLabel}'s`} text={renderMadLibText(story, partnerAnswers)} />
+          {partnerAnswers ? (
+            <StoryCard label={`${partnerLabel}'s`} text={renderMadLibText(story, partnerAnswers)} />
+          ) : (
+            <p className="animate-pulse text-center font-hand text-xl text-rose">
+              waiting on {partnerLabel} to fill theirs in...
+            </p>
+          )}
         </div>
-        <button
-          type="button"
-          onClick={onPlayAgain}
-          className="mx-auto rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper transition-transform duration-200 ease-out hover:-translate-y-0.5"
-        >
-          Play again
-        </button>
-      </div>
-    )
-  }
-
-  if (myAnswers) {
-    return (
-      <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-6 px-4 py-8 text-center sm:px-6">
-        <button
-          type="button"
-          onClick={onBack}
-          className="self-start font-body text-sm text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
-        >
-          ← Back
-        </button>
-        <p className="font-display text-2xl italic text-ink">{story.title}</p>
-        <p className="animate-pulse font-hand text-2xl text-rose">waiting on {partnerLabel} to fill theirs in...</p>
+        {bothDone && (
+          <button
+            type="button"
+            onClick={onPlayAgain}
+            className="mx-auto rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper transition-transform duration-200 ease-out hover:-translate-y-0.5"
+          >
+            Play again
+          </button>
+        )}
       </div>
     )
   }
