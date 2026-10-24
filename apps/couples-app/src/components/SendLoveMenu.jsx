@@ -95,7 +95,7 @@ export default function SendLoveMenu({ open, onClose, thumbkiss }) {
               </button>
 
               {Object.entries(LOVE_NOTE_KINDS).map(([kind, def]) => {
-                const used = !!usedToday[kind]
+                const used = !def.unlimited && !!usedToday[kind]
                 return (
                   <button
                     key={kind}

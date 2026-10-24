@@ -23,7 +23,8 @@ export function currentKissKind() {
 }
 
 // Each of these is limited to once per day per kind (see useLoveNotes'
-// `usedToday`) — unlike the kiss, which can be sent any time.
+// `usedToday`) — unlike the kiss, which can be sent any time — unless it's
+// flagged `unlimited`.
 export const LOVE_NOTE_KINDS = {
   thinking: {
     emoji: '💭',
@@ -39,6 +40,13 @@ export const LOVE_NOTE_KINDS = {
     emoji: '🥺',
     label: 'I miss you',
     message: (name) => `${name} misses you 🥺`,
+  },
+  // Unlike the rest, can be sent as often as you like (see `unlimited`).
+  smackButt: {
+    emoji: '🍑',
+    label: 'Smack Butt',
+    unlimited: true,
+    message: (name) => `${name} smacked your butt 🍑`,
   },
 }
 

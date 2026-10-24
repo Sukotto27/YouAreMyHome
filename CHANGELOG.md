@@ -5,6 +5,17 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.19.0
+
+- **Press and hold your partner's avatar on Home** to open a quick menu:
+  Send Message, Send Love Letter, Send Love, Invite to Game, Start Jam Session.
+- **Smack Butt 🍑** added to Send Love — no once-a-day limit.
+- Home weather now shows both temperatures in your own unit (°F for Scott,
+  °C for Cristina), and the weather cards are a fixed size so they stay side
+  by side instead of stacking.
+- Removed the "a little corner of the internet…" tagline and changed the
+  footer to "Meu amor, meu caminho, meu lar".
+
 ## v1.18.0
 
 - **Chat bookmarks.** Long-press any message and pick **Bookmark** — a little

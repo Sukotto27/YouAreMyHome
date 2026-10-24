@@ -75,7 +75,7 @@ export function useLoveNotes() {
     if (!firebaseReady) {
       const withId = { ...note, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
       setNotes((prev) => [withId, ...prev])
-      if (category === 'note') {
+      if (category === 'note' && !def.unlimited) {
         const next = { ...usedToday, [kind]: true }
         writeDemoList(`loveNoteSends:${user.uid}:${date}`, next)
         setUsedToday(next)
@@ -105,7 +105,7 @@ export function useLoveNotes() {
     }
 
     await addDoc(collection(db, 'loveNotes'), { ...note, createdAt: serverTimestamp() })
-    if (category === 'note') {
+    if (category === 'note' && !def.unlimited) {
       await setDoc(doc(db, 'loveNoteSends', `${user.uid}_${date}`), { [kind]: true }, { merge: true })
     }
   }

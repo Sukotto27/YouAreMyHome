@@ -17,6 +17,7 @@ import GameInvitePopup from '../GameInvitePopup'
 import MusicInvitePopup from '../MusicInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
 import SendLoveMenu from '../SendLoveMenu'
+import { OPEN_SEND_LOVE_EVENT } from '../PartnerActionMenu'
 import MusicBar from '../MusicBar'
 import SwipeableNav from './SwipeableNav'
 import Wordmark from './Wordmark'
@@ -57,6 +58,11 @@ function ShellContent() {
   const [greeting, setGreeting] = useState(null)
   const [sendLoveOpen, setSendLoveOpen] = useState(false)
   const { unread } = useUnreadBadges()
+  useEffect(() => {
+    const open = () => setSendLoveOpen(true)
+    window.addEventListener(OPEN_SEND_LOVE_EVENT, open)
+    return () => window.removeEventListener(OPEN_SEND_LOVE_EVENT, open)
+  }, [])
   // Music isn't tracked by useUnreadBadges (it's live RTDB session state, not
   // a Firestore "seen/unseen" feed) — merged in here so the Music nav item
   // gets the same badge dot as everything else while a session you haven't
