@@ -17,6 +17,7 @@ import GameInvitePopup from '../GameInvitePopup'
 import MusicInvitePopup from '../MusicInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
 import SendLoveMenu from '../SendLoveMenu'
+import WhatsNew from '../WhatsNew'
 import { OPEN_SEND_LOVE_EVENT } from '../PartnerActionMenu'
 import MusicBar from '../MusicBar'
 import SwipeableNav from './SwipeableNav'
@@ -104,6 +105,7 @@ function ShellContent() {
   return (
     <div className="flex h-svh flex-col overflow-hidden bg-paper text-ink">
       <NamePrompt />
+      <WhatsNew />
       <CheckInReminder />
       <GameInvitePopup />
       <MusicInvitePopup />
