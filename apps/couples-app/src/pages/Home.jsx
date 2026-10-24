@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import RelationshipCounter from '../components/counter/RelationshipCounter'
 import InstallBanner from '../components/InstallBanner'
@@ -7,6 +7,7 @@ import LocationClocks from '../components/LocationClocks'
 import MoodBubble from '../components/MoodBubble'
 import AvatarBadge from '../components/AvatarBadge'
 import LoveNoteCard from '../components/LoveNoteCard'
+import PartnerActionMenu from '../components/PartnerActionMenu'
 import { useAuth } from '../context/AuthContext'
 import { useMusicPlayer } from '../context/MusicPlayerContext'
 import { useMoods } from '../hooks/useMoods'
@@ -25,6 +26,8 @@ import { formatCountdown } from '../lib/countdown'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
 
+const LONG_PRESS_MS = 500
+
 export default function Home() {
   const navigate = useNavigate()
   const { user } = useAuth()
@@ -39,6 +42,7 @@ export default function Home() {
   const { incoming: incomingLoveNote, sendReply } = useLoveNotes()
   const [loveNoteOpen, setLoveNoteOpen] = useState(false)
   const [loveNoteReplied, setLoveNoteReplied] = useState(false)
+  const [partnerMenuOpen, setPartnerMenuOpen] = useState(false)
 
   function openLoveNote() {
     markSeenNow(user, 'loveNotes')
@@ -149,9 +153,6 @@ export default function Home() {
           <h1 className="font-display text-4xl italic tracking-tight text-ink sm:text-5xl">
             You Are My Home
           </h1>
-          <p className="font-hand text-xl text-rose sm:text-2xl">
-            a little corner of the internet, just for the two of us
-          </p>
         </div>
 
         <RelationshipCounter />
@@ -175,6 +176,7 @@ export default function Home() {
             isMine={user.displayName === 'Cristina'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
+            onLongPress={() => setPartnerMenuOpen(true)}
             badges={badgesFor(user.displayName === 'Cristina')}
           />
           <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
@@ -186,6 +188,7 @@ export default function Home() {
             isMine={user.displayName === 'Scott'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
+            onLongPress={() => setPartnerMenuOpen(true)}
             badges={badgesFor(user.displayName === 'Scott')}
           />
         </div>
@@ -193,13 +196,21 @@ export default function Home() {
         <LocationClocks />
       </div>
 
+      {partnerMenuOpen && (
+        <PartnerActionMenu
+          name={preferredNameFor(user.displayName === 'Scott' ? 'Cristina' : 'Scott', chatSettings.preferredNames)}
+          onClose={() => setPartnerMenuOpen(false)}
+          onNavigate={(path, state) => navigate(path, { state })}
+        />
+      )}
+
       {loveNoteOpen && incomingLoveNote && (
         <LoveNoteCard note={incomingLoveNote} replied={loveNoteReplied} onReply={replyToLoveNote} onClose={closeLoveNote} />
       )}
 
       <footer className="relative pb-6 text-center">
         <p className="font-hand text-lg text-ink-soft">
-          — always us, always ours · sempre nós, sempre nosso —
+          Meu amor, meu caminho, meu lar
         </p>
         <p className="mt-1.5 font-body text-[10px] text-ink-soft/40">{APP_VERSION_LABEL}</p>
       </footer>
@@ -213,7 +224,22 @@ function moodFor(name, user, moods) {
   return partnerEntry?.[1]
 }
 
-function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, badges }) {
+function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, onLongPress, badges }) {
+  const pressTimer = useRef(null)
+
+  function startPress() {
+    if (isMine) return
+    pressTimer.current = setTimeout(() => {
+      pressTimer.current = null
+      onLongPress()
+    }, LONG_PRESS_MS)
+  }
+
+  function cancelPress() {
+    clearTimeout(pressTimer.current)
+    pressTimer.current = null
+  }
+
   return (
     <div className="flex flex-col items-center gap-2">
       <div className="relative">
@@ -221,7 +247,14 @@ function Avatar({ src, name, ring, mood, isMine, onSetMood, onOpenSettings, badg
           src={src}
           alt={name}
           onClick={isMine ? onOpenSettings : undefined}
-          className={`h-16 w-16 rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring} ${
+          onPointerDown={startPress}
+          onPointerUp={cancelPress}
+          onPointerLeave={cancelPress}
+          onPointerCancel={cancelPress}
+          onContextMenu={(event) => event.preventDefault()}
+          draggable={false}
+          style={{ WebkitTouchCallout: 'none' }}
+          className={`h-16 w-16 select-none rounded-full object-cover ring-4 ring-offset-4 ring-offset-paper sm:h-20 sm:w-20 ${ring} ${
             isMine ? 'cursor-pointer transition-transform hover:scale-105' : ''
           }`}
         />

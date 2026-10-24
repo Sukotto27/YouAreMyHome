@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   addDoc,
   collection,
@@ -43,7 +44,8 @@ export default function Mail() {
   useMarkSeen('mail')
   const [letters, setLetters] = useState(firebaseReady ? [] : readDemoLetters)
   const [selectedId, setSelectedId] = useState(null)
-  const [composing, setComposing] = useState(false)
+  const location = useLocation()
+  const [composing, setComposing] = useState(!!location.state?.compose)
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
 
