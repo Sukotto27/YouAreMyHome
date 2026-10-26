@@ -45,11 +45,21 @@ export default defineConfig({
         // a 150MB+ install-time download, so they're runtime-cached instead
         // (cached the first time each track actually plays, not upfront).
         globPatterns: ['**/*.{js,css,html,png,ttf,json}'],
+        // the 3D models and textures are big and numerous: they are cached the first time they are used, not up front
+        globIgnores: ['assets3d/**', 'characters3d/**'],
         // Cistercian.ttf is ~2.18MB, just over Workbox's 2MiB default cap —
         // still small next to the music files, and it's needed immediately
         // for UI glyphs so it belongs in the precache, not runtime-cached.
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         runtimeCaching: [
+          {
+            urlPattern: /\/(assets3d|characters3d)\/.*\.(glb|gltf|png|jpg|jpeg|json|tga|bin)$/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'game-3d',
+              expiration: { maxEntries: 600, maxAgeSeconds: 60 * 60 * 24 * 90 },
+            },
+          },
           {
             urlPattern: /\/src\/music\/.*\.mp3$/,
             handler: 'CacheFirst',

@@ -24,7 +24,10 @@ const destDir = path.join(root, 'public/src/music')
 fs.rmSync(destDir, { recursive: true, force: true })
 fs.mkdirSync(destDir, { recursive: true })
 
-const files = fs.readdirSync(sourceDir).filter((name) => name.toLowerCase().endsWith('.mp3'))
+// Only the tracks the game itself plays (title, daytime/nighttime x indoor/outdoor, dungeon). The rest of the shared library is for
+// the couples app's Music tab; shipping it here too would put every one of those files in the Pages site twice (it has a 1 GB cap).
+const GAME_TRACK = /^(title|dungeon\d+|(daytime|nighttime)_(indoor|outdoor)\d+)\.mp3$/i
+const files = fs.readdirSync(sourceDir).filter((name) => GAME_TRACK.test(name))
 for (const name of files) {
   fs.copyFileSync(path.join(sourceDir, name), path.join(destDir, name))
 }

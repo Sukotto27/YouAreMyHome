@@ -386,60 +386,6 @@
   },
 
   {
-    "id": "rubble",
-    "name": "Rubble",
-    "icon": "🧱",
-    "blocks": true,
-    "renewable": false,
-    "size": "medium",
-    "hp": 3,
-    "harvest": {
-      "requiresTool": "pickaxe",
-      "gives": { "stone": 1 }
-    }
-  },
-
-  {
-    "id": "lever",
-    "name": "Lever",
-    "icon": "🎚️",
-    "blocks": true,
-    "size": "small"
-  },
-
-  {
-    "id": "torch_unlit",
-    "name": "Unlit Torch",
-    "icon": "🕯️",
-    "blocks": false,
-    "size": "small"
-  },
-
-  {
-    "id": "torch_lit",
-    "name": "Lit Torch",
-    "icon": "🔥",
-    "blocks": false,
-    "size": "small"
-  },
-
-  {
-    "id": "boulder",
-    "name": "Boulder",
-    "icon": "🪨",
-    "blocks": true,
-    "size": "medium"
-  },
-
-  {
-    "id": "pressure_plate",
-    "name": "Pressure Plate",
-    "icon": "🔳",
-    "blocks": false,
-    "size": "small"
-  },
-
-  {
     "id": "fish_spot",
     "name": "Fishing Spot",
     "icon": "🐟",
@@ -798,7 +744,8 @@
 },
     "hunt": {
       "requiresTool": "bow_and_arrow",
-      "gives": { "raw_chicken": 1 }
+      "gives": { "raw_chicken": 1 },
+    "bonusRandom": { "feather": [5, 10] }
     }
   },
 
@@ -923,5 +870,39 @@
   "icon": { "type": "image", "src": "src/icons/table.png" },
   "blocks": true,
   "tags": ["household"]
-}
+},
+
+  {
+    "id": "feather_pickup",
+    "name": "Feather",
+    "icon": { "type": "image", "src": "src/icons/feather.png" },
+    "renewable": false,
+    "size": "tiny",
+    "blocks": false,
+    "pickup": { "gives": { "feather": 1 } }
+  },
+
+  {
+    "id": "wild_bananas",
+    "name": "Wild Bananas",
+    "icon": "🍌",
+    "renewable": false,
+    "size": "small",
+    "blocks": false,
+    "tags": ["food"],
+    "spawn": { "enabled": true, "tiles": ["grass"], "max": 14, "intervalSec": 60, "chance": 0.25, "falloff": 2 },
+    "pickup": { "gives": { "banana": 3 } }
+  },
+
+  {
+    "id": "wild_oranges",
+    "name": "Wild Oranges",
+    "icon": "🍊",
+    "renewable": false,
+    "size": "small",
+    "blocks": false,
+    "tags": ["food"],
+    "spawn": { "enabled": true, "tiles": ["grass"], "max": 14, "intervalSec": 60, "chance": 0.25, "falloff": 2 },
+    "pickup": { "gives": { "orange": 3 } }
+  }
 ]

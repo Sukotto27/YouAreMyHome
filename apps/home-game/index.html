@@ -11,6 +11,9 @@
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="description" content="A cozy co-op world for the two of us." />
     <meta name="theme-color" content="#111111" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&family=Caveat:wght@500;600;700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <style>
       :root {
         --safe-top: env(safe-area-inset-top, 0px);
@@ -52,7 +55,15 @@
       ">Loading...</div>
     </div>
 
-    <script type="module" src="/src/main.js"></script>
+    <!-- the 3D view's three.js (the HUD and game scripts are loaded by boot.js) -->
+    <script type="importmap">
+      { "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/",
+        "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/"
+      } }
+    </script>
+    <script type="module" src="/src/boot.js"></script>
   </body>
 
   <style>
