@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 177;
+const GAME_BUILD = 178;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -1173,7 +1173,8 @@ function applyPlayersSnapshot(val) {
         lp.stamina = Math.max(0, lp.stamina - (STAMINA_COST_PER_TILE * tilesMoved));
       }
     }
-    lp.x = sp.x; lp.y = sp.y; lp.fx = sp.x; lp.fy = sp.y; lp.path = [];
+    lp.x = sp.x; lp.y = sp.y; lp.path = [];
+    if (Math.hypot(sp.x - lp.fx, sp.y - lp.fy) > 4) { lp.fx = sp.x; lp.fy = sp.y; }   // far away (teleport, first sight): jump; otherwise updatePlayers glides
   }
 
   if (anyMoved && state.mode === "overworld" && typeof revealAroundPlayers === "function") revealAroundPlayers();
@@ -1475,8 +1476,11 @@ function enableOverworldObjectsProxy() {
     const stage = m.stage ?? "";
     const other = m.kind ?? ""; // harmless extra discriminator if you use it
     const rot = m.rot ?? "";
+    const hp = v.hp ?? "";                       // a tree losing hp is a change too, or it never becomes a stump
+    const depleted = m.depleted ? "1" : "";
+    const regrow = m.regrowDay ?? "";
 
-    return `${id}|${stage}|${itemId}|${qty}|${anchor}|${other}|${rot}`;
+    return `${id}|${stage}|${itemId}|${qty}|${anchor}|${other}|${rot}|${hp}|${depleted}|${regrow}`;
   }
 
   for (let y = 0; y < map.objects.length; y++) {
@@ -5264,12 +5268,7 @@ if (p.stamina <= 0) { notifyNoEnergy(); return; }
   // ONLINE + OVERWORLD: queue the path and let netTick() drip-feed steps to server.
   // Dungeon and interior movement is always local — sending dungeon tile coords to the
   // server would corrupt the server's player position (dungeon uses its own 0-70 grid).
-  if (state.net?.enabled && state.mode === "overworld") {
-    netQueuePath(path);
-    return;
-  }
-
-  // LOCAL: offline, dungeon, or interior
+  // (online movement is client-side too: the walk is smooth and the new tile is published as each step lands)
   p.path = path;
 }
 
@@ -5333,8 +5332,8 @@ function coupleWalk(idx, x, y) {
   const P = state.players[idx];
   const path = findPathBFS({ x: P.x, y: P.y }, { x, y });
   if (!path || !path.length) return false;
-  if (state.net?.enabled && state.mode === "overworld") { if (state.activePlayer === idx) netQueuePath(path); }
-  else { P.resting = false; P.path = path; }
+  if (state.net?.enabled && state.activePlayer !== idx) return true;   // online, each client moves only its own character
+  P.resting = false; P.path = path;
   return true;
 }
 
@@ -5462,6 +5461,7 @@ if (pl.hunger >= HUNGER_MAX) {
         }
 
         consumeStaminaForTile(pl);
+        if (pl === activePlayer() && state.net?.enabled && state.mode === "overworld") writePlayerPositionThrottled();
 
         // fog reveal on overworld
         revealAroundPlayers();
@@ -5477,6 +5477,14 @@ if (pl.hunger >= HUNGER_MAX) {
         pl._wasMoving = true;
       }
     } else {
+      if (state.net?.enabled && pl !== activePlayer() && Math.hypot(pl.x - pl.fx, pl.y - pl.fy) > 0.01) {
+        // the partner's position arrives a tile at a time: glide to it instead of jumping
+        const dx = pl.x - pl.fx, dy = pl.y - pl.fy, dist = Math.hypot(dx, dy);
+        const step = (state.view3d ? MOVE_SPEED_TILES_PER_SEC_3D : MOVE_SPEED_TILES_PER_SEC) * dt;
+        if (dist <= step) { pl.fx = pl.x; pl.fy = pl.y; } else { pl.fx += dx / dist * step; pl.fy += dy / dist * step; }
+        pl._wasMoving = true;
+        continue;
+      }
       // snap floats to ints when not moving
       pl.fx = pl.x;
       pl.fy = pl.y;
@@ -12817,27 +12825,7 @@ const moveDir = {
 if (moveDir[k]) {
   const { dx, dy } = moveDir[k];
 
-// ONLINE + OVERWORLD: server-authoritative movement
-if (state.net?.enabled && state.mode === "overworld") {
-  const p = activePlayer();
-
-  // ✅ stamina gate (client-side)
-  if ((p.stamina ?? STAMINA_MAX) <= 0) return;
-
-  // ✅ Pending-move gate: don't send another move until the server confirms the last one.
-  // Without this, OS key-repeat (~30/sec) floods the server with moves and the player
-  // zips off screen before a snapshot comes back.
-  if (state.net._pendingMove) return;
-
-  if (canStep(p.x, p.y, p.x + dx, p.y + dy)) {
-    sendNetInput({ type: "move", dx, dy });
-    state.net._pendingMove = { expectedX: p.x + dx, expectedY: p.y + dy };
-    state.net._pendingMoveDeadline = performance.now() + 400;
-  }
-  return;
-}
-
-  // LOCAL: offline, dungeon, or interior
+  // walks locally, online or not (the position is published as each step lands)
   const p = activePlayer();
   const nx = p.x + dx;
   const ny = p.y + dy;
@@ -12873,15 +12861,6 @@ function stepHeldMoveKeys() {
   if (state.title?.open || state.menu || state.craftingOpen || state.settingsOpen || state.cutscene?.open || state.tutorial?.open || state.trade?.open || state.coordsOpen || state.stockpileOpen || typingInTextField()) return;
   const [dx, dy] = HELD_DIR[heldMoveKeys[heldMoveKeys.length - 1]];
   const p = activePlayer();
-  if (state.net?.enabled && state.mode === "overworld") {
-    if ((p.stamina ?? STAMINA_MAX) <= 0 || state.net._pendingMove) return;
-    if (canStep(p.x, p.y, p.x + dx, p.y + dy)) {
-      sendNetInput({ type: "move", dx, dy });
-      state.net._pendingMove = { expectedX: p.x + dx, expectedY: p.y + dy };
-      state.net._pendingMoveDeadline = performance.now() + 400;
-    }
-    return;
-  }
   if (p.stamina <= 0) { notifyNoEnergy(); return; }
   if (p.path.length > 1) return;
   const bx = p.path.length ? p.path[0].x : p.x, by = p.path.length ? p.path[0].y : p.y;   // queue the next step before the current one finishes: no stop between tiles
