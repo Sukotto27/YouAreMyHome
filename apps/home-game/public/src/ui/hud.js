@@ -119,6 +119,7 @@ function hudIcon(name, cx, cy, size, color = HUD_C.ink, lw = 1.9) {
     case "volume": P("M-9 -3.5h3.8l5.2-4.4v16l-5.2-4.4H-9z"); ctx.beginPath(); ctx.arc(1.5, 0, 5, -0.85, 0.85); ctx.stroke(); ctx.beginPath(); ctx.arc(1.5, 0, 9, -0.8, 0.8); ctx.stroke(); break;
     case "muted": P("M-9 -3.5h3.8l5.2-4.4v16l-5.2-4.4H-9z"); P("M5 -4l7 8M12 -4l-7 8"); break;
     case "gear": ctx.beginPath(); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2, a0 = a - 0.2, a1 = a + 0.2; ctx.lineTo(Math.cos(a0) * 7.2, Math.sin(a0) * 7.2); ctx.lineTo(Math.cos(a0 + 0.04) * 10, Math.sin(a0 + 0.04) * 10); ctx.lineTo(Math.cos(a1 - 0.04) * 10, Math.sin(a1 - 0.04) * 10); ctx.lineTo(Math.cos(a1) * 7.2, Math.sin(a1) * 7.2); ctx.arc(0, 0, 7.2, a1, a + Math.PI / 4 - 0.2); } ctx.closePath(); ctx.stroke(); ctx.beginPath(); ctx.arc(0, 0, 3, 0, 7); ctx.stroke(); break;
+    case "exit": P("M-2 -9h-5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h5"); P("M2 -5l5 5-5 5M7 0H-3"); break;
     case "journal": P("M-9 -7.5q4.5-1.6 9 1.2q4.5-2.8 9-1.2v14.5q-4.5-1.6-9 1.2q-4.5-2.8-9-1.2z"); P("M0 -6.3v14.5"); break;
     case "pencil": P("M-7 8l1-4.5L5.5 -7a2 2 0 0 1 3 0l1 1a2 2 0 0 1 0 3L-1.5 7z"); P("M3.5 -5l3 3"); break;
     case "bag": P("M-8.5 9.5V-1a8.5 7.5 0 0 1 17 0v10.5a2.5 2.5 0 0 1-2.5 2.5h-12a2.5 2.5 0 0 1-2.5-2.5z"); P("M-2.6 -7.6v-1.6a2.6 2.6 0 0 1 5.2 0v1.6"); P("M-5 12V6.2a1.6 1.6 0 0 1 1.6-1.6h6.8A1.6 1.6 0 0 1 5 6.2V12"); P("M-8.5 0.8q8.5 4 17 0"); break;
@@ -253,7 +254,7 @@ function drawHudDay(left, top, right, narrow) {
   return narrow ? cy + ch : y + h;
 }
 
-// ---- left rail: compass, music, settings, journal (+ edit in interiors). Same hit-test shape main.js already expects. ----
+// ---- left rail: compass, music, settings, journal (+ edit in interiors), exit. Same hit-test shape main.js already expects. ----
 function drawHudRail(x0, y0, narrow) {
   const r = 22, gap = 10, cx = x0 + r, step = r * 2 + gap;
   let i = 0; const at = () => ({ cx, cy: y0 + r + (i++) * step });
@@ -264,7 +265,8 @@ function drawHudRail(x0, y0, narrow) {
   const settingsBtn = mk("gear", !!state.settingsOpen);
   const collectiblesBtn = mk("journal", !!state.collectiblesOpen);
   const editBtn = state.mode === "interior" ? mk("pencil", !!state.interiorEdit?.on) : null;
-  const ui = state._leftbarUI = { compassBtn, volBtn, settingsBtn, collectiblesBtn, editBtn, sliderBox: null, sliderTrack: null, sliderKnob: null };
+  const exitBtn = mk("exit", performance.now() < (state.ui.exitArmedUntil || 0));   // lit while it waits for the confirming second tap
+  const ui = state._leftbarUI = { compassBtn, volBtn, settingsBtn, collectiblesBtn, editBtn, exitBtn, sliderBox: null, sliderTrack: null, sliderKnob: null };
 
   if (!state.ui.musicSliderOpen) return;
   const boxW = Math.min(230, window.innerWidth - (volBtn.x + volBtn.w + 20)), boxH = 62, bx = volBtn.x + volBtn.w + 10, by = volBtn.y + volBtn.h / 2 - boxH / 2;

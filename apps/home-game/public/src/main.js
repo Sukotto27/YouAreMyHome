@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 179;
+const GAME_BUILD = 180;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -873,6 +873,29 @@ function saveWorldPayload(id, payload) {
   localStorage.setItem(worldKey(id), JSON.stringify(payload));
 }
 
+/** Write everything to disk and (host) to the cloud right now, instead of waiting for the throttled saves. Resolves when the cloud write is done. */
+async function saveEverythingNow() {
+  clearTimeout(state._saveWorldTimer); state._saveWorldTimer = null;
+  clearTimeout(state._saveInvTimer); state._saveInvTimer = null;
+  const id = getActiveWorldId?.();
+  try {
+    if (state.mode === "dungeon" && state.dungeonId) saveDungeonLayout();
+    if (id && state.world) { saveWorldPayload(id, worldToPayload(state.world, id, state.world.seed)); saveInventoriesForWorld(id); }
+  } catch (e) { console.warn("local save failed:", e); }
+  if (state.net?.enabled && firebaseReady) {
+    try { await Promise.race([publishWorld(), new Promise((r) => setTimeout(r, 4000))]); } catch (e) { console.warn("cloud save failed:", e); }
+  }
+}
+
+let _exiting = false;
+async function exitToCouplesApp() {
+  if (_exiting) return; _exiting = true;
+  hudToast("Saving…", { icon: "bolt", ms: 5000 });
+  await saveEverythingNow();
+  try { if (state.net?.enabled && state.net.uid) await Promise.race([remove(ref(rtdb, rtdbPaths.player(state.net.worldId, state.net.uid))), new Promise((r) => setTimeout(r, 1500))]); } catch {}
+  location.href = new URL("../", location.href).href;   // the couples app lives one level above /game/
+}
+
 function saveCurrentWorldSoon() {
   // Throttle saves so we don't hammer localStorage every frame
   if (state._saveWorldTimer) return;
@@ -1285,12 +1308,13 @@ function publishWorld() {
   }
   const version = Date.now();
   _appliedWorldVersion = version;
-  setDoc(doc(db, FIRESTORE.worlds, String(wid)), {
+  const setDocPromise = setDoc(doc(db, FIRESTORE.worlds, String(wid)), {
     hostUid: state.net.uid,
     worldJson,
     version,
     updatedAt: serverTimestamp(),
   }).catch((e) => console.error("[NET] publishWorld failed:", e));
+  return setDocPromise;
 }
 
 function publishWorldOp(op) {
@@ -2683,6 +2707,14 @@ if (ui.collectiblesBtn && hitRect(px, py, ui.collectiblesBtn)) {
 
   return true;
 }
+
+  // Exit: first tap arms it (so a stray tap can't kick you out), second tap saves everything and goes back to the couples app
+  if (ui.exitBtn && hitRect(px, py, ui.exitBtn)) {
+    playSound("click");
+    if (performance.now() < (state.ui.exitArmedUntil || 0)) { state.ui.exitArmedUntil = 0; exitToCouplesApp(); }
+    else { state.ui.exitArmedUntil = performance.now() + 3500; hudToast("Leave the game?", { sub: "Tap exit again to save and go back", icon: "bolt", ms: 3500 }); }
+    return true;
+  }
 
   // Interior Edit Mode toggle
   if (ui.editBtn && hitRect(px, py, ui.editBtn)) {
