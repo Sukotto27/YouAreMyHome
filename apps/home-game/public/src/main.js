@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 178;
+const GAME_BUILD = 179;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -783,6 +783,55 @@ function saveInventoriesSoon() {
 }
 
 
+const WORLD_EPOCH_PREFIX = "yamhome_world_epoch_v1_";   // + world id: the last fresh start this device has applied
+
+/** A world with a new epoch is a fresh start: empty bags, no learned recipes, no saved dungeons / markers, players at the spawn.
+ *  Runs once per device per epoch (inventories live in each device's own localStorage). */
+function applyFreshStartIfNew(wid, world) {
+  const epoch = world?.epoch;
+  if (!epoch) return;
+  try { if (localStorage.getItem(WORLD_EPOCH_PREFIX + wid) === String(epoch)) return; } catch {}
+
+  state.inventories = [[], []];
+  state.learnedRecipes = new Set(); state.recipeLootExtra = {}; seedStarterRecipes();
+  state.markers = [];
+  state.structures = { stockpiles: [], houses: [] };
+  state.dungeons = {};
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith("YAMHOME:dungeon:") || k.startsWith("YAMHOME:interior:") || k.startsWith("yamhome_starter_toolkit_given")) localStorage.removeItem(k);
+    }
+    localStorage.removeItem(COLLECTIBLES_FOUND_KEY);
+  } catch {}
+  for (const pl of state.players) { pl.stamina = STAMINA_MAX; pl.hunger = 0; pl.resting = false; pl.path = []; }
+  if (world.spawn) state.players.forEach((p, i) => { p.x = p.fx = world.spawn.x + i; p.y = p.fy = world.spawn.y; });
+  if (state.mode === "overworld" && typeof revealAroundPlayers === "function") revealAroundPlayers();
+  saveInventoriesForWorld(wid);
+  try { localStorage.setItem(WORLD_EPOCH_PREFIX + wid, String(epoch)); } catch {}
+  if (typeof writePlayerPositionThrottled === "function" && state.net?.enabled) writePlayerPositionThrottled();
+}
+
+// HOST ONLY: throw the shared world away and start over on a freshly generated island. Both devices wipe their progress.
+window.devnewisland = function (confirm) {
+  if (confirm !== "yes") { console.warn('devnewisland: this wipes the world, both inventories and all progress. Run devnewisland("yes") to do it.'); return; }
+  if (!state.net?.enabled || !state.net.isHost) { console.warn("devnewisland: only the host (Scott) can start the world over."); return; }
+  if (state.mode !== "overworld") { console.warn("devnewisland: go back to the overworld first."); return; }
+  const wid = state.net.worldId;
+  const gen = generateOverworld();
+  gen.explored = make2D(WORLD_W, WORLD_H, false);
+  gen.epoch = Date.now();
+  const payload = worldToPayload(gen, wid, makeSeed());
+  saveWorldPayload(wid, payload);
+  state.world = payloadToWorld(payload);
+  enableOverworldObjectsProxy();
+  state.time.day = 1; state.time.phaseT = 0; state.time.t = 0; state.time.isDay = true;
+  applyFreshStartIfNew(wid, state.world);
+  ensurePlayersNotOnWater(state.world);
+  publishWorld();
+  publishTime(state.time.phaseT, state.time.day, state.time.t);
+  logAction("A new island rises from the sea. Day 1.");
+};
+
 function loadWorldsMeta() {
   try {
     const raw = localStorage.getItem(WORLDS_META_KEY);
@@ -878,6 +927,7 @@ function worldToPayload(world, id, seed) {
     explored: world.explored || make2D(WORLD_W, WORLD_H, false),
     structures: world.structures || {},   // modular houses (src/render3d/building)
     spawn: world.spawn || null,           // where new players start (island worlds)
+    epoch: world.epoch || null,           // set when the host starts the world over: every device wipes its own progress once per epoch
   };
 }
 
@@ -892,6 +942,7 @@ function payloadToWorld(payload) {
       : make2D(WORLD_W, WORLD_H, false),
     structures: payload.structures || {},
     spawn: payload.spawn || null,
+    epoch: payload.epoch || null,
   };
 }
 
@@ -1038,6 +1089,7 @@ function connectOnline() {
           if (typeof payloadToWorld === "function") {
             state.world = payloadToWorld(payload);
             enableOverworldObjectsProxy();
+            applyFreshStartIfNew(wid, state.world);
           }
           if (Array.isArray(state.players)) for (const pl of state.players) pl.path = [];
           if (typeof revealAroundPlayers === "function") revealAroundPlayers();
@@ -4755,6 +4807,9 @@ for (let y = 1; y < WORLD_H - 1; y++) {
     const sx = Math.floor(WORLD_W / 2) - 1, sy = Math.floor(WORLD_H / 2);
     for (let y = sy - 2; y <= sy + 2; y++) for (let x = sx - 4; x <= sx + 5; x++) { if (map.tiles[y][x] === "water") map.tiles[y][x] = "grass"; map.objects[y][x] = null; }
     map.spawn = { x: sx, y: sy };
+    // nobody starts with tools: two toolboxes at the spawn so the first axe is a few steps away
+    map.objects[sy - 2][sx - 3] = { id: "toolbox", hp: objDef("toolbox")?.hp ?? 1, meta: {} };
+    map.objects[sy - 2][sx + 4] = { id: "toolbox", hp: objDef("toolbox")?.hp ?? 1, meta: {} };
   }
 
   // Water boundary ring
@@ -13620,32 +13675,7 @@ function doWorldSetup() {
 
   setLoadProgress(85, "Finishing up...");
 
-  // Starter inventories: toolkit only (TRULY first-time, per world + player)
-  (function ensureStarterToolkitsOnce() {
-    const startWid =
-      (state.currentWorldId | 0) ||
-      ((typeof getActiveWorldId === "function" ? (getActiveWorldId() | 0) : 0)) ||
-      1;
-
-    const invs = Array.isArray(state.inventories) ? state.inventories : [[], []];
-
-    for (let pi = 0; pi < 2; pi++) {
-      const key = `yamhome_starter_toolkit_given_v2_${startWid}_p${pi}`;
-      const inv = invs[pi];
-      if (!Array.isArray(inv)) continue;
-      if (localStorage.getItem(key) === "1" && (typeof getQty !== "function" || getQty(inv, "toolkit") > 0)) continue;
-      if (typeof getQty === "function" && typeof addItem === "function") {
-        if (getQty(inv, "toolkit") <= 0) addItem(inv, "toolkit", 1);
-      }
-      localStorage.setItem(key, "1");
-    }
-
-    if (typeof saveInventoriesForWorld === "function") {
-      saveInventoriesForWorld(startWid);
-    } else if (typeof saveInventoriesSoon === "function") {
-      saveInventoriesSoon();
-    }
-  })();
+  // (no starter kit: tools are looted from toolboxes and chests, which respawn each day: updateChestsOnNewDay)
 
   // reveal initial fog
   revealAroundPlayers();
