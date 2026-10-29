@@ -609,9 +609,55 @@
   },
 
 {
+    "id": "doe",
+    "name": "Doe",
+    "icon": "🦌",
+    "renewable": false,
+	"size": "medium",
+    "blocks": true,
+    "tags": ["animal"],
+    "hp": 1,
+    "spawn": {
+      "enabled": true,
+      "tiles": ["grass"],
+      "max": 10,
+      "intervalSec": 60,
+      "chance": 0.35,
+      "falloff": 2
+},
+    "hunt": {
+      "requiresTool": "bow_and_arrow",
+      "gives": { "raw_meat": 2 }
+    }
+  },
+
+{
     "id": "squirrel",
     "name": "Squirrel",
     "icon": "🐿️",
+    "blocks": false,
+    "tags": ["animal"],
+    "renewable": false,
+	"size": "small",
+    "hp": 1,
+    "spawn": {
+      "enabled": true,
+      "tiles": ["grass"],
+      "max": 10,
+      "intervalSec": 60,
+      "chance": 0.35,
+      "falloff": 2
+},
+    "hunt": {
+      "requiresTool": "bow_and_arrow",
+      "gives": { "raw_meat": 1 }
+    }
+  },
+
+{
+    "id": "rabbit",
+    "name": "Rabbit",
+    "icon": "🐇",
     "blocks": false,
     "tags": ["animal"],
     "renewable": false,
@@ -775,6 +821,7 @@
     "id": "cat",
     "name": "Bombadil",
     "icon": "🐈",
+    "ai": "cat",
     "blocks": false,
     "tags": ["animal"],
 	"size": "small",

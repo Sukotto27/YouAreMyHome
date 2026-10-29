@@ -69,8 +69,9 @@ export function createBuilderUI(builder) {
       ctx.appendChild(mk("button", "", "⟲ Rotate", () => builder.rotate()));
     }
     if (builder.mode === "furnish" && (builder.furnGhost || builder.target?.type === "furniture")) ctx.appendChild(mk("button", "", "⟲ Rotate", () => builder.rotate()));
+    if (builder.mode === "furnish" && builder.target?.type === "furniture") ctx.appendChild(mk("button", "", "✥ Move", () => builder.liftTarget()));
     if (builder.ghost || builder.target || builder.furnGhost) {
-      const ok = mk("button", "ok", "✓ " + (builder.mode === "remove" ? "Remove" : builder.mode === "furnish" ? (builder.furnGhost ? "Place" : "Pick up") : builder.ghost ? "Build" : "Place"), () => builder.confirm());
+      const ok = mk("button", "ok", "✓ " + (builder.mode === "remove" ? "Remove" : builder.mode === "furnish" ? (builder.furnGhost ? "Place" : "Dismantle") : builder.ghost ? "Build" : "Place"), () => builder.confirm());
       ok.disabled = !builder.canConfirm; ctx.appendChild(ok);
       ctx.appendChild(mk("button", "no", "✗", () => builder.cancel()));
     }

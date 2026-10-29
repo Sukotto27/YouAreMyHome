@@ -158,7 +158,7 @@ export function installInput3D({ renderer, camera, rig, terrain: overTerrain, ob
     if (!obj || obj.meta?.depleted) return false;
     if (obj.id === "dropped_item") return true;
     const def = objDef(obj.id); if (!def) return false;
-    return !!(def.pickup || def.harvest || def.hunt);
+    return !!(def.pickup || def.harvest || def.hunt || def.container);
   }
   function doInteract(pk) {
     if (!pk) return;
@@ -300,6 +300,11 @@ export function installInput3D({ renderer, camera, rig, terrain: overTerrain, ob
     }
     lastTap = { t: now, x: e.clientX, y: e.clientY };
     if (builder?.active) { builder.tap(gg.x0, gg.y0); return; }
+    if (state.placingStockpile || state.placinghouse) {                 // "Place stockpile" / house blueprint: the tap picks the spot
+      const gp = groundPick(gg.x0, gg.y0);
+      if (gp) { if (state.placingStockpile ? placeStockpileAt(gp.tx, gp.ty) : placehouseAt(gp.tx, gp.ty)) { state.placingStockpile = false; state.placinghouse = false; } }
+      return;
+    }
     doMove(groundPick(gg.x0, gg.y0));                                   // single tap: walk there right away (a second tap quickly after turns it into "use")
   }, true);
   addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); if (g && g.id === e.pointerId) { clearHold(); g = null; resetMainPointer(); } pinch = null; }, true);

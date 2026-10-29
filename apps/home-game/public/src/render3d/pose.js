@@ -33,8 +33,8 @@ export function applyPose(actor, dt) {
   if (P.lean > 0.01) for (const n of ["spine_01", "spine_02", "spine_03"]) { const b = P.bones[n]; if (b) { q.setFromAxisAngle(T.leanAxis, (T.leanTotal / 3) * P.lean * T.leanSign); b.quaternion.multiply(q); } }
 
   P.sit += ((actor.sitting ? 1 : 0) - P.sit) * Math.min(1, dt * 5);
-  if (P.sit > 0.01) for (const n of ["calf_l", "calf_r"]) { const b = P.bones[n]; if (b && P.rest[n]) b.quaternion.slerp(P.rest[n], sw(P.sit * 1.2)); }
-  actor.sitDrop = T.sitDrop * sw(P.sit * 1.2);
+  if (P.sit > 0.01 && !actor.onSeat) for (const n of ["calf_l", "calf_r"]) { const b = P.bones[n]; if (b && P.rest[n]) b.quaternion.slerp(P.rest[n], sw(P.sit * 1.2)); }
+  actor.sitDrop = actor.onSeat ? 0 : T.sitDrop * sw(P.sit * 1.2);   // in a chair the clip already sits at seat height
 
   applyArmIK(actor, P, dt);
   applyCouplePose(actor, P, dt);
@@ -77,7 +77,7 @@ function solveArm(A, B, C, target, pole, w) {
   if (w < 0.999) { A.quaternion.copy(qA0.slerp(A.quaternion, w)); B.quaternion.copy(qB0.slerp(B.quaternion, w)); A.updateWorldMatrix(false, true); }
 }
 
-const IK_TUNE = { mouthUp: 0.03, mouthFwd: 0.12, bowReach: 0.6, bowSide: 0.04, bowUp: -0.02, anchorFwd: 0.02, anchorSide: 0.02, anchorUp: -0.03 };
+const IK_TUNE = { petFwd: 0.5, petUp: -0.62, mouthUp: 0.03, mouthFwd: 0.12, bowReach: 0.6, bowSide: 0.04, bowUp: -0.02, anchorFwd: 0.02, anchorSide: 0.02, anchorUp: -0.03 };
 const POLE = { r: new THREE.Vector3(-0.6, -1, -0.3), l: new THREE.Vector3(0.6, -1, -0.3) };   // elbow hint in the body's own space (+z forward, -x = its right)
 
 /** Rigs: (ctx) -> [{ hand: "r"|"l", w, target: Vector3 }] ; ctx = { t, bone(name), fwd, right, up, pos(boneName) } */
@@ -85,6 +85,12 @@ const RIGS = {
   mouth(c) {   // eating: right hand up to the mouth, a little chewing bob while it's there
     const w = keyAt([[0, 0], [0.2, 1], [1.05, 1], [1.3, 0]], c.t), head = c.pos(c.head);
     const target = head.clone().addScaledVector(c.up, IK_TUNE.mouthUp + Math.sin(c.t * 22) * 0.006 * w).addScaledVector(c.fwd, IK_TUNE.mouthFwd);
+    return [{ hand: "r", w, target }];
+  },
+  pet(c) {     // petting: crouched, the right hand reaches out and down and strokes back and forth
+    const w = keyAt([[0, 0], [0.45, 1], [2.0, 1], [2.4, 0]], c.t), head = c.pos(c.head);
+    const stroke = c.fwd.clone().multiplyScalar(Math.sin(c.t * 5.5) * 0.05).addScaledVector(c.right, Math.sin(c.t * 5.5 + 1.2) * 0.04);
+    const target = c.aim ? c.aim.clone().add(stroke) : head.clone().addScaledVector(c.fwd, IK_TUNE.petFwd).addScaledVector(c.up, IK_TUNE.petUp).add(stroke);   // onto the cat itself when we know where it is
     return [{ hand: "r", w, target }];
   },
   archery(c) {  // left arm out holding the bow, right hand on the string drawn back to the cheek, then let go
@@ -103,7 +109,7 @@ function applyArmIK(actor, P, dt) {
   const rq = actor.root.getWorldQuaternion(new THREE.Quaternion());
   const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(rq), right = new THREE.Vector3(-1, 0, 0).applyQuaternion(rq), up = new THREE.Vector3(0, 1, 0);
   const b = P.bones, head = b.head ? "head" : "neck_01";
-  const ctx = { t: act.t, fwd, right, up, head, release: act.def.releaseAt ?? 1, pos: (n) => b[n].getWorldPosition(new THREE.Vector3()) };
+  const ctx = { t: act.t, fwd, right, up, head, aim: actor.petAim, release: act.def.releaseAt ?? 1, pos: (n) => b[n].getWorldPosition(new THREE.Vector3()) };
   const out = rig(ctx); actor._ikCtx = ctx; actor._ikOut = out;
   for (const e of out) {
     const s = e.hand, A = b["upperarm_" + s], B = b["lowerarm_" + s], C = b["hand_" + s]; if (!A || !B || !C) continue;

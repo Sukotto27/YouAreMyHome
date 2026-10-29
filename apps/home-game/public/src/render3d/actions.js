@@ -27,7 +27,8 @@ export const ACTIONS = {
   chest:     { label: "Open a chest", dur: 1.0, steps: [{ at: 0, clip: "Interact", speed: 2 }], sfx: [{ at: 0.25, name: "chest" }] },
   lightfire: { label: "Light a fire", dur: 1.6, steps: [{ at: 0, clip: "Crouch_Idle_Loop" }], sfx: [{ at: 0.5, name: "lightfire" }], placeholder: "crouching" },
   extinguish:{ label: "Put out a fire", dur: 1.2, steps: [{ at: 0, clip: "Interact", speed: 1.6 }], sfx: [{ at: 0.3, name: "extinguish" }] },
-  pet:       { label: "Pet the cat", dur: 1.4, steps: [{ at: 0, clip: "Crouch_Idle_Loop" }], sfx: [{ at: 0.3, name: "cat" }], placeholder: "crouching" },
+  pet:       { label: "Pet the cat", dur: 2.4, steps: [{ at: 0, clip: "Crouch_Idle_Loop" }], sfx: [{ at: 0.3, name: "cat" }], ik: "pet" },   // crouches, the hand strokes (pose.js)
+  petSeated: { label: "Pet the cat (seated)", dur: 2.4, steps: [{ at: 0, clip: "Sitting_Idle_Loop" }], sfx: [{ at: 0.3, name: "cat" }], ik: "pet" },
   interact:  { label: "Use / open", dur: 1.0, steps: [{ at: 0, clip: "Interact", speed: 2 }], sfx: [] },
 };
 // Not triggered by a sound, just for trying them out and for emotes

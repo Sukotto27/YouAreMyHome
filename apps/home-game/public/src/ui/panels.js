@@ -55,7 +55,7 @@ function hudClip(r, fn) { ctx.save(); ctx.beginPath(); ctx.rect(r.x, r.y, r.w, r
 const MENU_ICON_RULES = [
   [/stockpile/, "box"], [/^(close|cancel|back|never mind)/, "close"], [/pluck/, "feather"], [/relight|try lighting|light (a )?fire|equip torch|put torch|lit /, "flame"], [/put out|extinguish/, "drip"],
   [/^(hunt|shoot)/, "target"], [/harvest|chop|mine|gather/, "axe"], [/pick up|take|grab|collect/, "hand"], [/^eat|cook|prepare/, "apple"],
-  [/rest|sleep|sit/, "moon"], [/stop resting|stand/, "sun"], [/craft|build|put down|hammer|contribute|\+ /, "hammer"], [/^place/, "hammer"],
+  [/^sneak/, "eye"], [/rest|sleep|sit/, "moon"], [/stop resting|stand/, "sun"], [/craft|build|put down|hammer|contribute|\+ /, "hammer"], [/^place/, "hammer"],
   [/stockpile/, "box"], [/drop/, "drop"], [/examine|decipher|read|inspect|look/, "eye"], [/open|unlock|stockpile|chest|toolbox|container/, "box"], [/answer|key|lock/, "key"],
   [/enter|exit|door|leave/, "door"], [/trade|swap|give/, "swap"], [/hug|kiss|hold hands|hold|let go|end holding|pet|love/, "heart"],
   [/fill|bucket|water|dump|dig/, "drip"], [/plant|seed|sow/, "sprout"], [/fish|cast|reel/, "fish"], [/bed|sleep in/, "bed"], [/rotate|turn/, "rotate"],

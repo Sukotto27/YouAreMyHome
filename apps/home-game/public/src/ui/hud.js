@@ -219,7 +219,7 @@ function drawHudStatus(x, y, narrow, p) {
   const idx = state.activePlayer | 0, src = idx === 0 ? "src/images/scott_thumbnail.jpg" : "src/images/cristina_thumbnail.jpg";
   hudAvatar(src, x + 27, y + 27, 19, { ring: idx === 0 ? HUD_C.teal : HUD_C.rose });
   const bx = x + 54, bw = w - 54 - 12;
-  const rest = p.resting ? "resting" : (p.stamina <= 0 ? "exhausted" : "");
+  const rest = p.resting ? "resting" : (p.sneak ? "sneaking" : (p.stamina <= 0 ? "exhausted" : ""));
   hudText(p.name, bx, y + 13, 13, { family: HUD_DISPLAY, weight: 600 });
   if (p.equipped === "torch") { ctx.font = `600 13px ${HUD_DISPLAY}`; const nw = ctx.measureText(p.name).width; hudIcon("flame", bx + nw + 12, y + 13, 12, "#e9a35e"); }
   if (rest) hudText(rest, x + w - 12, y + 13, 11, { family: HUD_HAND, weight: 600, color: HUD_C.rose, align: "right", italic: false });

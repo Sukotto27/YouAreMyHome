@@ -179,7 +179,7 @@ export function createBuilder({ scene, camera, rig, terrain, getWorld }) {
     const def = furnitureDef(t.id), inv = typeof activeInv === "function" ? activeInv() : null, held = world().objects?.[t.y]?.[t.x];
     if (held?.meta?.inv?.length) { say("Empty it first"); return false; }
     if (def && inv && !devFree() && typeof addItemOrDrop === "function") for (const [k, n] of Object.entries(def.cost || {})) addItemOrDrop(inv, k, n, state.players[state.activePlayer | 0].x, state.players[state.activePlayer | 0].y);
-    setOverworldObject(t.x, t.y, null); say(`${def?.name || "It"} picked up (materials returned)`); B.target = null; emit(); return true;
+    setOverworldObject(t.x, t.y, null); say(`${def?.name || "It"} dismantled (materials returned)`); B.target = null; emit(); return true;
   }
   function rotateTarget() {
     const t = B.target, o = t && world().objects?.[t.y]?.[t.x]; if (!o) return;
@@ -243,14 +243,25 @@ export function createBuilder({ scene, camera, rig, terrain, getWorld }) {
     for (const id of ids) commit(world(), id, { terrain });
     if (!devFree() && typeof removeItem === "function") for (const [k, n] of Object.entries(L.refund || {})) removeItem(activeInv(), k, n);   // it was refunded when lifted
   }
+  /** Lifts the furniture on a tile so it can be set down somewhere else (no materials are lost; the piece keeps what is inside it). */
+  function liftTile(tx, ty) {
+    const o = world().objects?.[ty]?.[tx], od = o && furnitureDef(o.id); if (!od) return false;
+    B.lifted = { type: "furn", x: tx, y: ty, obj: JSON.parse(JSON.stringify(o)) };
+    setOverworldObject(tx, ty, null); B.furn.item = od.id; B.furn.rot = o.meta?.rot | 0; B.target = null; fghost = { tx, ty, valid: true, floorY: 0 }; refreshFurnGhost(); say(`${od.name}: tap a floor tile to move it, Place to set it down`); return true;
+  }
+  /** "Move" from the furniture's own menu: opens build mode already holding that piece. */
+  function moveFurnitureAt(tx, ty) {
+    const o = world().objects?.[ty]?.[tx]; if (!o || !furnitureDef(o.id)) return false;
+    if (!B.active) open(); if (B.mode !== "furnish") setMode("furnish");
+    return liftTile(tx, ty);
+  }
+  function liftTarget() { const t = B.target; return t?.type === "furniture" ? liftTile(t.x, t.y) : false; }
   function lift(px, py) {
     if (!B.active || ghost || fghost || !["furnish", "room", "roof", null].includes(B.mode)) return false;
     const st = S();
     if (B.mode === "furnish") {
       const t = furnTile(px, py); if (!t) return false;
-      const [tx, ty] = t, o = world().objects?.[ty]?.[tx], od = o && furnitureDef(o.id); if (!od) return false;
-      B.lifted = { type: "furn", x: tx, y: ty, obj: JSON.parse(JSON.stringify(o)) };
-      setOverworldObject(tx, ty, null); B.furn.item = od.id; B.furn.rot = o.meta?.rot | 0; B.target = null; fghost = { tx, ty, valid: true, floorY: 0 }; refreshFurnGhost(); say(`${od.name}: drag to move it, Place to set it down`); return true;
+      return liftTile(t[0], t[1]);
     }
     const rf = roofUnder(px, py);
     if (rf) {
@@ -388,7 +399,7 @@ export function createBuilder({ scene, camera, rig, terrain, getWorld }) {
     }
     if (B.mode === "furnish") {
       const t = furnTile(px, py); if (!t) return true; const [tx, ty] = t, o = world().objects?.[ty]?.[tx], od = o && furnitureDef(o.id);
-      if (od) { clearFurnGhost(); B.target = { type: "furniture", x: tx, y: ty, id: o.id }; setCost({}); say(`${od.name}: turn it or pick it up`); return true; }
+      if (od) { clearFurnGhost(); B.target = { type: "furniture", x: tx, y: ty, id: o.id }; setCost({}); say(`${od.name}: turn it, move it or dismantle it`); return true; }
       B.target = null;
       if (!B.furn.item) { say("Pick something from the list first"); return true; }
       fghost = { tx, ty, valid: false }; refreshFurnGhost(); return true;
@@ -431,7 +442,7 @@ export function createBuilder({ scene, camera, rig, terrain, getWorld }) {
   }
 
   Object.assign(B, {
-    open, close, setMode, confirm, cancel, rotate, setRoofStyle, begin, move, end, tap, setPaint, setFurnItem, setFurnCat, pickupFurniture, lift,
+    open, close, setMode, confirm, cancel, rotate, setRoofStyle, begin, move, end, tap, setPaint, setFurnItem, setFurnCat, pickupFurniture, lift, liftTarget, moveFurnitureAt,
     update(dt) {
       if (B.userCam && rig.override?.owner === "builder") rig.override.dist = rig.dist;   // the player is steering: keep their zoom
       if (ghost) {

@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 180;
+const GAME_BUILD = 188;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -1449,6 +1449,18 @@ function applyWorldOp(op) {
       return;
     }
 
+    if (op.kind === "pose") {   // a player sat in a chair / lay down in a bed / got up
+      const pl = state.players[op.idx | 0];
+      if (pl) { pl.pose = op.pose ? { ...op.pose, px: pl.x, py: pl.y } : null; if (pl.pose) { pl.resting = false; pl.sneak = false; } }
+      return;
+    }
+
+    if (op.kind === "sneak") {   // a player crouched / stood up
+      const pl = state.players[op.idx | 0];
+      if (pl) { pl.sneak = !!op.on; if (op.on) pl.resting = false; }
+      return;
+    }
+
     if (op.kind === "set_tile") {
       const map = state.world;
       if (!map?.tiles) return;
@@ -1490,7 +1502,8 @@ function setOverworldObject(x, y, value, broadcast = true) {
     const depleted = m.depleted ? "1" : "";
     const rot = (m.rot == null) ? "" : String(m.rot);   // furniture turned a quarter turn is a change too
 
-    return `${id}|${hp}|${stage}|${regrowDay}|${anchor}|${itemId}|${qty}|${kind}|${depleted}|${rot}`;
+    const live = `${m.perch ? m.perch.x + "," + m.perch.y : ""}~${m.petUntil ?? ""}~${Array.isArray(m.inv) ? JSON.stringify(m.inv) : ""}`;
+    return `${id}|${hp}|${stage}|${regrowDay}|${anchor}|${itemId}|${qty}|${kind}|${depleted}|${rot}|${live}`;
   }
 
   const prevSig = sig(prev);
@@ -1552,11 +1565,11 @@ function enableOverworldObjectsProxy() {
     const stage = m.stage ?? "";
     const other = m.kind ?? ""; // harmless extra discriminator if you use it
     const rot = m.rot ?? "";
-    const hp = v.hp ?? "";                       // a tree losing hp is a change too, or it never becomes a stump
-    const depleted = m.depleted ? "1" : "";
-    const regrow = m.regrowDay ?? "";
+    // hp and the depleted flag count: a bush going 3 -> 2 -> depleted must be written (and sent), or resources never run out
+    const hp = v.hp ?? "", depleted = m.depleted ? 1 : 0, regrow = `${m.regrowDay ?? ""}${m.depletedDay ?? ""}`;
+    const live = `${m.perch ? m.perch.x + "," + m.perch.y : ""}~${m.petUntil ?? ""}~${Array.isArray(m.inv) ? JSON.stringify(m.inv) : ""}`;   // a cat on a table / being petted, what is in a stockpile
 
-    return `${id}|${stage}|${itemId}|${qty}|${anchor}|${other}|${rot}|${hp}|${depleted}|${regrow}`;
+    return `${id}|${stage}|${itemId}|${qty}|${anchor}|${other}|${rot}|${hp}|${depleted}|${regrow}|${live}`;
   }
 
   for (let y = 0; y < map.objects.length; y++) {
@@ -1691,7 +1704,7 @@ if (canStep(p.x, p.y, p.x + dx, p.y + dy)) {
   // Record what position we expect the server to confirm, with a 400ms deadline
   state.net._pendingMove = { expectedX: p.x + dx, expectedY: p.y + dy };
   state.net._pendingMoveDeadline = now + 400;
-  state.net.nextMoveAt = now + 110;
+  state.net.nextMoveAt = now + (p.sneak ? 110 / SNEAK_SPEED_MULT : 110);
 } else {
   // Dump the queued node if it's not reachable
   q.shift();
@@ -4572,9 +4585,323 @@ if (cur < min) {
   }
 }
 
+// ---- Animal senses + sneaking ----------------------------------------------------------------------------------
+// Animals see only what is in front of them (a cone, blocked by trees/rocks/walls) but hear all around. The chance of being heard
+// rises with every tile closer, is far lower while crouched, and is lowest of all when standing still.
+const ANIMAL_SIGHT_RADIUS = 6;                       // tiles
+const ANIMAL_SIGHT_HALF_ANGLE = Math.PI / 3;         // 120 degree field of view
+const ANIMAL_HEAR_RADIUS = 9;                        // tiles
+const ANIMAL_ALERT_MS = 4000;                        // how long an animal that spotted you keeps running
+const SNEAK_SPEED_MULT = 0.45;                       // crouched walking is slower
+const BOW_MAX_RANGE = 8;                             // tiles (and the target must be on screen)
+
+function setSneak(idx, on, broadcast = true) {
+  const pl = state.players[idx];
+  if (!pl) return;
+  pl.sneak = !!on;
+  if (on) pl.resting = false;
+  if (broadcast) sendWorldOp({ kind: "sneak", idx, on: !!on });   // the host runs the animals, so it needs to know
+}
+function toggleSneak(idx = state.activePlayer) { setSneak(idx, !state.players[idx]?.sneak); }
+
+// ---- Poses: sitting in a chair, lying in a bed (drawn by src/render3d/index.js from player.pose) ----
+const SEAT_CATS = new Set(["Chairs", "Sofas"]);
+function setPose(idx, pose, broadcast = true) {
+  const pl = state.players[idx];
+  if (!pl) return;
+  pl.pose = pose ? { ...pose, px: pl.x, py: pl.y } : null;
+  if (pose) { pl.resting = false; pl.sneak = false; pl.path = []; }
+  if (broadcast) sendWorldOp({ kind: "pose", idx, pose: pose ? { kind: pose.kind, tx: pose.tx, ty: pose.ty, yaw: pose.yaw } : null });
+}
+/** Sitting ends when the player walks off; sleeping ends on its own when the night is over. */
+function tickPoses() {
+  for (const [i, pl] of state.players.entries()) {
+    const ps = pl?.pose; if (!ps || ps.kind === "sleep") continue;
+    if (pl.x !== ps.px || pl.y !== ps.py || pl.path?.length) setPose(i, null, i === state.activePlayer);
+  }
+}
+function sitOn(idx, x, y) {
+  const o = state.world.objects?.[y]?.[x];
+  setPose(idx, { kind: "sit", tx: x, ty: y, yaw: ((o?.meta?.rot | 0) * Math.PI) / 2 });
+  logAction(`${state.players[idx].name} sat down.`);
+}
+
+// is the bow allowed to reach this tile? within BOW_MAX_RANGE and visible on the screen
+function bowCanReach(mapX, mapY) {
+  const p = activePlayer(), d = Math.hypot(p.x - mapX, p.y - mapY);
+  if (d > BOW_MAX_RANGE) return false;
+  const r3 = window.__r3d;
+  if (state.view3d && r3?.camera && r3.THREE) {
+    const wx = (mapX + 0.5) * 2, wz = (mapY + 0.5) * 2;
+    const v = new r3.THREE.Vector3(wx, (r3.terrain?.heightAt?.(wx, wz) ?? 0) + 0.5, wz).project(r3.camera);
+    return v.z < 1 && Math.abs(v.x) <= 0.92 && v.y >= -0.72 && v.y <= 0.92;   // (the bottom strip is under the HUD dock)
+  }
+  return d <= 6;
+}
+
+function trackPlayerNoise(now) {
+  for (const p of state.players) {
+    const key = `${(p.fx ?? p.x).toFixed(2)},${(p.fy ?? p.y).toFixed(2)}`;
+    if (p._noiseKey !== key) { p._noiseKey = key; p._lastMoveAt = now; }
+  }
+}
+
+function animalLineClear(map, x0, y0, x1, y1, dungeon) {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+  for (let i = 1; i < n; i++) {
+    const x = Math.round(x0 + (x1 - x0) * i / n), y = Math.round(y0 + (y1 - y0) * i / n);
+    if (dungeon && map.tiles?.[y]?.[x] !== "floor") return false;
+    const o = map.objects?.[y]?.[x];
+    if (o && objectBlocks(o.id) && !(objDef(o.id)?.tags || []).includes("animal")) return false;
+    if (!dungeon && typeof structureTileAt === "function" && structureTileAt(x, y)) return false;
+  }
+  return true;
+}
+
+// "seen" | "heard" | null. Also turns the animal toward a noise it heard.
+function animalPerceive(m, x, y, map, dungeon, now) {
+  if (m.fx == null) { const a = Math.random() * Math.PI * 2; m.fx = Math.sin(a); m.fy = Math.cos(a); }
+  const fl = Math.hypot(m.fx, m.fy) || 1;
+  let chance = 0, heardFrom = null;
+  for (const p of state.players) {
+    const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy);
+    if (d > ANIMAL_HEAR_RADIUS) continue;
+    if (d <= ANIMAL_SIGHT_RADIUS) {
+      const dot = d === 0 ? 1 : (dx * m.fx + dy * m.fy) / (d * fl);
+      if (dot >= Math.cos(ANIMAL_SIGHT_HALF_ANGLE) && animalLineClear(map, x, y, p.x, p.y, dungeon)) return "seen";
+    }
+    const moving = now - (p._lastMoveAt || 0) < 400;
+    const noise = moving ? (p.sneak ? 0.22 : 1) : (p.sneak ? 0.01 : 0.08);
+    const c = noise * (1 - d / ANIMAL_HEAR_RADIUS);
+    if (c > chance) { chance = c; heardFrom = [dx, dy, d]; }
+  }
+  if (heardFrom && now >= (m.hearAt || 0)) {
+    m.hearAt = now + 450;
+    if (Math.random() < chance) { m.fx = heardFrom[0] / (heardFrom[2] || 1); m.fy = heardFrom[1] / (heardFrom[2] || 1); return "heard"; }
+  }
+  return null;
+}
+
+// What an animal does this tick: the tile it steps to, or null to stay put. Keeps its facing / alert state on obj.meta.
+function animalThink(obj, x, y, map, dungeon, canMoveTo, dt) {
+  const m = obj.meta = obj.meta || {}, now = Date.now();
+  const sense = animalPerceive(m, x, y, map, dungeon, now);
+  if (sense === "seen") m.alertUntil = now + ANIMAL_ALERT_MS;
+  else if (sense === "heard") m.freezeUntil = now + 800;      // stops and turns toward the sound
+  const alerted = now < (m.alertUntil || 0);
+  m.run = alerted ? 1 : 0;                                      // the 3D view runs the animal faster while it flees
+
+  let nearest = null, nearestD = Infinity;
+  for (const p of state.players) {
+    const d = Math.hypot(x - p.x, y - p.y);
+    if (d < nearestD) { nearestD = d; nearest = p; }
+  }
+
+  if (alerted && nearest) {
+    if (now < (m.fleeAt || 0)) return null;
+    m.fleeAt = now + 260;
+  } else {
+    if (now < (m.freezeUntil || 0)) return null;
+    m.moveCd = (m.moveCd ?? (Math.random() * 0.4)) - dt;
+    if (m.moveCd > 0) return null;
+    m.moveCd = 0.25 + Math.random() * 0.35;
+    if (Math.random() < 0.55) {                                // idle: now and then look somewhere else
+      if (Math.random() < 0.3) { const a = Math.random() * Math.PI * 2; m.fx = Math.sin(a); m.fy = Math.cos(a); }
+      return null;
+    }
+  }
+
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+  let candidates = [], bestScore = -Infinity;
+  for (const [dx, dy] of dirs) {
+    const nx = x + dx, ny = y + dy;
+    if (!canMoveTo(nx, ny)) continue;
+    if (!(alerted && nearest)) { candidates.push([nx, ny]); continue; }
+    const score = Math.hypot(nx - nearest.x, ny - nearest.y);   // fleeing: the step that gets furthest from the nearest player
+    if (score > bestScore + 1e-6) { bestScore = score; candidates = [[nx, ny]]; }
+    else if (Math.abs(score - bestScore) <= 1e-6) candidates.push([nx, ny]);
+  }
+  if (!candidates.length) return null;
+  const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
+  m.fx = nx - x; m.fy = ny - y;
+  return [nx, ny];
+}
+
+// ---- The cat: curious, then fond, then off ----
+// It notices a player nearby, trots over, follows for a while (and may hop onto a table, counter, bed or chair beside them),
+// then bolts off and ignores everyone for a bit. A cat on furniture keeps its own tile; meta.perch says which piece it sits on
+// and the 3D view draws it there. Everything lives on obj.meta so the other player sees the same cat.
+const CAT_NOTICE_RADIUS = 7;
+const CAT_FOLLOW_MS = [16000, 28000];
+const CAT_SHY_MS = [30000, 55000];
+const CAT_PERCH_MS = [9000, 20000];
+const CAT_PET_MS = 2400;
+const SURFACE_BY_CAT = { Tables: 0.78, Chairs: 0.5, Sofas: 0.5, Beds: 0.62, Drawers: 0.8 };
+const SURFACE_BY_ID = { workbench: 0.95, counter: 0.92, cupboard: 0.92, bed: 0.62, dresser: 0.8, sink: 0.92, chair_left: 0.5, chair_right: 0.5 };
+const rand = (a, b) => a + Math.random() * (b - a);
+
+/** How high (m) the top of the piece of furniture on this tile is, or null when a cat cannot sit on it. */
+function catSurfaceHeight(x, y) {
+  const o = state.world?.objects?.[y]?.[x]; if (!o) return null;
+  if (SURFACE_BY_ID[o.id] != null) return SURFACE_BY_ID[o.id];
+  const f = state.data?.furniture?.[o.id]; if (!f) return null;
+  if (f.cat === "Kitchen") return /counter|cupboard|sink/i.test(f.name) ? 0.92 : null;
+  return SURFACE_BY_CAT[f.cat] ?? null;
+}
+function catSurfaceTaken(x, y, self) {
+  if (state.players.some(p => p.pose?.tx === x && p.pose?.ty === y)) return true;     // someone is sitting / sleeping there
+  const w = state.world; if (!w?.objects) return false;
+  for (let yy = Math.max(0, y - 2); yy <= Math.min(w.objects.length - 1, y + 2); yy++)
+    for (let xx = Math.max(0, x - 2); xx <= Math.min(w.objects[0].length - 1, x + 2); xx++) {
+      const o = w.objects[yy][xx]; if (o && o !== self && o.id === "cat" && o.meta?.perch?.x === x && o.meta?.perch?.y === y) return true;
+    }
+  return false;
+}
+function catCanStep(ax, ay, bx, by) {
+  const { w, h } = currentDims();
+  if (!inBounds(bx, by, w, h) || !isWalkableTile(tileAt(bx, by))) return false;
+  if (objectAt(bx, by) || isOccupiedByPlayer(bx, by)) return false;
+  if (typeof structureBlocksStep === "function" && structureBlocksStep(ax, ay, bx, by)) return false;   // walls and shut doors; an open door lets it into a house
+  return true;
+}
+/** First step of a short breadth-first walk to within `gap` tiles of (tx,ty); null when there is no way. */
+function catStepToward(x, y, tx, ty, gap = 1) {
+  const key = (a, b) => a + "," + b, start = key(x, y), prev = new Map([[start, null]]), q = [[x, y]];
+  for (let i = 0; i < q.length && i < 500; i++) {
+    const [cx, cy] = q[i];
+    if (Math.hypot(cx - tx, cy - ty) <= gap && (cx !== x || cy !== y)) {
+      let k = key(cx, cy);
+      while (prev.get(k) && prev.get(k) !== start) k = prev.get(k);
+      return k.split(",").map(Number);
+    }
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = cx + dx, ny = cy + dy, k = key(nx, ny); if (prev.has(k) || !catCanStep(cx, cy, nx, ny)) continue; prev.set(k, key(cx, cy)); q.push([nx, ny]); }
+  }
+  return null;
+}
+function catLapTaken(i, self) {
+  const w = state.world; if (!w?.objects) return false;
+  for (const row of w.objects) for (const o of row) if (o && o !== self && o.id === "cat" && o.meta?.perch?.lap === i) return true;
+  return false;
+}
+function catTryPerch(m, x, y, self, now) {
+  const opts = [];
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const h = catSurfaceHeight(x + dx, y + dy);
+    if (h != null && !catSurfaceTaken(x + dx, y + dy, self) && !(typeof structureBlocksStep === "function" && structureBlocksStep(x, y, x + dx, y + dy))) opts.push({ x: x + dx, y: y + dy, h });
+  }
+  if (!opts.length) return false;
+  m.perch = opts[Math.floor(Math.random() * opts.length)]; m.perchUntil = now + rand(...CAT_PERCH_MS);
+  m.fx = m.perch.x - x; m.fy = m.perch.y - y;
+  return true;
+}
+/** Returns { step: [x, y] | null, changed } for this tick. */
+function catThink(obj, x, y, dt) {
+  const m = obj.meta = obj.meta || {}, now = Date.now(), snap = () => JSON.stringify([m.mode, m.perch, m.petUntil, m.run]), before = snap();
+  m.run = 0;
+  let near = null;
+  for (const p of state.players) { const d = Math.hypot(p.x - x, p.y - y); if (!near || d < near.d) near = { p, d }; }
+  const face = () => { if (near && near.d > 0) { m.fx = near.p.x - x; m.fy = near.p.y - y; } };
+  const done = (step = null) => ({ step, changed: snap() !== before });
+
+  if (now < (m.petUntil || 0)) { face(); return done(); }                                     // being petted: stays put
+
+  if (m.perch) {
+    const lap = m.perch.lap, sp = lap != null ? state.players[lap]?.pose : null;
+    if (lap != null && !(sp?.kind === "sit" && sp.tx === m.perch.x && sp.ty === m.perch.y)) { m.perch = null; m.lapCool = now + 8000; m.moveCd = 0.4; }   // they got up: down it hops
+    else if (catSurfaceHeight(m.perch.x, m.perch.y) == null || now > (m.perchUntil || 0)) { m.perch = null; m.perchCool = now + 20000; m.lapCool = now + 20000; m.moveCd = 0.5; }   // the piece is gone, or it is time to hop down
+    else { if (lap == null && near && near.d <= 4) face(); return done(); }
+  }
+
+  // someone sat down nearby: the cat wants their lap
+  if (m.mode !== "leave" && now > (m.lapCool || 0)) {
+    let sit = null, sd = 1e9;
+    state.players.forEach((p, i) => { const ps = p.pose; if (ps?.kind !== "sit") return; const d = Math.hypot(ps.tx - x, ps.ty - y); if (d <= 8 && d < sd && !catLapTaken(i, obj)) { sit = { p, i }; sd = d; } });
+    if (sit) {
+      const ps = sit.p.pose, adjacent = Math.abs(ps.tx - x) + Math.abs(ps.ty - y) === 1 && !(typeof structureBlocksStep === "function" && structureBlocksStep(x, y, ps.tx, ps.ty));
+      if (adjacent) {
+        m.perch = { x: ps.tx, y: ps.ty, h: 0.62, lap: sit.i, yaw: ps.yaw }; m.perchUntil = now + rand(25000, 45000);
+        m.mode = "follow"; m.followUntil = m.perchUntil + 6000; m.fx = Math.sin(ps.yaw); m.fy = Math.cos(ps.yaw);
+        return done();
+      }
+      m.mode = "approach"; m.followUntil = Math.max(m.followUntil || 0, now + 12000); m.run = sd > 5 ? 1 : 0;
+      if (now < (m.stepAt || 0)) return done();
+      m.stepAt = now + (m.run ? 260 : 480);
+      const st = catStepToward(x, y, ps.tx, ps.ty, 1);
+      if (st) { m.fx = st[0] - x; m.fy = st[1] - y; return done(st); }
+      return done();
+    }
+  }
+
+  if (!m.mode) m.mode = "wander";
+  if (m.mode === "wander" && near && near.d <= CAT_NOTICE_RADIUS && now > (m.shyUntil || 0)) {
+    m.mode = "approach"; m.followUntil = now + rand(...CAT_FOLLOW_MS);
+    if (now > (m.meowAt || 0)) { m.meowAt = now + 20000; playSound("cat"); }
+  }
+  if ((m.mode === "approach" || m.mode === "follow") && (!near || now > m.followUntil)) { m.mode = "leave"; m.leaveUntil = now + 4500; m.shyUntil = now + rand(...CAT_SHY_MS); }
+
+  if (m.mode === "leave") {
+    if (now > m.leaveUntil || !near) { m.mode = "wander"; return done(); }
+    m.run = 1;
+    if (now < (m.stepAt || 0)) return done();
+    m.stepAt = now + 260;
+    let best = null, bd = -1;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = x + dx, ny = y + dy; if (!catCanStep(x, y, nx, ny)) continue; const d = Math.hypot(nx - near.p.x, ny - near.p.y) + Math.random() * 0.4; if (d > bd) { bd = d; best = [nx, ny]; } }
+    if (best) { m.fx = best[0] - x; m.fy = best[1] - y; }
+    return done(best);
+  }
+
+  if (m.mode === "approach" || m.mode === "follow") {
+    if (near.d > 2.2) {
+      m.mode = "approach"; m.run = near.d > 5 ? 1 : 0;
+      if (now < (m.stepAt || 0)) return done();
+      m.stepAt = now + (m.run ? 260 : 480);
+      const st = catStepToward(x, y, near.p.x, near.p.y, 1.5);
+      if (st) { m.fx = st[0] - x; m.fy = st[1] - y; return done(st); }
+      return done();
+    }
+    m.mode = "follow"; face();                                                                 // close enough: lingers beside them
+    m.moveCd = (m.moveCd ?? 0.5) - dt;
+    if (m.moveCd > 0) return done();
+    m.moveCd = rand(0.5, 1.4);
+    if (now > (m.perchCool || 0) && Math.random() < 0.3 && catTryPerch(m, x, y, obj, now)) return done();
+    if (Math.random() < 0.25) {                                                                // shifts a step or two, but stays near
+      const opts = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [x + dx, y + dy]).filter(([nx, ny]) => catCanStep(x, y, nx, ny) && Math.hypot(nx - near.p.x, ny - near.p.y) <= 2.5);
+      if (opts.length) { const st = opts[Math.floor(Math.random() * opts.length)]; m.fx = st[0] - x; m.fy = st[1] - y; return done(st); }
+    }
+    return done();
+  }
+
+  // wander: slow ambling, and now and then up onto something
+  m.moveCd = (m.moveCd ?? Math.random()) - dt;
+  if (m.moveCd > 0) return done();
+  m.moveCd = rand(0.7, 1.8);
+  if (now > (m.perchCool || 0) && Math.random() < 0.12 && catTryPerch(m, x, y, obj, now)) return done();
+  if (Math.random() < 0.4) { const a = Math.random() * Math.PI * 2; m.fx = Math.sin(a); m.fy = Math.cos(a); return done(); }
+  const opts = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => [x + dx, y + dy]).filter(([nx, ny]) => catCanStep(x, y, nx, ny));
+  if (!opts.length) return done();
+  const st = opts[Math.floor(Math.random() * opts.length)]; m.fx = st[0] - x; m.fy = st[1] - y;
+  return done(st);
+}
+/** A player pets the cat (the host's cat AI and the 3D view both read petUntil off the object). */
+function petCat(x, y, plIdx = state.activePlayer | 0) {
+  const o = state.world?.objects?.[y]?.[x]; if (!o || o.id !== "cat") return false;
+  const p = state.players[plIdx], m = { ...(o.meta || {}) }, now = Date.now();
+  m.petUntil = now + CAT_PET_MS; m.fx = p.x - x; m.fy = p.y - y; m.mode = "follow"; m.followUntil = Math.max(m.followUntil || 0, now + 12000); m.shyUntil = 0;
+  setOverworldObject(x, y, { ...o, meta: m });
+  return true;
+}
+/** The cat sitting on the furniture at (x, y), if any: the x, y of its own tile. */
+function catPerchedOn(x, y) {
+  const w = state.world; if (!w?.objects) return null;
+  for (let yy = Math.max(0, y - 2); yy <= Math.min(w.objects.length - 1, y + 2); yy++)
+    for (let xx = Math.max(0, x - 2); xx <= Math.min(w.objects[0].length - 1, x + 2); xx++) { const o = w.objects[yy][xx]; if (o?.id === "cat" && o.meta?.perch?.x === x && o.meta?.perch?.y === y) return { x: xx, y: yy }; }
+  return null;
+}
+
 function updateAnimals(dt) {
 // Online: only host simulates animals (prevents double-moves + desync)
 if (state.net?.enabled && !state.net.isHost) return;
+trackPlayerNoise(Date.now());
 
   // =========================
   // DUNGEON: only rats wander
@@ -4619,23 +4946,9 @@ if (state.net?.enabled && !state.net.isHost) return;
 
         if (obj.id !== "rat1" && obj.id !== "rat2") continue;
 
-        obj.meta = obj.meta || {};
-        obj.meta.moveCd = (obj.meta.moveCd ?? (Math.random() * 0.4)) - dt;
-        if (obj.meta.moveCd > 0) continue;
-        obj.meta.moveCd = 0.25 + Math.random() * 0.35;
-
-        // wander sometimes (same vibe as overworld, no flee logic for rats)
-        if (Math.random() < 0.55) continue;
-
-        const candidates = [];
-        for (const [dx, dy] of dirs) {
-          const nx = x + dx, ny = y + dy;
-          if (canMove(nx, ny)) candidates.push([nx, ny]);
-        }
-
-        if (!candidates.length) continue;
-
-        const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
+        const step = animalThink(obj, x, y, map, true, canMove, dt);
+        if (!step) continue;
+        const [nx, ny] = step;
 
         map.objects[ny][nx] = obj;
         map.objects[y][x] = null;
@@ -4672,55 +4985,17 @@ if (state.net?.enabled && !state.net.isHost) return;
       if (!obj) continue;
 
       const def = objDef(obj.id);
+      if (def?.ai === "cat") {
+        const r = catThink(obj, x, y, dt);
+        if (r.step) { setOverworldObject(r.step[0], r.step[1], obj); setOverworldObject(x, y, null); }
+        else if (r.changed) setOverworldObject(x, y, { ...obj, meta: { ...obj.meta } });   // perched / petted: tell everyone
+        continue;
+      }
       if (!isMovingAnimalDef(def)) continue;
 
-      obj.meta = obj.meta || {};
-      obj.meta.moveCd = (obj.meta.moveCd ?? (Math.random() * 0.4)) - dt;
-      if (obj.meta.moveCd > 0) continue;
-      obj.meta.moveCd = 0.25 + Math.random() * 0.35;
-
-      // find nearest player distance
-      let nearest = null;
-      let nearestD = Infinity;
-      for (const p of state.players) {
-        const d = manhattan(x, y, p.x, p.y);
-        if (d < nearestD) {
-          nearestD = d;
-          nearest = p;
-        }
-      }
-
-      const fleeRadius = 2;
-
-      // decide movement
-      let candidates = [];
-
-      // if close, move away (maximize distance)
-      if (nearest && nearestD <= fleeRadius) {
-        let bestScore = -Infinity;
-        for (const [dx, dy] of dirs) {
-          const nx = x + dx, ny = y + dy;
-          if (!isPassableForAnimal(nx, ny)) continue;
-          const score = manhattan(nx, ny, nearest.x, nearest.y);
-          if (score > bestScore) {
-            bestScore = score;
-            candidates = [[nx, ny]];
-          } else if (score === bestScore) {
-            candidates.push([nx, ny]);
-          }
-        }
-      } else {
-        // wander sometimes
-        if (Math.random() < 0.55) continue;
-        for (const [dx, dy] of dirs) {
-          const nx = x + dx, ny = y + dy;
-          if (isPassableForAnimal(nx, ny)) candidates.push([nx, ny]);
-        }
-      }
-
-      if (!candidates.length) continue;
-
-      const [nx, ny] = candidates[Math.floor(Math.random() * candidates.length)];
+      const step = animalThink(obj, x, y, map, false, isPassableForAnimal, dt);
+      if (!step) continue;
+      const [nx, ny] = step;
 
 // move object (broadcast both tiles so everyone sees it)
 setOverworldObject(nx, ny, obj);
@@ -4825,8 +5100,10 @@ for (let y = 1; y < WORLD_H - 1; y++) {
 
  // animals (only place if they exist in objects.json)
   if (objDef("deer")) placeObjects(map, WORLD_W, WORLD_H, "deer", ["grass", "sand"], 10);
+  if (objDef("doe")) placeObjects(map, WORLD_W, WORLD_H, "doe", ["grass", "sand"], 8);
   if (objDef("squirrel")) placeObjects(map, WORLD_W, WORLD_H, "squirrel", ["grass", "sand"], 15);
   if (objDef("pig")) placeObjects(map, WORLD_W, WORLD_H, "pig", ["grass", "sand"], 10);
+  if (objDef("rabbit")) placeObjects(map, WORLD_W, WORLD_H, "rabbit", ["grass"], 12);
   if (objDef("chicken")) placeObjects(map, WORLD_W, WORLD_H, "chicken", ["grass", "sand"], 15);
   if (objDef("cow")) placeObjects(map, WORLD_W, WORLD_H, "cow", ["grass", "sand"], 5);
   if (objDef("cat")) placeObjects(map, WORLD_W, WORLD_H, "cat", ["grass", "sand"], 1);
@@ -5520,7 +5797,7 @@ if (pl.hunger >= HUNGER_MAX) {
       const dist = Math.hypot(dx, dy);
 
       const holdCatchUp = (state.holdingHands && state.players.indexOf(pl) === state.holdingHands.b) ? 1.8 : 1;   // the one being led closes any gap to the leader
-      const step = (state.view3d ? MOVE_SPEED_TILES_PER_SEC_3D : MOVE_SPEED_TILES_PER_SEC) * dt * holdCatchUp;
+      const step = (state.view3d ? MOVE_SPEED_TILES_PER_SEC_3D : MOVE_SPEED_TILES_PER_SEC) * dt * holdCatchUp * (pl.sneak ? SNEAK_SPEED_MULT : 1);
 
       if (dist <= step || dist === 0) {
         // Re-check passability at arrival: world may have changed since path was computed
@@ -5635,6 +5912,7 @@ function harvestObject(x, y) {
   // Support BOTH harvest and hunt
   const interact = def.hunt || def.harvest;
   if (!interact) return;
+  if (obj.meta?.depleted) return;   // nothing left to take until it regrows
 
   const inv = activeInv();
   const requiredTool = interact.requiresTool || null;
@@ -7769,8 +8047,9 @@ function placeStockpileAt(x, y) {
   if (!isPassable(x, y)) return false;
 
   const key = `stockpile:${x},${y}:${Date.now()}`;
-  state.structures.stockpiles.push({ key, x, y, inv: [] });
-  state.world.objects[y][x] = { id: "stockpile", hp: 999, meta: { key } };
+  const inv = [];
+  state.structures.stockpiles.push({ key, x, y, inv });
+  state.world.objects[y][x] = { id: "stockpile", hp: 999, meta: { key, inv } };
 
   saveStockpileAt(x, y, key);
 
@@ -7783,6 +8062,19 @@ function placeStockpileAt(x, y) {
 
 function getStockpileByKey(key) {
   if (typeof key === "string" && key.startsWith("f:")) return state._furnStore?.[key] || null;   // a cupboard, drawer or fridge (see openFurnitureStorage)
+  // The contents live on the stockpile object itself (meta.inv), so they survive a reload and reach the other player;
+  // the record in state.structures is only a cache that is rebuilt from the world on demand.
+  const m = /^stockpile:(\d+),(\d+):/.exec(String(key));
+  if (m) {
+    const o = state.world?.objects?.[+m[2]]?.[+m[1]];
+    if (o?.id === "stockpile" && o.meta?.key === key) {
+      o.meta.inv = Array.isArray(o.meta.inv) ? o.meta.inv : [];
+      let rec = state.structures.stockpiles.find(s => s.key === key);
+      if (!rec) { rec = { key, x: +m[1], y: +m[2], inv: o.meta.inv }; state.structures.stockpiles.push(rec); }
+      rec.inv = o.meta.inv;
+      return rec;
+    }
+  }
   return state.structures.stockpiles.find(s => s.key === key) || null;
 }
 
@@ -7817,6 +8109,17 @@ function openMenuForPlayer(plIndex, screenX, screenY) {
   if (state.holdingHands && (state.holdingHands.a === plIndex || state.holdingHands.b === plIndex)) {
     options.push({ label: "Let go of hands", action: () => { endHoldingHands(`${pl.name} let go.`); closeMenu(); } });
   }
+
+  if (pl.pose?.kind === "sit") options.push({ label: "Stand up", action: () => { setPose(plIndex, null); closeMenu(); } });
+  if (pl.pose?.kind === "sit") {
+    const lapCat = catPerchedOn(pl.pose.tx, pl.pose.ty);
+    if (lapCat) options.push({ label: "Pet the cat", action: withSfx("cat", () => { petCat(lapCat.x, lapCat.y, plIndex); logAction(`${pl.name} pets the cat.`); closeMenu(); return true; }) });
+  }
+
+  options.push({
+    label: pl.sneak ? "Stand up" : "Sneak",
+    action: () => { setSneak(plIndex, !pl.sneak); closeMenu(); }
+  });
 
   if (!pl.resting) {
     options.push({
@@ -8303,7 +8606,7 @@ if (obj.id === "bed") {
         label: "Sleep",
         action: withSfx("click", () => {
           closeMenu();
-          sleepInBed();
+          sleepInBed(mapX, mapY);
         })
       }
     ]
@@ -8585,7 +8888,7 @@ if (state.mode === "dungeon" && obj.id === "chest") {
   const def = objDef(obj.id);
   if (!def) return;
 
-  // Allow ranged interaction for huntable animals if player has bow_and_arrow (up to 3 tiles)
+  // Allow ranged interaction for huntable animals if player has bow_and_arrow (up to BOW_MAX_RANGE tiles, while on screen)
   const dist = Math.abs(p.x - mapX) + Math.abs(p.y - mapY);
   const huntData = def.hunt || def.harvest; // support either key
   const isHuntable =
@@ -8593,7 +8896,7 @@ if (state.mode === "dungeon" && obj.id === "chest") {
     (huntData && huntData.requiresTool === "bow_and_arrow");
 
   const hasBow = canShootBow(inv);
-  const allowRangedHunt = isHuntable && hasBow && dist <= 3;
+  const allowRangedHunt = isHuntable && hasBow && bowCanReach(mapX, mapY);
 
 // Bed is always interactable if clicked (even if you're far away)
 if (obj.id !== "bed" && !isAdjacentOrSame(p.x, p.y, mapX, mapY) && !allowRangedHunt) return;
@@ -8670,7 +8973,7 @@ if (obj.id === "bed") {
     action: () => {
       if (tooFar) return;
       closeMenu();
-      sleepInBed();
+      sleepInBed(mapX, mapY);
     }
   });
 }
@@ -8774,13 +9077,14 @@ if (obj.id === "campfire") {
 
   // ---- Cat special: Pet instead of Hunt ----
   if (obj.id === "cat") {
-    const tooFar = !isAdjacentOrSame(p.x, p.y, mapX, mapY);
+    const pc = obj.meta?.perch, tooFar = !isAdjacentOrSame(p.x, p.y, mapX, mapY) && !(pc && isAdjacentOrSame(p.x, p.y, pc.x, pc.y));
 
     options.push({
   label: "Pet",
   disabledReason: tooFar ? "Too far" : null,
   action: withSfx("cat", () => {
     if (tooFar) return false;
+    petCat(mapX, mapY, state.activePlayer | 0);
     logAction(`${p.name} pets ${def.name ?? "the cat"}.`);
     closeMenu();
     return true;
@@ -8840,22 +9144,30 @@ if (obj.id === "stump") {
   // ---- Furniture inside a house: sleep, cook, prepare, turn it, pick it up again ----
   if (def.furniture) {
     const f = state.data.furniture?.[obj.id], near = isAdjacentOrSame(p.x, p.y, mapX, mapY);
-    if (def.sleep) options.push({ label: "Sleep", disabledReason: near ? null : "Too far", action: () => { if (!near) return; closeMenu(); sleepInBed(); } });
+    if (def.sleep) options.push({ label: "Sleep", disabledReason: near ? null : "Too far", action: () => { if (!near) return; closeMenu(); sleepInBed(mapX, mapY); } });
+    if (SEAT_CATS.has(f?.cat)) options.push({ label: "Sit", disabledReason: near ? null : "Too far", action: withSfx("click", () => { if (!near) return; closeMenu(); sitOn(state.activePlayer | 0, mapX, mapY); }) });
     if (def.station === "stove") options.push({ label: "Cook", disabledReason: near ? null : "Too far", action: () => { closeMenu(); openCraftingScreen("cook"); } });
     if (def.station === "counter") options.push({ label: "Prepare", disabledReason: near ? null : "Too far", action: () => { closeMenu(); openCraftingScreen("prep"); } });
     if (f?.storage) options.push({ label: `Open ${f.storage.toLowerCase()}`, disabledReason: near ? null : "Too far", action: withSfx("chest", () => { if (!near) return; closeMenu(); openFurnitureStorage(mapX, mapY); }) });
+    const catHere = catPerchedOn(mapX, mapY);
+    if (catHere) options.push({ label: "Pet the cat", disabledReason: near ? null : "Too far", action: withSfx("cat", () => { if (!near) return false; petCat(catHere.x, catHere.y, state.activePlayer | 0); logAction(`${p.name} pets the cat.`); closeMenu(); return true; }) });
     options.push({
       label: "Rotate",
       action: withSfx("click", () => { setOverworldObject(mapX, mapY, { ...obj, meta: { ...(obj.meta || {}), rot: (((obj.meta?.rot | 0) + 1) % 4) } }); closeMenu(); })
     });
     options.push({
-      label: "Pick up",
+      label: "Move",
+      disabledReason: near ? null : "Too far",
+      action: withSfx("click", () => { if (!near) return; closeMenu(); window.__r3d?.builder?.moveFurnitureAt(mapX, mapY); })
+    });
+    options.push({
+      label: "Dismantle",
       disabledReason: near ? (obj.meta?.inv?.length ? "Empty it first" : null) : "Too far",
       action: withSfx("pickup", () => {
         if (!near || obj.meta?.inv?.length) return;
         for (const [id, n] of Object.entries(f?.cost || {})) addItemOrDrop(inv, id, n, p.x, p.y, p.name);   // the materials come back
         setOverworldObject(mapX, mapY, null);
-        logAction(`${p.name} picked up the ${def.name.toLowerCase()}.`);
+        logAction(`${p.name} dismantled the ${def.name.toLowerCase()}.`);
         closeMenu();
       })
     });
@@ -8874,7 +9186,7 @@ if (obj.meta?.depleted) disabledReason = "Depleted";
     if (isHuntable) {
       if (getQty(inv, "bow_and_arrow") <= 0) disabledReason = "Needs bow and arrow";
       else if (getQty(inv, "arrow") <= 0) disabledReason = "Out of arrows";
-      else if (dist > 3) disabledReason = "Too far";
+      else if (!bowCanReach(mapX, mapY)) disabledReason = "Too far";
     } else {
       // Normal harvesting stays adjacent-only
       if (!isAdjacentOrSame(p.x, p.y, mapX, mapY)) disabledReason = "Too far";
@@ -8912,16 +9224,19 @@ options.push({
 
 if (def.pickup) {
 
-  // Eat directly from map (only if item has nourishment)
-  if (typeof def.nourishment === "number") {
+  // Eat directly from the map: food lying about (strawberries, mushrooms, bananas, wheat...) is eaten on the spot.
+  // The nourishment is on the item, so add up what this patch would give you.
+  const eatGain = Object.entries(def.pickup.gives || {}).reduce((n, [id, amt]) => n + (typeof itemDef(id)?.nourishment === "number" ? itemDef(id).nourishment * amt : 0), typeof def.nourishment === "number" ? def.nourishment : 0);
+  if (eatGain > 0) {
+    const eatFar = !isAdjacentOrSame(p.x, p.y, mapX, mapY);
     options.push({
-      label: `Eat (+${def.nourishment})`,
-      disabledReason: tooFar ? "Too far" : null,
-      action: withSfx("pickup", () => {
-        if (tooFar) return;
+      label: `Eat (+${eatGain})`,
+      disabledReason: eatFar ? "Too far" : null,
+      action: withSfx("eat", () => {
+        if (eatFar) return false;
 
-        p.hunger = clamp((p.hunger ?? 0) - def.nourishment, 0, HUNGER_MAX);
-        logAction(`${p.name} eats ${def.name}.`);
+        p.hunger = clamp((p.hunger ?? 0) - eatGain, 0, HUNGER_MAX);
+        logAction(`${p.name} ate the ${def.name.toLowerCase()}.`);
 
         // remove object from map after eating
         setOverworldObject(mapX, mapY, null);
@@ -9634,7 +9949,7 @@ function craftingModeHasItem(def) {
 function recipeKnown(r) { return state.learnedRecipes.has(r.id) || (recipeHasStation(r, "hand") && !r.locked); }
 
 // Furniture pieces you may build from the start; every other piece needs its recipe scroll found and learned.
-const STARTER_FURNITURE = ["f_chair_a", "f_table_a", "f_bed_single", "f_cupboard_a", "f_shelf_a", "f_carpet_a", "f_lamp_a", "f_food_plate", "f_wood_stool_1", "f_wood_table_1"];
+const STARTER_FURNITURE = ["f_chair_a", "f_table_a", "f_bed_double", "f_cupboard_a", "f_shelf_a", "f_carpet_a", "f_food_plate", "f_wood_stool_1", "f_wood_table_1"];
 function seedStarterRecipes() {
   for (const id of STARTER_FURNITURE) { const rid = state.data?.furniture?.[id]?.recipe; if (rid) state.learnedRecipes.add(rid); }
 }
@@ -11738,6 +12053,16 @@ function handleCoordsTap(px, py) {
 }
 
 function handleStockpileTap(px, py) {
+  const key = state.stockpileOpen?.key, before = key && getStockpileByKey(key) ? JSON.stringify(getStockpileByKey(key).inv) : null;
+  const r = handleStockpileTapInner(px, py);
+  const sp = key && String(key).startsWith("stockpile:") ? getStockpileByKey(key) : null;
+  if (sp && JSON.stringify(sp.inv) !== before && state.net?.enabled) {   // tell the other player what is in it now
+    const o = state.world.objects[sp.y]?.[sp.x];
+    if (o) sendWorldOp({ kind: "set_obj", mode: "overworld", x: sp.x, y: sp.y, value: { ...o, meta: { ...o.meta, inv: JSON.parse(JSON.stringify(sp.inv)) } } });
+  }
+  return r;
+}
+function handleStockpileTapInner(px, py) {
   const ui = state._stockUI;
   const key = state.stockpileOpen?.key;
   const sp = key ? getStockpileByKey(key) : null;
@@ -12109,7 +12434,9 @@ const OBJECT_CURSORS = {
   berry_bush: { icon: "basket.png", hotX: 10, hotY: 10 },
   apple_tree: { icon: "basket.png", hotX: 10, hotY: 10 },
   deer: { icon: "bow_and_arrow.png", hotX: 10, hotY: 10 },
+  doe: { icon: "bow_and_arrow.png", hotX: 10, hotY: 10 },
   squirrel: { icon: "bow_and_arrow.png", hotX: 10, hotY: 10 },
+  rabbit: { icon: "bow_and_arrow.png", hotX: 10, hotY: 10 },
   cow: { icon: "bucket.png", hotX: 10, hotY: 10 },
   pig: { icon: "bow_and_arrow.png", hotX: 10, hotY: 10 },
   chicken: { icon: "bow_and_arrow.png", hotX: 10, hotY: 10 }
@@ -12670,6 +12997,14 @@ canvas.addEventListener("contextmenu", (e) => {
   const def = objDef(obj.id);
   if (!def) return;
 
+  // Chest / toolbox / stockpile: the quick action opens it (adjacent only)
+  if (def.container) {
+    if (!isAdjacentOrSame(activePlayer().x, activePlayer().y, x, y)) return;
+    playSound("chest");
+    openContainerObject(x, y);
+    return;
+  }
+
   const p = activePlayer();
   const inv = activeInv();
   const dist = manhattan(p.x, p.y, x, y);
@@ -12721,14 +13056,18 @@ canvas.addEventListener("contextmenu", (e) => {
 
   const isHuntable = isHuntableDef(def);
   const hasBow = canShootBow(inv);
-  const allowRangedHunt = isHuntable && hasBow && dist <= 3;
+  const allowRangedHunt = isHuntable && hasBow && bowCanReach(x, y);
   const allowAdjacent = isAdjacentOrSame(p.x, p.y, x, y);
 
   if (!allowRangedHunt && !allowAdjacent) return;
 
   // Tool gate for quick-harvest: don't play SFX (or harvest) if tool is missing
   const requiredTool = interact.requiresTool || null;
-  if (!isHuntable && requiredTool && !hasTool(inv, requiredTool)) return;
+  if (!isHuntable && requiredTool && !hasTool(inv, requiredTool)) {
+    logAction(`${p.name} needs ${itemDef(requiredTool)?.name ?? requiredTool} for that.`);
+    playSound("error");
+    return;
+  }
 
   let sfx = "harvest";
   if (isHuntable) sfx = "hunt";
@@ -12798,6 +13137,12 @@ if (state.craftingOpen) {
     closeCraftingScreen();
     return;
   }
+}
+
+if (k === "c" && !e.ctrlKey && !e.metaKey && !e.altKey && !state.craftingOpen && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+  e.preventDefault();
+  toggleSneak();
+  return;
 }
 
 if (k === "r") {
@@ -13396,6 +13741,7 @@ function startScreenFadeToBlackThenBack(opts = {}) {
   const holdSec = opts.holdSec ?? 0.10;
   const inSec = opts.inSec ?? 0.35;
   const onMid = typeof opts.onMid === "function" ? opts.onMid : null;
+  const onEnd = typeof opts.onEnd === "function" ? opts.onEnd : null;
 
   state.screenFade = {
     active: true,
@@ -13404,7 +13750,7 @@ function startScreenFadeToBlackThenBack(opts = {}) {
     alpha: 0,
     outSec, holdSec, inSec,
     didMid: false,
-    onMid
+    onMid, onEnd
   };
 }
 
@@ -13442,6 +13788,7 @@ function updateScreenFade(dt) {
     f.alpha = 1 - clamp(f.t / f.inSec, 0, 1);
     if (f.t >= f.inSec) {
       state.screenFade = null;
+      try { f.onEnd && f.onEnd(); } catch (e) { console.error(e); }
     }
   }
 }
@@ -13452,16 +13799,20 @@ function drawScreenFadeOverlay() {
   drawRect(0, 0, window.innerWidth, window.innerHeight, `rgba(0,0,0,${f.alpha})`);
 }
 
-function sleepInBed() {
+function sleepInBed(bx, by) {
   // Don’t stack sleeps like some kind of cursed time machine
-  if (state.screenFade?.active) return;
+  if (state.screenFade?.active || state._sleeping) return;
 
-  const p = activePlayer();
+  const p = activePlayer(), idx = state.activePlayer | 0;
+  const bed = bx == null ? null : state.world?.objects?.[by]?.[bx];
+  if (bed) setPose(idx, { kind: "sleep", tx: bx, ty: by, yaw: ((bed.meta?.rot | 0) * Math.PI) / 2 });
+  state._sleeping = true;
 
-  startScreenFadeToBlackThenBack({
-    outSec: 0.45,
-    holdSec: 0.15,
-    inSec: 0.45,
+  // lie down first, then the screen fades
+  setTimeout(() => startScreenFadeToBlackThenBack({
+    outSec: 0.6,
+    holdSec: 0.5,
+    inSec: 0.6,
     onMid: () => {
       // 50% of *current* day length, automatically scales if you change DAY_SECONDS
       advanceTimeSeconds(DAY_SECONDS * 0.50);
@@ -13472,8 +13823,9 @@ function sleepInBed() {
       p.path = [];
 
       logAction(`${p.name} slept. Stamina fully restored. (+50% day)`);
-    }
-  });
+    },
+    onEnd: () => { state._sleeping = false; setTimeout(() => { if (state.players[idx]?.pose?.kind === "sleep") setPose(idx, null); }, 500); }   // a moment in bed after waking, then up
+  }), bed ? 1300 : 0);
 }
 
 function drawNightOverlay() {
@@ -13495,6 +13847,7 @@ function update(dt) {
   // Always update title/menu/cutscene stuff first so clicks work even before world arrives.
   updateTitleMenu(dt);
   updateScreenFade(dt);
+  tickPoses();
   updateMusic(dt);
 
   // Multiplayer boot: don't run overworld sim until server world arrives

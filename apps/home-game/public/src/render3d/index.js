@@ -84,7 +84,13 @@ export async function start3D() {
       if (moved > 1e-4) { const target = Math.atan2(dx, dz); let d = target - h.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); h.yaw += d * Math.min(1, dt * 14); }
       h.v = (h.v ?? 0) + (moved / rawDt - (h.v ?? 0)) * Math.min(1, rawDt * 10);   // smoothed ground speed, m/s (real time, not the clamped frame time)
       h.x = wx; h.z = wz; heading.set(a, h);
-      a.root.position.set(wx, wy, wz); a.root.rotation.y = h.yaw; a.root.visible = !builder.active;   // build mode has no characters in the way
+      // sitting in a chair / lying in a bed: the body slides to that furniture and turns to match it
+      const ps = p.pose, tgt = ps ? 1 : 0; a.poseK = (a.poseK || 0) + (tgt - (a.poseK || 0)) * Math.min(1, dt * 6); if (ps) a.lastPose = ps;
+      const pk = a.poseK < 0.01 ? 0 : a.poseK, lp = ps || a.lastPose;
+      let px = wx, pz = wz, yaw = h.yaw;
+      if (pk > 0 && lp) { px = wx + ((lp.tx + 0.5) * TILE_M - wx) * pk; pz = wz + ((lp.ty + 0.5) * TILE_M - wz) * pk; const dy = Math.atan2(Math.sin(lp.yaw - h.yaw), Math.cos(lp.yaw - h.yaw)); yaw = h.yaw + dy * pk; }
+      if (ps?.kind === "sit" && pk > 0) { px += Math.sin(yaw) * (window.__seatFwd ?? 0.1) * pk; pz += Math.cos(yaw) * (window.__seatFwd ?? 0.1) * pk; }   // hips back against the backrest, not on the front edge
+      a.root.position.set(px, wy, pz); a.root.rotation.y = yaw; a.root.visible = !builder.active;   // build mode has no characters in the way
       couple.apply(a, pi, bases, heading, pActors, dt, clock, (x, z) => curTerrain().heightAt(x, z));   // hug / kiss / holding hands
       // an action in progress (chopping, fishing...) keeps the body; walking away cancels it
       const speedScale = window.__animSpeed ?? 1; a.mixer.timeScale = speedScale;
@@ -92,12 +98,17 @@ export async function start3D() {
       if (a.act && v > 1.5) cancelAction(a);
       const busy = updateAction(a, dt * speedScale);
       if (!busy) {
-        if (p.resting && v < 0.4) {                      // resting: sit down, then sit
+        if (ps) a.onSeat = ps.kind === "sit"; else if (p.resting) a.onSeat = false;   // (stays set while standing up from a chair, so the body does not dip)
+        const seated = ps?.kind === "sit" || p.resting;
+        if (ps?.kind === "sleep") { a.play("Idle_Loop", { speed: 0.02 }); }
+        else if (seated && v < 0.4) {   // resting (on the ground) or in a chair: sit down, then sit
           if (!a.sitting) { a.sitting = performance.now(); a.play("Sitting_Enter", { once: true, restart: true }); }
           else if (performance.now() - a.sitting > 1300) a.play("Sitting_Idle_Loop");
         } else if (a.sitting) { a.sitting = 0; a.play("Sitting_Exit", { once: true, restart: true }); a.standUntil = performance.now() + 1000; }
         else if (a.standUntil && performance.now() < a.standUntil && v < 0.4) { /* standing back up */ }
         // clip follows speed so the feet don't skate (the game moves at 6 tiles/s = 12 m/s, i.e. a sprint)
+        else if (p.sneak && v < 0.4) a.play("Crouch_Idle_Loop");
+        else if (p.sneak) a.play("Crouch_Fwd_Loop", { speed: Math.min(2, Math.max(0.6, v / 1.4)) });
         else if (v < 0.4) a.play("Idle_Loop");
         else if (v < 3) a.play("Walk_Loop", { speed: Math.max(0.6, v / 1.5) });
         else if (v < 7) a.play("Jog_Fwd_Loop", { speed: v / 3.6 });
@@ -106,6 +117,10 @@ export async function start3D() {
       a.mixer.update(dt); applyPose(a, dt);
       heldTorch.update(a, p, clock);
       a.root.position.y -= a.sitDrop || 0;
+      // lying in a bed: on the back, head to the bedhead, lifted onto the mattress
+      a.lie = (a.lie || 0) + ((ps?.kind === "sleep" ? 1 : 0) - (a.lie || 0)) * Math.min(1, dt * 4);
+      if (a.lie > 0.005) { const e = a.lie * a.lie * (3 - 2 * a.lie); a.root.rotation.order = "YXZ"; a.root.rotation.x = -Math.PI / 2 * e; a.root.position.y += 0.78 * e; a.root.position.x += Math.sin(yaw) * 0.85 * e; a.root.position.z += Math.cos(yaw) * 0.85 * e; }
+      else if (a.root.rotation.x) a.root.rotation.x = 0;
     }
   }
   for (const a of Object.values(actors)) a.onStrike = (name, act) => {
@@ -124,6 +139,17 @@ export async function start3D() {
   for (const fn of ["harvestObject", "pickupObject"]) {
     const orig = window[fn]; if (typeof orig !== "function") continue;
     window[fn] = function (x, y, ...rest) { faceTile.set("last", { x, y, t: performance.now() }); return orig.call(this, x, y, ...rest); };
+  }
+  // petting: face the cat (or the furniture it is sitting on) and aim the stroking hand at it
+  let petAim = null;
+  if (typeof window.petCat === "function") {
+    const origPet = window.petCat;
+    window.petCat = function (x, y, ...rest) {
+      const o = state.world?.objects?.[y]?.[x], pc = o?.meta?.perch, tx = pc ? pc.x : x, ty = pc ? pc.y : y, wx = (tx + 0.5) * TILE_M, wz = (ty + 0.5) * TILE_M;
+      faceTile.set("last", { x: tx, y: ty, t: performance.now() });
+      petAim = new THREE.Vector3(wx, (pc ? pc.h : 0) + curTerrain().heightAt(wx, wz) + 0.3, wz);
+      return origPet.call(this, x, y, ...rest);
+    };
   }
   function faceYawFor(actor) {
     const t = faceTile.get("last"); if (!t || performance.now() - t.t > 250) return null;
@@ -149,7 +175,9 @@ export async function start3D() {
 
       const a = actorFor(state.players[state.activePlayer | 0] || state.players[0]);
       const t0 = performance.now(), ft0 = faceTile.get("last");
-      startAction(a, action, { playSfx: origPlaySound });
+      const seated = action === "pet" && state.players[state.activePlayer | 0]?.pose?.kind === "sit";   // petting the cat on your lap: stay in the chair
+      startAction(a, seated ? "petSeated" : action, { playSfx: origPlaySound });
+      if (action === "pet") a.petAim = petAim;
       // the game may call harvestObject/pickupObject just before OR just after playing the sound: settle the target once its handler has finished
       queueMicrotask(() => {
         const ft = faceTile.get("last"); if (!ft || performance.now() - ft.t > 400 || !a.act) return;

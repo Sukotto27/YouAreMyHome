@@ -15,7 +15,10 @@ const legacyManager = new THREE.LoadingManager();
 legacyManager.setURLModifier((url) => {
   if (url.startsWith("data:") || url.startsWith("blob:")) return url;
   const m = /([^/\\]+\.(png|jpe?g|tga|webp))(\?.*)?$/i.exec(url);
-  return (m && texIndex[m[1].toLowerCase()]) || url;
+  if (m && texIndex[m[1].toLowerCase()]) return texIndex[m[1].toLowerCase()];
+  // the buildable-furniture FBX still name the pack's wood maps (held out of the game; furniture draws with textures/furniture/wood.jpg): answer with a 1x1 pixel instead of a 404
+  if (m && /^(tiled)?wood[_.]/i.test(m[1])) return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+  return url;
 });
 legacyManager.addHandler(/\.tga$/i, new TGALoader(legacyManager));
 const manager = new THREE.LoadingManager();

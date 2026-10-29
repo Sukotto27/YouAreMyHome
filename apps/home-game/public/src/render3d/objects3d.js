@@ -78,6 +78,31 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
     } catch (e) { console.warn("[objects] rig failed:", url, e.message); return null; }
   }
 
+  // Tripo wild animals (tools/bake_wild_animals.mjs): static part meshes, so no clips - the legs swing from the hip by hand.
+  // face = which way the model looks along x; legs = part index -> swing sign (diagonal pairs); hop = hop height in m when it moves.
+  const WILD = {
+    deer: { file: "deer", height: 1.35, face: 1, legs: { 0: 1, 1: 1, 3: -1, 5: -1 } },
+    doe: { file: "doe", height: 1.0, face: 1, legs: { 0: 1, 1: 1, 3: -1, 5: -1 } },
+    pig: { file: "pig", height: 0.7, face: 1, legs: { 2: 1, 9: 1, 8: -1, 6: -1 } },
+    squirrel: { file: "squirrel", height: 0.4, face: -1, hop: 0.1 },
+    rat1: { file: "rat", height: 0.17, face: -1, hop: 0.02 },
+    rat2: { file: "rat", height: 0.17, face: -1, hop: 0.02, tint: 0x8a8a94 },
+    rabbit: { file: "rabbit", height: 0.42, face: 1, hop: 0.16 },
+  };
+  async function wildTemplate(w) {
+    try {
+      const tpl = await loadAny(`${MODELS}animals/wild/${w.file}.glb`); tpl.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(tpl), s = w.height / Math.max(1e-3, box.max.y - box.min.y);
+      const parts = []; tpl.traverse((o) => { if (o.isMesh) parts.push(o); });
+      parts.forEach((m) => { m.castShadow = true; if (w.tint) { m.material = m.material.clone(); m.material.color.lerp(new THREE.Color(w.tint), 0.7); } });
+      for (const i of Object.keys(w.legs || {})) {      // re-parent a leg under a pivot at its top (the hip)
+        const m = parts[i], b = new THREE.Box3().setFromObject(m), piv = new THREE.Group(), top = new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y, (b.min.z + b.max.z) / 2);
+        piv.name = "leg" + i; piv.position.copy(top); m.parent.add(piv); piv.add(m); m.position.sub(top);
+      }
+      return { tpl, s, lift: -box.min.y * s, yaw: -w.face * Math.PI / 2, w };
+    } catch (e) { console.warn("[objects] wild animal failed:", w.file, e.message); return null; }
+  }
+
   // --- models (loaded in parallel; null when a file is missing) ---
   const treeNames = [1, 2, 3, 4, 5, 6, 7, 8];
   const treeHeights = [4.3, 3.9, 4.1, 4.3, 4.5, 4.1, 5.2, 5.0];   // a tree fills about one 2 m tile, like the 2D game
@@ -100,6 +125,8 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
     (async () => { M.cowRig = await rigTemplate(`${MODELS}animals/styloo/Cow.glb`, 1.45); })(),
     (async () => { M.chickenRig = await rigTemplate(`${MODELS}animals/styloo/chichen.glb`, 0.5); })(),
     (async () => { M.cat = await L(`${MODELS}animals/styloo/cat.glb`, { height: 0.34 }); })(),
+    (async () => { M.catRig = await rigTemplate(`${MODELS}animals/styloo/cat.glb`, 0.36); })(),
+    ...Object.entries(WILD).map(async ([id, w]) => { M[id + "Wild"] = await wildTemplate(w); }),
     (async () => { M.apple = await L(`${MODELS}food/applered.glb`, { height: 0.2 }); })(),
     (async () => { M.grape = await L(`${MODELS}food/grapesingle.glb`, { footprint: 0.1 }); })(),
     (async () => { M.egg = await L(`${MODELS}food/egg.glb`, { height: 0.13 }); })(),
@@ -135,7 +162,7 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
     for (const m of [body, head, legs]) { m.castShadow = true; g.add(m); }
     return g;
   };
-  const PLACEHOLDER = { deer: [1.2, 1.3, 0xa87444], pig: [0.95, 0.65, 0xe8a8a0], goat: [0.9, 0.85, 0xe9e4d8], squirrel: [0.3, 0.22, 0x8a8a8a], rat1: [0.26, 0.16, 0x6a5a4a], rat2: [0.26, 0.16, 0x4a4a52], duck: [0.4, 0.32, 0xf0f0e8], swan: [0.8, 0.7, 0xffffff] };
+  const PLACEHOLDER = { deer: [1.2, 1.3, 0xa87444], doe: [1.1, 1.1, 0xa87444], pig: [0.95, 0.65, 0xe8a8a0], goat: [0.9, 0.85, 0xe9e4d8], squirrel: [0.3, 0.22, 0x8a8a8a], rabbit: [0.4, 0.3, 0x85694f], rat1: [0.26, 0.16, 0x6a5a4a], rat2: [0.26, 0.16, 0x4a4a52], duck: [0.4, 0.32, 0xf0f0e8], swan: [0.8, 0.7, 0xffffff] };
 
   // ---------- entity builders: (obj, tx, ty) -> entity { dispose(), update?(dt,t) } ----------
   const place = (key, model, x, z, o = {}) => model ? set.add(key, model, x, o.y ?? terrain.heightAt(x, z), z, o) : null;
@@ -205,7 +232,7 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
   R.feather_pickup = (obj, tx, ty) => {
     const [cx, cz] = tileCenter(tx, ty), [jx, jz] = jitter(tx, ty, 3, 0.9), g = new THREE.Group();
     const vane = new THREE.Mesh(featherGeo, featherMat), quill = new THREE.Mesh(quillGeo, quillMat); g.add(vane, quill);
-    g.position.set(cx + jx, terrain.heightAt(cx + jx, cz + jz) + 0.04, cz + jz); g.rotation.set(0, hash(tx, ty, 6) * 6.28, 0.08); g.scale.setScalar(2.1); group.add(g);
+    g.position.set(cx + jx, terrain.heightAt(cx + jx, cz + jz) + 0.04, cz + jz); g.rotation.set(0, hash(tx, ty, 6) * 6.28, 0.08); g.scale.setScalar(0.8); group.add(g);
     return { nodes: [g], setHidden(h) { g.visible = !h; }, dispose() { group.remove(g); } };
   };
   R.stick_pickup = (obj, tx, ty) => { const [cx, cz] = tileCenter(tx, ty), [jx, jz] = jitter(tx, ty, 3, 0.9); return instanced([place("stick", M.stick, cx + jx, cz + jz, { yaw: hash(tx, ty, 6) * 6.28 })]); };
@@ -292,7 +319,7 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
   };
   // ---------- furniture inside built houses ----------
   // Each catalog piece is an object id (f_...). The model loads the first time one is seen; the object is a plain group in the meantime.
-  const FURN_ALIAS = { counter: "f_cupboard_c", stove: "f_oven", refrigerator: "f_fridge_a", cupboard: "f_cupboard_a", bed: "f_bed_single", bookshelf: "f_shelf_d", chair_right: "f_chair_a", chair_left: "f_chair_a", dresser: "f_drawer_a", sink: "f_cupboard_sink", table: "f_table_a" };
+  const FURN_ALIAS = { counter: "f_cupboard_c", stove: "f_oven", refrigerator: "f_fridge_a", cupboard: "f_cupboard_a", bed: "f_bed_double", bookshelf: "f_shelf_d", chair_right: "f_chair_a", chair_left: "f_chair_a", dresser: "f_drawer_a", sink: "f_cupboard_sink", table: "f_table_a" };
   const floorAt = (tx, ty, cx, cz) => { const hit = curMap && roomAtTile(structuresOf(curMap), tx, ty); return hit ? (hit.structure.floorY ?? 0) + FLOOR_TOP : terrain.heightAt(cx, cz); };
   const furnitureRecipe = (def, rotOverride) => (obj, tx, ty) => {
     const [cx, cz] = tileCenter(tx, ty), g = new THREE.Group(); g.position.set(cx, floorAt(tx, ty, cx, cz), cz); group.add(g);
@@ -302,7 +329,24 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
   };
   for (const def of furnitureDefs()) R[def.id] = furnitureRecipe(def);
   for (const [old, id] of Object.entries(FURN_ALIAS)) { const def = furnitureDefs().find((d) => d.id === id); if (def && !R[old]) R[old] = furnitureRecipe(def, 0); }
-  R.workbench = (obj, tx, ty) => { const [cx, cz] = tileCenter(tx, ty); return instanced([place("table", M.table, cx, cz, { yaw: Math.round(hash(tx, ty, 6) * 2) * Math.PI / 2 })]); };
+  // the workbench: a heavy plank top on stout legs with a low shelf, a vise on one end and a mallet and a saw lying on top (not a dining table)
+  const benchWood = new THREE.MeshStandardMaterial({ color: 0x8a5a30, roughness: 0.9 }), benchTop = new THREE.MeshStandardMaterial({ color: 0xb98a55, roughness: 0.85 }), benchIron = new THREE.MeshStandardMaterial({ color: 0x3a3a40, roughness: 0.5, metalness: 0.7 });
+  const bx = (w, h, d, mat, x, y, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); return m; };
+  R.workbench = (obj, tx, ty) => {
+    const [cx, cz] = tileCenter(tx, ty), g = new THREE.Group(), L = 1.5, D = 0.72, H = 0.92;
+    g.add(bx(L, 0.12, D, benchTop, 0, H, 0));                                                    // thick top
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(bx(0.13, H - 0.06, 0.13, benchWood, sx * (L / 2 - 0.12), (H - 0.06) / 2, sz * (D / 2 - 0.1)));
+    g.add(bx(L - 0.2, 0.07, D - 0.14, benchWood, 0, 0.3, 0));                                    // low shelf
+    g.add(bx(L - 0.2, 0.1, 0.06, benchWood, 0, H - 0.14, D / 2 - 0.08));                        // apron
+    g.add(bx(0.2, 0.14, 0.16, benchIron, -L / 2 + 0.2, H + 0.13, D / 2 - 0.12)); g.add(bx(0.06, 0.2, 0.2, benchIron, -L / 2 + 0.2, H + 0.1, D / 2 + 0.06));   // vise
+    const sawBlade = bx(0.55, 0.02, 0.1, benchIron, 0.28, H + 0.07, 0.1); sawBlade.rotation.y = 0.25; g.add(sawBlade);                       // saw
+    const sawGrip = bx(0.14, 0.05, 0.05, benchWood, 0.6, H + 0.09, 0.03); sawGrip.rotation.y = 0.25; g.add(sawGrip);
+    const handle = bx(0.3, 0.04, 0.04, benchWood, -0.15, H + 0.08, -0.15); handle.rotation.y = -0.5; g.add(handle); const head = bx(0.1, 0.09, 0.07, benchIron, -0.3, H + 0.1, -0.2); head.rotation.y = -0.5; g.add(head);   // mallet
+    g.add(bx(0.4, 0.05, 0.22, benchWood, 0.3, 0.355 + 0.03, 0.02)); g.add(bx(0.36, 0.05, 0.2, benchWood, 0.32, 0.405 + 0.03, 0.02));          // scrap planks on the shelf
+    g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    g.position.set(cx, terrain.heightAt(cx, cz), cz); g.rotation.y = Math.round(hash(tx, ty, 6) * 2) * Math.PI / 2; group.add(g);
+    return { nodes: [g], setHidden(h) { g.visible = !h; }, dispose() { group.remove(g); g.traverse((o) => { if (o.isMesh) o.geometry.dispose(); }); } };
+  };
   // the stockpile: three crates on the ground; as it fills, one crate is stacked on top, then a second
   R.stockpile = (obj, tx, ty) => {
     const [cx, cz] = tileCenter(tx, ty), y = terrain.heightAt(cx, cz), ch = M.crate?.size?.y ?? 0.7;
@@ -326,54 +370,102 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
   R.wild_oranges = (obj, tx, ty) => { const [cx, cz] = tileCenter(tx, ty); return instanced([0, 1, 2].map((i) => place("orangeFruit", M.orangeFruit, cx + Math.cos(i * 2.1) * 0.28, cz + Math.sin(i * 2.1) * 0.28, { yaw: hash(tx, ty, 40 + i) * 6.28 }))); };
 
   // ---------- animals (tracked by object identity; glide between tiles) ----------
+  const catQ = new THREE.Quaternion();
+  const CAT_TUNE = window.__catTune = { axisLeg: new THREE.Vector3(1, 0, 0), axisTail: new THREE.Vector3(0, 0, 1), axisHead: new THREE.Vector3(0, 1, 0), axisNod: new THREE.Vector3(1, 0, 0), leg: 0.8, knee: 0.6, tail: 1, head: 1, jumpLeg: 1.0, petNod: -0.45, petTail: 0.9 };
   const ANIMAL_MODEL = { cat: "cat" };                    // static models
   const ANIMAL_RIG = { cow: "cowRig", chicken: "chickenRig" };   // rigged models
-  const SPEED = { cat: 3.6, chicken: 3.2, squirrel: 3.6, rat1: 3.6, rat2: 3.6, cow: 1.8 };
+  const SPEED = { rabbit: 4.5, deer: 4.5, doe: 4.5, pig: 3.4, cat: 3.6, chicken: 3.2, squirrel: 3.6, rat1: 3.6, rat2: 3.6, cow: 1.8 };
   function animal(id) {
     return (obj, tx, ty) => {
-      const rig = ANIMAL_RIG[id] && M[ANIMAL_RIG[id]], mk = ANIMAL_MODEL[id] && M[ANIMAL_MODEL[id]];
-      let body, mixer = null, acts = {}, bones = {};
+      const rig = (ANIMAL_RIG[id] || (id === "cat" && "catRig")) && M[ANIMAL_RIG[id] || "catRig"], mk = ANIMAL_MODEL[id] && M[ANIMAL_MODEL[id]];
+      let body, mixer = null, acts = {}, bones = {}, legs = [], hopH = 0.04;
       if (rig) {
-        const inner = cloneSkinned(rig.tpl); inner.scale.setScalar(rig.s); inner.position.y = rig.lift; inner.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
+        const inner = cloneSkinned(rig.tpl); inner.scale.setScalar(rig.s); if (id === "chicken") inner.rotation.y = Math.PI;   // the chicken model faces -z
+        inner.position.y = rig.lift; inner.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.frustumCulled = false; } });
         body = new THREE.Group(); body.add(inner); mixer = new THREE.AnimationMixer(inner);
         const clip = (...names) => names.map((n) => rig.clips[n]).find(Boolean);
         for (const [k, names] of Object.entries({ idle: ["iddle"], walk: ["walk", "walking"], run: ["run"] })) { const c = clip(...names); if (c) { acts[k] = mixer.clipAction(c); acts[k].play(); acts[k].setEffectiveWeight(k === "idle" ? 1 : 0); } }
         inner.traverse((o) => { if (o.isBone) bones[o.name] = o; });
-        for (const b of Object.values(bones)) b.userData.rest = b.rotation.clone();
+        for (const b of Object.values(bones)) { b.userData.rest = b.rotation.clone(); b.userData.q0 = b.quaternion.clone(); }
         mixer.update(hash(tx, ty, 4) * 3);       // each animal starts at its own point in the animation
+      } else if (M[id + "Wild"]) {
+        const wl = M[id + "Wild"], inner = wl.tpl.clone(true); inner.scale.setScalar(wl.s); inner.position.y = wl.lift; inner.rotation.y = wl.yaw;
+        body = new THREE.Group(); body.add(inner); inner.traverse((o) => { if (o.name.startsWith("leg")) legs.push([o, wl.w.legs[+o.name.slice(3)]]); }); hopH = wl.w.hop ?? 0;
       } else body = mk ? partsToGroup(mk) : critter(...PLACEHOLDER[id] || [0.6, 0.5, 0xaaaaaa]);
       const root = new THREE.Group(); root.add(body); group.add(root);
       const [cx, cz] = tileCenter(tx, ty); root.position.set(cx, terrain.heightAt(cx, cz), cz); root.rotation.y = hash(tx, ty, 6) * 6.28;
-      const ent = { tx, ty, moving: 0, phase: hash(tx, ty, 2) * 6.28, root, nodes: [root] };
+      const ent = { tx, ty, moving: 0, phase: hash(tx, ty, 2) * 6.28, root, nodes: [root], perch: obj.meta?.perch, petUntil: obj.meta?.petUntil };
       let blend = 0, peck = 0, nextPeck = 1 + hash(tx, ty, 9) * 4;
+      let lastPerch = ent.perch ? ent.perch.x + "," + ent.perch.y + (ent.perch.lap != null ? "L" : "") : "", jump = null, pet = 0;     // the cat hops onto / off furniture
       ent.dispose = () => { group.remove(root); mixer?.stopAllAction(); };
       ent.update = (dt, t) => {
-        const [wx, wz] = tileCenter(ent.tx, ent.ty), dx = wx - root.position.x, dz = wz - root.position.z, d = Math.hypot(dx, dz);
-        if (d > 0.02) {
-          const step = Math.min(d, (SPEED[id] ?? 2.6) * dt);
+        const perch = id === "cat" ? ent.perch : null;
+        const [wx0, wz0] = perch ? tileCenter(perch.x, perch.y) : tileCenter(ent.tx, ent.ty);
+        const lapOff = perch && perch.lap != null ? 0.18 : 0, wx = wx0 + Math.sin(perch?.yaw || 0) * lapOff, wz = wz0 + Math.cos(perch?.yaw || 0) * lapOff;   // on a lap: over the knees, not the middle of the chair
+        const dx = wx - root.position.x, dz = wz - root.position.z, d = Math.hypot(dx, dz);
+        const surfY = perch ? floorAt(perch.x, perch.y, wx0, wz0) + perch.h : (id === "cat" ? floorAt(ent.tx, ent.ty, root.position.x, root.position.z) : terrain.heightAt(root.position.x, root.position.z));
+        if (id === "cat") {
+          const key = perch ? perch.x + "," + perch.y + (perch.lap != null ? "L" : "") : "";
+          if (key !== lastPerch) { lastPerch = key; jump = { t: 0, x0: root.position.x, z0: root.position.z, y0: root.position.y, dur: 0.6 }; }
+        }
+        if (jump) {   // a hop up onto (or down from) furniture: straight line over the ground, an arc in height
+          jump.t += dt; const k = Math.min(1, jump.t / jump.dur), e = k * k * (3 - 2 * k), rise = surfY - jump.y0;
+          root.position.x = jump.x0 + (wx - jump.x0) * e; root.position.z = jump.z0 + (wz - jump.z0) * e;
+          root.position.y = jump.y0 + rise * e + Math.sin(Math.PI * k) * (0.32 + Math.abs(rise) * 0.5);
+          const ddx = wx - jump.x0, ddz = wz - jump.z0; if (Math.hypot(ddx, ddz) > 0.05) { let dy = Math.atan2(ddx, ddz) - root.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); root.rotation.y += dy * Math.min(1, dt * 14); }
+          ent.air = Math.sin(Math.PI * k); ent.airK = k; ent.airUp = rise >= 0 ? 1 : -0.5;
+          if (k >= 1) { jump = null; ent.air = 0; }
+        } else ent.air = 0;
+        if (!jump && d > 0.02) {
+          const step = Math.min(d, (ent.run ? Math.max(SPEED[id] ?? 2.6, 8) : SPEED[id] ?? 2.6) * dt);
           root.position.x += dx / d * step; root.position.z += dz / d * step;
           let dy = Math.atan2(dx, dz) - root.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); root.rotation.y += dy * Math.min(1, dt * 10);
           ent.moving = 1;
-        } else ent.moving = 0;
+        } else {
+          if (jump) ent.moving = 1; else ent.moving = 0;
+          if (!jump && ent.fx != null) { let dy = Math.atan2(ent.fx, ent.fy) - root.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy)); root.rotation.y += dy * Math.min(1, dt * 6); }   // standing: look where the game says it faces
+        }
         blend += ((ent.moving ? 1 : 0) - blend) * Math.min(1, dt * 6);
         if (mixer) {
-          if (acts.walk && acts.idle) { acts.walk.setEffectiveWeight(blend); acts.idle.setEffectiveWeight(1 - blend); acts.walk.timeScale = 0.9 + 0.4 * blend; }
+          if (acts.walk && acts.idle) { acts.walk.setEffectiveWeight(blend); acts.idle.setEffectiveWeight(1 - blend); acts.walk.timeScale = (ent.run ? 1.8 : 0.9) + 0.4 * blend; }
           mixer.update(dt);
         }
-        if (id === "chicken") {      // no clips ship with the chicken: swing the legs by hand, and peck now and then
+        if (id === "cat" && rig) {   // the cat is rigged but ships no clips: walk / trot / idle are driven bone by bone (three.js strips the dots from bone names)
+          const C = CAT_TUNE, run = ent.run ? 1 : 0, f = C.freeze ?? (t * (run ? 15 : 9) + ent.phase), bl = C.blendOverride ?? blend, amp = bl * (run ? 0.75 : 0.5);
+          const turn = (name, ax, ang) => { const b = bones[name]; if (b) { catQ.setFromAxisAngle(ax, ang); b.quaternion.copy(b.userData.q0).multiply(catQ); } };
+          for (const [side, sg] of [["L", 1], ["R", -1]]) {
+            const rearPh = Math.sin(f + (side === "L" ? 0 : Math.PI)), frontPh = -rearPh;   // diagonal pairs move together
+            turn(`DEF-thigh${side}`, C.axisLeg, rearPh * amp * C.leg);
+            turn(`DEF-shin${side}`, C.axisLeg, (Math.max(0, Math.cos(f + (side === "L" ? 0 : Math.PI))) * bl * 0.9) * C.knee);
+            turn(`DEF-front_thigh${side}`, C.axisLeg, frontPh * amp * C.leg);
+            turn(`DEF-front_shin${side}`, C.axisLeg, (Math.max(0, -Math.cos(f + (side === "L" ? 0 : Math.PI))) * bl * 0.8) * C.knee);
+          }
+          const tail = ["DEF-spine", "DEF-spine001", "DEF-spine002", "DEF-spine003"];
+          tail.forEach((n, i) => turn(n, C.axisTail, Math.sin(t * (ent.moving ? 5 : 1.6) + ent.phase - i * 0.7) * (ent.moving ? 0.22 : 0.3) * C.tail + (ent.moving ? 0.12 : 0)));
+          pet += ((Date.now() < (ent.petUntil || 0) ? 1 : 0) - pet) * Math.min(1, dt * 6);
+          const air = ent.air || 0;
+          if (air > 0.01) for (const [n, sg] of [["DEF-front_thighL", -1], ["DEF-front_thighR", -1], ["DEF-thighL", 1], ["DEF-thighR", 1]]) turn(n, C.axisLeg, sg * air * C.jumpLeg);   // reaches out in the air
+          turn("head", C.axisHead, ent.moving ? 0 : Math.sin(t * 0.7 + ent.phase * 3) * 0.5 * C.head * (1 - pet));   // looks about while standing
+          if (pet > 0.01) { turn("neck", C.axisNod, C.petNod * pet); turn("head", C.axisNod, C.petNod * 0.6 * pet); tail.forEach((n, i) => turn(n, C.axisTail, Math.sin(t * 9 + i) * 0.1 * pet)); }   // chin up into the hand, tail up and quivering
+          body.scale.y = 1 + Math.sin(t * 2.2 + ent.phase) * 0.012 * (1 - blend) + Math.sin(t * 26) * 0.006 * pet;   // breathing, and a purr
+          body.position.y = ent.moving ? Math.abs(Math.sin(f)) * 0.012 * (1 + run) : 0;
+          body.rotation.x = jump ? -0.4 * Math.cos(Math.PI * (ent.airK || 0)) * (ent.airUp || 1) : 0;               // nose up on take-off, down on landing
+        } else if (id === "chicken") {      // no clips ship with the chicken: swing the legs by hand, and peck now and then
           const swing = Math.sin(t * 16 + ent.phase) * 0.9 * blend;
           for (const n of ["legL", "legR"]) { const b = bones[n]; if (b) b.rotation.x = b.userData.rest.x + (n === "legL" ? swing : -swing); }
           nextPeck -= dt; if (!ent.moving && nextPeck < 0) { peck = 0.45; nextPeck = 2 + Math.random() * 4; }
           peck = Math.max(0, peck - dt); body.rotation.x = -Math.sin((1 - peck / 0.45) * Math.PI) * (peck > 0 ? 0.55 : 0);
         } else if (!mixer) {
-          const hop = ent.moving ? Math.abs(Math.sin(t * 10 + ent.phase)) * 0.04 : 0; body.position.y = hop; body.rotation.z = ent.moving ? Math.sin(t * 10 + ent.phase) * 0.05 : 0;
+          const hop = ent.moving ? Math.abs(Math.sin(t * (ent.run ? 16 : 10) + ent.phase)) * hopH : 0; body.position.y = hop; body.rotation.z = ent.moving ? Math.sin(t * 10 + ent.phase) * 0.05 : 0;
+          for (const [leg, sign] of legs) leg.rotation.z = Math.sin(t * (ent.run ? 16 : 9) + ent.phase) * (ent.run ? 0.8 : 0.55) * blend * sign;
         }
-        root.position.y = terrain.heightAt(root.position.x, root.position.z) + (id === "chicken" ? (ent.moving ? Math.abs(Math.sin(t * 16 + ent.phase)) * 0.03 : 0) : 0);
+        if (id === "cat") { if (!jump) root.position.y += (surfY - root.position.y) * Math.min(1, dt * 14); }
+        else root.position.y = terrain.heightAt(root.position.x, root.position.z) + (id === "chicken" ? (ent.moving ? Math.abs(Math.sin(t * 16 + ent.phase)) * 0.03 : 0) : 0);
       };
       return ent;
     };
   }
-  for (const id of ["cow", "chicken", "cat", "deer", "pig", "goat", "squirrel", "rat1", "rat2", "duck", "swan"]) R[id] = animal(id);
+  for (const id of ["cow", "chicken", "cat", "deer", "doe", "pig", "goat", "squirrel", "rat1", "rat2", "rabbit", "duck", "swan"]) R[id] = animal(id);
 
   // ---------- dropped items: a small model (or sack) bobbing over a soft ring ----------
   const ITEM_FILE = { banana: "food/banana.glb", orange: "food/orange.glb", watermelon: "food/watermelon.glb", soda_blue: "food/sodablue.glb", soda_green: "food/sodagreen.glb", soda_red: "food/sodared.glb",
@@ -483,23 +575,35 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
       if (world !== lastWorld) { clearAll(); lastWorld = world; }
       curMap = world;
       frame++;
-      const objs = world.objects, H = objs.length, W = objs[0].length;
+      const objs = world.objects, H = objs.length, W = objs[0].length, fresh = [];
       for (let y = 0; y < H; y++) {
         const row = objs[y];
         for (let x = 0; x < W; x++) {
           const o = row[x]; if (!o) continue;
           let rec = ents.get(o);
           if (rec) {
-            rec.frame = frame;
+            rec.frame = frame; if (rec.ent) { rec.ent.run = !!o.meta?.run; rec.ent.fx = o.meta?.fx; rec.ent.fy = o.meta?.fy; rec.ent.perch = o.meta?.perch; rec.ent.petUntil = o.meta?.petUntil; }
             const s = sigOf(o);
             if (s !== rec.sig) { rec.ent?.dispose?.(); rec.ent = skip.has(o.id) ? null : R[o.id]?.(o, x, y) ?? null; rec.sig = s; rec.tx = x; rec.ty = y; }
             else if (rec.tx !== x || rec.ty !== y) { rec.tx = x; rec.ty = y; if (rec.ent) { rec.ent.tx = x; rec.ent.ty = y; } }
-          } else {
+          } else if (ANIMAL_IDS.has(o.id)) fresh.push([o, x, y]);   // the game re-creates an animal's object on every step: matched to its old entity below
+          else {
             let ent = null;
             if (!skip.has(o.id) && R[o.id]) { try { ent = R[o.id](o, x, y); } catch (e) { console.warn("[objects] spawn failed for", o.id, e); } }
             else if (!skip.has(o.id) && !warned.has(o.id)) { warned.add(o.id); console.warn("[objects] no 3D recipe for", o.id); }
             ents.set(o, { sig: sigOf(o), ent, frame, tx: x, ty: y });
           }
+        }
+      }
+      if (fresh.length) {
+        const stale = [...ents].filter(([, r]) => r.frame !== frame && r.ent && r.animal);
+        for (const [o, x, y] of fresh) {
+          let best = -1, bd = 3;      // the same kind of animal that just vanished within 2 tiles is this one, one step on
+          stale.forEach(([so, r], i) => { if (r && r.animal === o.id) { const d = Math.max(Math.abs(r.tx - x), Math.abs(r.ty - y)); if (d < bd) { bd = d; best = i; } } });
+          if (best >= 0) { const [so, r] = stale[best]; stale[best] = [so, null]; ents.delete(so); r.ent.tx = x; r.ent.ty = y; r.ent.run = !!o.meta?.run; r.ent.fx = o.meta?.fx; r.ent.fy = o.meta?.fy; r.ent.perch = o.meta?.perch; r.ent.petUntil = o.meta?.petUntil; ents.set(o, { sig: sigOf(o), ent: r.ent, frame, tx: x, ty: y, animal: o.id, hidden: r.hidden, hiddenEnt: r.hiddenEnt }); continue; }
+          let ent = null;
+          if (!skip.has(o.id) && R[o.id]) { try { ent = R[o.id](o, x, y); } catch (e) { console.warn("[objects] spawn failed for", o.id, e); } }
+          ents.set(o, { sig: sigOf(o), ent, frame, tx: x, ty: y, animal: o.id });
         }
       }
       for (const [o, rec] of ents) {
@@ -515,3 +619,4 @@ export async function createObjectLayer({ terrain, scene, fog = true }) {   // f
   };
 }
 const warned = new Set();
+const ANIMAL_IDS = new Set(["cow", "chicken", "cat", "deer", "doe", "pig", "goat", "squirrel", "rat1", "rat2", "rabbit", "duck", "swan"]);
