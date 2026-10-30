@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 189;
+const GAME_BUILD = 190;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -9937,9 +9937,13 @@ function craftingModeHasRecipe(r) {
   return false;
 }
 function craftingModeRecipes() { return recipeList().filter(craftingModeHasRecipe); }
+const _modeIngredients = {};
 function craftingModeHasItem(def) {
   const tags = def?.tags ?? [];
   const m = state.craftingMode;
+  // anything one of this mode's recipes uses can be mixed in, whatever its tags (planks, matches...), so every recipe can be stumbled on
+  if (!_modeIngredients[m]) _modeIngredients[m] = new Set(craftingModeRecipes().flatMap(r => Object.keys(r.in ?? {})));
+  if (def?.id && _modeIngredients[m].has(def.id)) return true;
   if (m === "craft" || m === "hand") return tags.includes("resource");
   if (m === "cook") return tags.includes("food");
   if (m === "prep") return tags.includes("food") || tags.includes("dish") || tags.includes("resource");
@@ -10073,6 +10077,18 @@ playSound(isCooking ? "cook" : recipeHasStation(r, "hand") ? "pickup" : "saw");
   logAction(`${pName} crafted ${r.name}!`);
 }
 
+// Furniture can't be crafted into your pack, but mixing exactly what a piece costs at the workbench gives you the idea for one you don't know yet.
+function furnitureHunch() {
+  if (state.craftingMode !== "craft") return null;
+  const sel = state.selectedForCraft; if (!sel || !sel.size) return null;
+  const list = Object.values(state.data?.furniture ?? {}).filter(f => {
+    if (state.learnedRecipes.has(f.recipe)) return false;
+    const ids = Object.keys(f.cost ?? {});
+    return ids.length === sel.size && ids.every(id => (sel.get(id) ?? 0) === f.cost[id]);
+  });
+  return list.length ? list : null;
+}
+
 function attemptManualCraft() {
   if (state.selectedForCraft.size === 0) return;
 
@@ -10110,7 +10126,17 @@ function attemptManualCraft() {
     return mult !== null && mult >= 1;
   });
 
-  if (!r) return;
+  if (!r) {
+    const hunch = furnitureHunch();
+    if (!hunch) return;
+    const f = hunch[randInt(0, hunch.length - 1)];
+    learnRecipe(f.recipe, true);
+    logAction(`${activePlayer().name} had an idea: ${f.name}! (Recipe learned)`);
+    playSound?.("achievement");
+    state.selectedForCraft.clear();
+    closeCraftingScreen();
+    return true;
+  }
 
   // Station gating (supports station arrays)
 if (state.craftingMode === "craft" && !recipeHasStation(r, "workbench")) return;

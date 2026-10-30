@@ -196,11 +196,12 @@ function drawCraftingPopup() {
 
   // footer: what you're about to make + Craft
   const f = L.foot; hudPath(f.x, f.y, f.w, f.h, 18); ctx.fillStyle = HUD_C.paperDeep; ctx.fill();
-  const known = match && recipeKnown(match.r), chk = match ? canCraftRecipe(match.r) : null, canGo = !!(match && chk.ok);
+  const known = match && recipeKnown(match.r), chk = match ? canCraftRecipe(match.r) : null, hunch = !match && furnitureHunch(), canGo = !!(match && chk.ok) || !!hunch;
   const btnW = 128, btnH = 46, btn = { x: f.x + f.w - btnW - 14, y: f.y + (f.h - btnH) / 2, w: btnW, h: btnH };
   let title, sub, subColor = HUD_C.inkSoft;
   if (match && known) { title = `${match.r.name}${match.mult > 1 ? ` ×${match.mult}` : ""}`; sub = chk.ok ? recipeResult(match.r, match.mult) : chk.reason; if (!chk.ok) subColor = HUD_C.rose; }
   else if (match) { title = "Something new…"; sub = chk.ok ? "Try it and see what happens" : chk.reason; if (!chk.ok) subColor = HUD_C.rose; }
+  else if (hunch) { title = "Something new…"; sub = "Try it and see what happens"; }
   else { title = state.selectedForCraft.size ? "Doesn't make anything yet" : "Pick a recipe"; sub = state.selectedForCraft.size ? "Adjust the amounts, or try another mix" : "or mix things to experiment"; }
   const tx = f.x + 16, tw = btn.x - tx - 12;
   hudText(hudFit(title, tw, 17, { family: HUD_DISPLAY, weight: 600, italic: true }), tx, f.y + 26, 17, { family: HUD_DISPLAY, weight: 600, italic: true });

@@ -733,6 +733,233 @@
   ]
  },
  {
+  "id": "banana_pancakes_recipe",
+  "name": "Banana Pancakes",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "flour": 1,
+   "egg": 1,
+   "milk": 1,
+   "banana": 1
+  },
+  "out": {
+   "banana_pancakes": 1
+  },
+  "requiresTools": [
+   "frying_pan",
+   "mixing_bowl"
+  ]
+ },
+ {
+  "id": "banana_bread_recipe",
+  "name": "Banana Bread",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "flour": 1,
+   "egg": 1,
+   "banana": 2
+  },
+  "out": {
+   "banana_bread": 1
+  },
+  "requiresTools": [
+   "mixing_bowl"
+  ]
+ },
+ {
+  "id": "berry_tart_recipe",
+  "name": "Berry Tart",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "flour": 1,
+   "egg": 1,
+   "blueberry": 4,
+   "strawberry": 2
+  },
+  "out": {
+   "berry_tart": 1
+  },
+  "requiresTools": [
+   "mixing_bowl"
+  ]
+ },
+ {
+  "id": "guacamole_recipe",
+  "name": "Guacamole",
+  "station": "counter",
+  "in": {
+   "avacado": 2,
+   "tomato": 1,
+   "onion": 1,
+   "chili": 1
+  },
+  "out": {
+   "guacamole": 1
+  },
+  "requiresTools": [
+   "kitchen_knife",
+   "cutting_board",
+   "mixing_bowl"
+  ]
+ },
+ {
+  "id": "avocado_toast_recipe",
+  "name": "Avocado Toast",
+  "station": "counter",
+  "in": {
+   "toast": 1,
+   "avacado": 1,
+   "tomato": 1
+  },
+  "out": {
+   "avocado_toast": 1
+  },
+  "requiresTools": [
+   "kitchen_knife"
+  ]
+ },
+ {
+  "id": "chili_con_carne_recipe",
+  "name": "Chili con Carne",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "raw_meat": 1,
+   "chili": 2,
+   "tomato": 2,
+   "onion": 1,
+   "water_bucket": 1
+  },
+  "out": {
+   "chili_con_carne": 1
+  },
+  "requiresTools": [
+   "cooking_pot",
+   "cooking_spoon"
+  ]
+ },
+ {
+  "id": "pea_soup_recipe",
+  "name": "Pea Soup",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "peas": 4,
+   "potato": 1,
+   "onion": 1,
+   "water_bucket": 1
+  },
+  "out": {
+   "pea_soup": 1
+  },
+  "requiresTools": [
+   "cooking_pot",
+   "cooking_spoon"
+  ]
+ },
+ {
+  "id": "veggie_stir_fry_recipe",
+  "name": "Veggie Stir-Fry",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "peas": 2,
+   "brocolli": 1,
+   "bell_pepper": 1,
+   "garlic": 1,
+   "onion": 1
+  },
+  "out": {
+   "veggie_stir_fry": 1
+  },
+  "requiresTools": [
+   "frying_pan"
+  ]
+ },
+ {
+  "id": "orange_chicken_recipe",
+  "name": "Orange Chicken",
+  "station": [
+   "campfire",
+   "stove"
+  ],
+  "in": {
+   "raw_chicken": 1,
+   "orange": 2,
+   "garlic": 1
+  },
+  "out": {
+   "orange_chicken": 1
+  },
+  "requiresTools": [
+   "frying_pan"
+  ]
+ },
+ {
+  "id": "tropical_fruit_salad_recipe",
+  "name": "Tropical Fruit Salad",
+  "station": "counter",
+  "in": {
+   "banana": 1,
+   "orange": 1,
+   "watermelon": 1,
+   "strawberry": 3
+  },
+  "out": {
+   "tropical_fruit_salad": 1
+  },
+  "requiresTools": [
+   "kitchen_knife",
+   "cutting_board",
+   "mixing_bowl"
+  ]
+ },
+ {
+  "id": "banana_smoothie_recipe",
+  "name": "Banana Smoothie",
+  "station": "counter",
+  "in": {
+   "banana": 2,
+   "strawberry": 2,
+   "milk": 1
+  },
+  "out": {
+   "banana_smoothie": 1
+  },
+  "requiresTools": [
+   "mixing_bowl"
+  ]
+ },
+ {
+  "id": "watermelon_juice_recipe",
+  "name": "Watermelon Juice",
+  "station": "counter",
+  "in": {
+   "watermelon": 1
+  },
+  "out": {
+   "watermelon_juice": 1
+  },
+  "requiresTools": [
+   "juicer"
+  ]
+ },
+ {
   "id": "coffee_recipe",
   "name": "Cup of Coffee",
   "station": [
