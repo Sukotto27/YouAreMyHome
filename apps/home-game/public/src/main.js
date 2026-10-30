@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 188;
+const GAME_BUILD = 189;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -4588,10 +4588,10 @@ if (cur < min) {
 // ---- Animal senses + sneaking ----------------------------------------------------------------------------------
 // Animals see only what is in front of them (a cone, blocked by trees/rocks/walls) but hear all around. The chance of being heard
 // rises with every tile closer, is far lower while crouched, and is lowest of all when standing still.
-const ANIMAL_SIGHT_RADIUS = 6;                       // tiles
+const ANIMAL_SIGHT_RADIUS = 3.5;                       // tiles
 const ANIMAL_SIGHT_HALF_ANGLE = Math.PI / 3;         // 120 degree field of view
-const ANIMAL_HEAR_RADIUS = 9;                        // tiles
-const ANIMAL_ALERT_MS = 4000;                        // how long an animal that spotted you keeps running
+const ANIMAL_HEAR_RADIUS = 5;                        // tiles
+const ANIMAL_ALERT_MS = 2000;                        // how long an animal that spotted you keeps running
 const SNEAK_SPEED_MULT = 0.45;                       // crouched walking is slower
 const BOW_MAX_RANGE = 8;                             // tiles (and the target must be on screen)
 
