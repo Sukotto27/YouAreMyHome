@@ -3,6 +3,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { MusicPlayerProvider, useMusicPlayer } from '../../context/MusicPlayerContext'
 import { NavigationHistoryProvider, useNavigationHistory } from '../../context/NavigationHistoryContext'
+import { GameAttentionProvider, useGameAttention } from '../../context/GameAttentionContext'
 import { firebaseReady } from '../../firebase'
 import { nicknameFor } from '../../lib/nicknames'
 import { seedHistoryMilestones, seedBirthdays } from '../../lib/migrations'
@@ -29,7 +30,7 @@ const NAV_ITEMS = [
   { key: 'home', to: '/', label: 'Home', icon: 'home' },
   { key: 'chat', to: '/chat', label: 'Chat', icon: 'chat', badgeKey: 'chat' },
   { key: 'qa', to: '/qa', label: 'Q&A', icon: 'qa', badgeKey: 'qa' },
-  { key: 'games', to: '/games', label: 'Games', icon: 'games', badgeKey: 'scrapbook' },
+  { key: 'games', to: '/games', label: 'Games', icon: 'games', badgeKey: 'games' },
   { key: 'music', to: '/music', label: 'Music', icon: 'music', badgeKey: 'music' },
   { key: 'gallery', to: '/gallery', label: 'Gallery', icon: 'gallery', badgeKey: 'gallery' },
   { key: 'mail', to: '/mail', label: 'Mail', icon: 'mail', badgeKey: 'mail' },
@@ -45,7 +46,9 @@ export default function Shell() {
   return (
     <NavigationHistoryProvider>
       <MusicPlayerProvider>
-        <ShellContent />
+        <GameAttentionProvider>
+          <ShellContent />
+        </GameAttentionProvider>
       </MusicPlayerProvider>
     </NavigationHistoryProvider>
   )
@@ -59,6 +62,7 @@ function ShellContent() {
   const [greeting, setGreeting] = useState(null)
   const [sendLoveOpen, setSendLoveOpen] = useState(false)
   const { unread } = useUnreadBadges()
+  const { any: gamesNeedYou } = useGameAttention()
   useEffect(() => {
     const open = () => setSendLoveOpen(true)
     window.addEventListener(OPEN_SEND_LOVE_EVENT, open)
@@ -68,7 +72,9 @@ function ShellContent() {
   // a Firestore "seen/unseen" feed) — merged in here so the Music nav item
   // gets the same badge dot as everything else while a session you haven't
   // joined is live.
-  const unreadWithMusic = { ...unread, music: sessionActive && !hasJoined }
+  // Games likewise folds in the scrapbook's unread dot plus anything in a game
+  // that's waiting on you (an invite, or your turn) — see GameAttentionContext.
+  const unreadWithMusic = { ...unread, music: sessionActive && !hasJoined, games: unread.scrapbook || gamesNeedYou }
   useNotificationSounds(unread)
   const thumbkiss = useThumbkiss()
   useThumbkissGesture(thumbkiss.startPress, thumbkiss.endPress)

@@ -5,6 +5,7 @@ export const BADGE_ANGLE = {
   chat: 0,
   mail: 60,
   sendLove: 120,
+  game: 90,
   calendar: 180,
   qa: 240,
   journal: 300,

@@ -41,3 +41,6 @@ apps/couples-app/src/lib/musicTitles.generated.json
 *.njsproj
 *.sln
 *.sw?
+
+# Doors game: 3D character models copied from home-game by scripts/sync-doors-assets.mjs
+apps/couples-app/public/doors/characters3d/

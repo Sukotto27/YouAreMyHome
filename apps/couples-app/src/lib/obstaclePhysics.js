@@ -38,7 +38,7 @@ export function createWorld() {
 
   const ballStart = toPhysics(BALL_START)
   const ball = Matter.Bodies.circle(ballStart.x, ballStart.y, BALL_RADIUS * PHYSICS_SCALE, {
-    restitution: 0.4,
+    restitution: 0.9,
     friction: 0.02,
     frictionAir: 0.001,
     label: 'ball',
@@ -88,7 +88,7 @@ export function resetBall(ball) {
 // One static rectangle segment per consecutive point pair in each run — the
 // standard "chain of thin rectangles" technique for a freeform Matter.js
 // obstacle, since Matter has no native arbitrary-polyline body type.
-export function buildObstacleBodies(runs) {
+export function buildObstacleBodies(runs, obstacleId) {
   const thickness = OBSTACLE_THICKNESS * PHYSICS_SCALE
   const bodies = []
   for (const run of runs) {
@@ -103,8 +103,9 @@ export function buildObstacleBodies(runs) {
           isStatic: true,
           angle,
           friction: 0.05,
-          restitution: 0.3,
+          restitution: 1,
           label: 'obstacle',
+          plugin: { obstacleId },
         }),
       )
     }

@@ -1,12 +1,12 @@
 {
   "name": "you-are-my-home",
   "private": true,
-  "version": "1.20.0",
+  "version": "1.47.1",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/generate-music-titles.mjs",
+    "predev": "node scripts/generate-music-titles.mjs && node scripts/sync-doors-assets.mjs",
     "dev": "vite",
-    "prebuild": "node scripts/generate-music-titles.mjs",
+    "prebuild": "node scripts/generate-music-titles.mjs && node scripts/sync-doors-assets.mjs",
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview"
@@ -18,7 +18,8 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-router-dom": "^7.18.1",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "three": "^0.186.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.17",

@@ -2,18 +2,10 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useGameInvite } from '../hooks/useGameInvite'
+import { GAME_EMOJI } from '../lib/gameInfo'
 
 const DISMISS_KEY_PREFIX = 'you-are-my-home:game-invite-dismissed:'
 const STALE_MS = 5 * 60 * 1000
-
-const GAME_EMOJI = {
-  draw: '🎨',
-  madlibs: '📝',
-  story: '📖',
-  song: '🎶',
-  farkle: '🎲',
-  obstacleDrop: '⚽',
-}
 
 function toMillis(value) {
   if (!value) return null

@@ -3,6 +3,8 @@ import { useAuth } from '../../context/AuthContext'
 import { usePartnerUid } from '../../hooks/usePartnerUid'
 import { useFarkle, DEMO_PARTNER_UID } from '../../hooks/useFarkle'
 import { useGameInvite } from '../../hooks/useGameInvite'
+import EndGameButton from './EndGameButton'
+import GameIntro from './GameIntro'
 import { firebaseReady } from '../../firebase'
 import { scoreSelection } from '../../lib/farkle'
 import { playSound } from '../../lib/sounds'
@@ -88,11 +90,20 @@ export default function FarkleGame({ onBack }) {
           <FinishedBanner game={game} myUid={user.uid} mineLabel={mineLabel} partnerLabel={partnerLabel} />
         )}
         <h1 className="font-display text-3xl italic text-ink">Farkle</h1>
-        <p className="max-w-sm font-body text-sm text-ink-soft">
-          Roll six dice, set aside anything that scores, and either bank your points or push your luck with another
-          roll — but a roll with nothing scoring wipes out everything you haven't banked yet. First to{' '}
-          {targetScore.toLocaleString()} wins, though the other person always gets one last turn to catch up.
-        </p>
+        <GameIntro gameKey="farkle" title="Farkle" defaultText={`Each player rolls a hand of 6 dice.
+Set aside dice that score points, & reroll the rest if you dare.
+Rolling no scoring dice cancels your score.
+If all dice score, reroll the entire hand and stack your points.
+
+Scoring:
+1: 100 points.
+5: 50 points.
+3 of a kind: 100x dice value (except 1's).
+3 1's: 1000 points.
+Straight: 1500 points.
+3 pairs: 1500 points.
+
+First to ${targetScore.toLocaleString()} wins.`} />
         <div className="flex flex-wrap justify-center gap-3">
           <button
             type="button"
@@ -145,13 +156,7 @@ export default function FarkleGame({ onBack }) {
           >
             {confirmAction === 'restart' ? 'Tap again to start over' : 'Start over'}
           </button>
-          <button
-            type="button"
-            onClick={() => handleResetClick('cancel')}
-            className="font-body text-xs text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
-          >
-            {confirmAction === 'cancel' ? 'Tap again to cancel' : 'Cancel game'}
-          </button>
+          <EndGameButton onEnd={cancelGame} />
         </div>
       </div>
 

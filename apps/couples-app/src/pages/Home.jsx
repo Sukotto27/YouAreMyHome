@@ -16,6 +16,8 @@ import { useUnreadBadges } from '../hooks/useUnreadBadges'
 import { useUpcomingDateNight } from '../hooks/useUpcomingDateNight'
 import { useUpcomingCalendarItems } from '../hooks/useUpcomingCalendarItems'
 import { useAwaitingQa } from '../hooks/useAwaitingQa'
+import { useGameAttention } from '../context/GameAttentionContext'
+import { GAME_EMOJI } from '../lib/gameInfo'
 import { useCheckIn } from '../hooks/useCheckIn'
 import { useLoveNotes } from '../hooks/useLoveNotes'
 import { markSeenNow } from '../hooks/useMarkSeen'
@@ -38,6 +40,7 @@ export default function Home() {
   const upcomingDateNight = useUpcomingDateNight()
   const upcomingCalendarCategory = useUpcomingCalendarItems()
   const awaitingQa = useAwaitingQa()
+  const { invite: gameInvite } = useGameAttention()
   const { myCheckIn, partnerCheckIn } = useCheckIn()
   const { incoming: incomingLoveNote, sendReply } = useLoveNotes()
   const [loveNoteOpen, setLoveNoteOpen] = useState(false)
@@ -71,6 +74,14 @@ export default function Home() {
           emoji: detail.mail ? '💐' : '💌',
           label: 'New mail — open Mail',
           onClick: () => navigate('/mail'),
+        })
+      }
+      if (gameInvite) {
+        badges.push({
+          type: 'game',
+          emoji: GAME_EMOJI[gameInvite.game] || '🎮',
+          label: `They invited you to play ${gameInvite.gameLabel || 'a game'} — tap to join`,
+          onClick: () => navigate('/games', { state: { view: gameInvite.game } }),
         })
       }
       if (unread.loveNotes) {

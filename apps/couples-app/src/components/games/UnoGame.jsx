@@ -3,6 +3,8 @@ import { useAuth } from '../../context/AuthContext'
 import { usePartnerUid } from '../../hooks/usePartnerUid'
 import { useUno, DEMO_PARTNER_UID } from '../../hooks/useUno'
 import { useGameInvite } from '../../hooks/useGameInvite'
+import EndGameButton from './EndGameButton'
+import GameIntro from './GameIntro'
 import { firebaseReady } from '../../firebase'
 import { COLORS, canPlayCard } from '../../lib/uno'
 
@@ -76,10 +78,7 @@ export default function UnoGame({ onBack }) {
           <FinishedBanner game={game} myUid={user.uid} mineLabel={mineLabel} partnerLabel={partnerLabel} />
         )}
         <h1 className="font-display text-3xl italic text-ink">Uno</h1>
-        <p className="max-w-sm font-body text-sm text-ink-soft">
-          Match the color or number on top of the pile, or play a Wild. Skips and Reverses just hand the turn right
-          back to you with two players. First to empty their hand wins.
-        </p>
+        <GameIntro gameKey="uno" title="Uno" defaultText={"Match the color or number on top of the pile, or play a Wild. Skips and Reverses just hand the turn right back to you with two players. First to empty their hand wins."} />
         <div className="flex flex-wrap justify-center gap-3">
           <button
             type="button"
@@ -126,13 +125,7 @@ export default function UnoGame({ onBack }) {
           >
             {confirmAction === 'restart' ? 'Tap again to start over' : 'Start over'}
           </button>
-          <button
-            type="button"
-            onClick={() => handleResetClick('cancel')}
-            className="font-body text-xs text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
-          >
-            {confirmAction === 'cancel' ? 'Tap again to cancel' : 'Cancel game'}
-          </button>
+          <EndGameButton onEnd={cancelGame} />
         </div>
       </div>
 

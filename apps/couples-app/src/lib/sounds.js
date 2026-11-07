@@ -23,8 +23,7 @@ const audioCache = {}
 // app is backgrounded or closed, the service worker's push notification
 // takes over instead, and that uses the phone's default tone (we never set
 // a custom `sound` on it, and browsers don't support that anyway).
-export function playSound(key) {
-  if (document.visibilityState !== 'visible') return
+export function playSound(key) {  if (document.visibilityState !== 'visible') return
   if (!soundsEnabled()) return
   const src = SOUNDS[key]
   if (!src) return

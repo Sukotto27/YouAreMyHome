@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { onValue, push, ref, serverTimestamp as rtdbServerTimestamp, set } from 'firebase/database'
+import { onValue, push, ref, remove, serverTimestamp as rtdbServerTimestamp, set } from 'firebase/database'
 import { rtdb, firebaseReady } from '../firebase'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
 import {
@@ -65,5 +65,17 @@ export function useObstacleDropObstacles() {
     return true
   }
 
-  return { obstacles, activeObstacles, canDraw, addObstacle }
+  // Called by the host when the ball bounces off an obstacle — the line is
+  // spent, so it's deleted for everyone (instead of waiting out its timer).
+  async function removeObstacle(id) {
+    if (!firebaseReady) {
+      const next = obstaclesRef.current.filter((o) => o.id !== id)
+      writeDemoList(DEMO_KEY, next)
+      setObstacles(next)
+      return
+    }
+    await remove(ref(rtdb, `obstacleDrop/obstacles/${id}`))
+  }
+
+  return { obstacles, activeObstacles, canDraw, addObstacle, removeObstacle }
 }

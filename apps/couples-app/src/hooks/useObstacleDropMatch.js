@@ -79,5 +79,18 @@ export function useObstacleDropMatch() {
     await update(ref(rtdb, 'obstacleDrop/match'), { scores, status, winnerUid })
   }
 
-  return { match, myUid: user?.uid, effectivePartnerUid, startMatch, recordGoal }
+  // Either player can end the match; both land back on the lobby.
+  async function endGame() {
+    if (!user || !match) return
+    const patch = { status: 'ended', endedBy: user.uid }
+    if (!firebaseReady) {
+      const next = { ...match, ...patch }
+      writeDemoList(DEMO_KEY, [next])
+      setMatch(next)
+      return
+    }
+    await update(ref(rtdb, 'obstacleDrop/match'), patch)
+  }
+
+  return { match, myUid: user?.uid, effectivePartnerUid, startMatch, recordGoal, endGame }
 }
