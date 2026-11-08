@@ -246,31 +246,7 @@
    "y": 17
   }
  ],
- "prompts": [
-  {
-   "x": 9.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "THIS DOOR NEEDS TWO PLATES: USE YOUR ECHO ({echo})",
-   "range": 7,
-   "for": "blue"
-  },
-  {
-   "x": 44,
-   "y": 13.6,
-   "dir": "down",
-   "text": "CRUSHERS! GO WHILE THEY WAIT",
-   "range": 8,
-   "rangeY": 8
-  },
-  {
-   "x": 76.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "A LASER! HOLD THE PLATE TO SWITCH IT OFF",
-   "range": 6
-  }
- ],
+ "prompts": [],
  "exit": {
   "x": 92,
   "y": 15,

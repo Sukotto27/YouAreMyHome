@@ -593,8 +593,9 @@ export function updateTraps(game, dt, kill) {
       }
       case 'boulder': {
         const shot = Math.floor((time - trap.offset) / trap.period)
-        // the boulders come out of a hole in the ceiling at (x, y); holding its plate (or flipping its lever) seals the hole:
-        // nothing more comes out and the ones already rolling crumble away
+        // the boulders come out of a hole in the ceiling at (x, y) and roll along the floor until they drop into a gap in it
+        // (the level leaves one). Holding the plate (or flipping the lever) seals the hole: nothing more comes out, and the
+        // ones already rolling are harmless and carry on to the gap
         if (trap.off) trap.lastSpawn = shot
         if (!trap.off && time >= trap.offset && shot > trap.lastSpawn) {
           trap.lastSpawn = shot
@@ -603,8 +604,6 @@ export function updateTraps(game, dt, kill) {
         }
         const alive = []
         for (const b of trap.boulders) {
-          if (trap.off) b.dying = (b.dying || 0) + dt
-          if (b.dying > 0.4) continue
           b.age += dt
           stepBoulder(b, trap.radius, blocker, dt)
           if (b.y > game.level.rows + 8 || b.x < -4 || b.x > game.level.cols + 4 || b.age > TRAPS.BOULDER_LIFE) continue

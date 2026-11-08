@@ -13,6 +13,16 @@ bottom of Home always reflects the latest entry below.
 - Doors opening scene: the pair now walk at a steady pace with the walk animation
   matched to it, so their feet no longer slide ("walking in place").
 
+## v1.54.0
+
+- Boulders (rooms 5 and 10) roll along the floor and drop into a gap in it instead of vanishing. The gap is 3 tiles
+  wide, so you jump it yourself. Sealing the hole stops new boulders; the ones already rolling are harmless and go on
+  to the gap. Boulders also come every 1.6 seconds now.
+- Room 5: the falling floor gives way 1.5 seconds after someone steps on it (it was half a second), so one of you can
+  sprint across before it goes. The plate that holds it up is now on the far side, next to the lever that fixes it for
+  good: whoever makes it across holds it up for the other.
+- No more arrow hints after room 4 (rooms 5-10 have none).
+
 ## v1.53.0
 
 - Doors on a phone: the game goes fullscreen and locks to landscape. Browsers that won't lock the orientation

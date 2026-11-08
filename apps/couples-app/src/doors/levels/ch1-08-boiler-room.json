@@ -208,23 +208,7 @@
    "y": 17
   }
  ],
- "prompts": [
-  {
-   "x": 22.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "A SWINGING BLADE!",
-   "range": 9
-  },
-  {
-   "x": 48.5,
-   "y": 13.4,
-   "dir": "down",
-   "text": "AN UPDRAFT! WALK IN, THEN FLOAT OVER",
-   "range": 7,
-   "rangeY": 8
-  }
- ],
+ "prompts": [],
  "exit": {
   "x": 90,
   "y": 15,

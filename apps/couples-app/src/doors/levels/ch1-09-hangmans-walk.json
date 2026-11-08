@@ -217,32 +217,7 @@
    "y": 17
   }
  ],
- "prompts": [
-  {
-   "x": 43.2,
-   "y": 15.2,
-   "dir": "down",
-   "text": "JUMP THE PIT, THEN ROPE YOUR PARTNER ({rope})",
-   "range": 6,
-   "for": "blue"
-  },
-  {
-   "x": 41.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "WAIT FOR YOUR PARTNER’S ROPE",
-   "range": 6,
-   "for": "pink"
-  },
-  {
-   "x": 57.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "DRAW A LONG BRIDGE ({draw}), THEN DRAG",
-   "range": 6,
-   "for": "pink"
-  }
- ],
+ "prompts": [],
  "exit": {
   "x": 101,
   "y": 15,

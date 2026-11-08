@@ -25,7 +25,7 @@ go(900, () => B.x > 25, drive(27, { autoJump: false }), drive(25.5, { autoJump: 
 check('A: both through the first door', sw('lv-a').on && B.x > 24 && P.deaths + B.deaths === 0)
 
 // B: boulders (Pink's heart is in the lane)
-holdCross(d, { plateX: 32.5, leverX: 56.5, afterX: 59, label: 'B (boulders)' }, check)
+holdCross(d, { plateX: 32.5, leverX: 56.5, afterX: 59, leaderOpts: { jumpEdge: [36.0] }, followerOpts: { jumpEdge: [36.0] }, label: 'B (boulders and the gap they roll into)' }, check)
 check('B: Pink took the last extra heart: 6', P.maxHearts === 6 && B.maxHearts === 5 && P.deaths + B.deaths === 0)
 
 // C: the wall. Pink draws a ramp over her own head for Blue then teleports to him.

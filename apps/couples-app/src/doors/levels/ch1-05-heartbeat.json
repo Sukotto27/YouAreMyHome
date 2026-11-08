@@ -6,7 +6,7 @@
   "title": "Heartbeat"
  },
  "theme": "basement",
- "notes": "New: boulders, collapsing floors, extra hearts. A: Blue holds a plate that stops the boulders while Pink crosses (her extra heart lies in the lane) and pulls the lever. B: Pink carries Blue up to the slab with his extra heart; he lands ahead. C: Pink holds a plate that keeps the floor from collapsing while Blue crosses and pulls the lever. D: Pink draws a ramp over a 5-tall wall for Blue; his lever opens the door in it for her.",
+ "notes": "New: boulders, collapsing floors, extra hearts. A: boulders fall from a ceiling hole and roll left into a gap in the floor; Blue holds a plate that seals the hole while Pink crosses (her extra heart lies in the lane) and pulls the lever. B: Pink carries Blue up to the slab with his extra heart; he lands ahead. C: the floor gives way 1.5 seconds after someone steps on it, so one player has to sprint across first. The plate that holds it up is on the far side (and so is the lever that fixes it for good), so the one who made it over holds it for the other. D: Pink draws a ramp over a 5-tall wall for Blue; his lever opens the door in it for her.",
  "abilities": {},
  "grid": [
   "##############################################################################################################",
@@ -27,12 +27,12 @@
   "#............................................................................................................#",
   "#............................................................................................................#",
   "#..B..P......................................................................................................#",
-  "########################################################........##############################################",
-  "########################################################........##############################################",
-  "########################################################........##############################################",
-  "########################################################........##############################################",
-  "########################################################........##############################################",
-  "########################################################........##############################################"
+  "##############...#######################################........##############################################",
+  "##############...#######################################........##############################################",
+  "##############...#######################################........##############################################",
+  "##############...#######################################........##############################################",
+  "##############...#######################################........##############################################",
+  "##############...#######################################........##############################################"
  ],
  "crystals": [
   {
@@ -58,7 +58,7 @@
   },
   {
    "id": "pc",
-   "x": 52,
+   "x": 65,
    "y": 17
   }
  ],
@@ -103,7 +103,7 @@
    "dir": -1,
    "speed": 4,
    "radius": 1.2,
-   "period": 2,
+   "period": 1.6,
    "offset": 0.5,
    "offWhile": [
     "pb",
@@ -116,7 +116,7 @@
    "x": 56,
    "y": 18,
    "w": 8,
-   "delay": 0.5,
+   "delay": 1.5,
    "respawn": 6,
    "offWhile": [
     "pc",
@@ -146,36 +146,7 @@
    "y": 17
   }
  ],
- "prompts": [
-  {
-   "x": 10.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "BOULDERS FALL FROM THE HOLE. HOLD THE PLATE TO SEAL IT",
-   "range": 6
-  },
-  {
-   "x": 26.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "AN EXTRA HEART! GRAB IT",
-   "range": 7
-  },
-  {
-   "x": 59.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "THIS FLOOR COLLAPSES",
-   "range": 8
-  },
-  {
-   "x": 83.4,
-   "y": 15.2,
-   "dir": "down",
-   "text": "DRAW A RAMP UP THE WALL ({draw})",
-   "range": 7
-  }
- ],
+ "prompts": [],
  "exit": {
   "x": 102,
   "y": 15,

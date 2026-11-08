@@ -151,22 +151,7 @@
    "y": 17
   }
  ],
- "prompts": [
-  {
-   "x": 44.5,
-   "y": 15.2,
-   "dir": "down",
-   "text": "ONLY YOUR ECHO CAN HOLD THIS PLATE: STAND ON IT, THEN ({echo})",
-   "range": 6
-  },
-  {
-   "x": 75,
-   "y": 15.2,
-   "dir": "down",
-   "text": "PARTNER OVER? TELEPORT TO THEM ({teleport})",
-   "range": 7
-  }
- ],
+ "prompts": [],
  "exit": {
   "x": 88,
   "y": 15,

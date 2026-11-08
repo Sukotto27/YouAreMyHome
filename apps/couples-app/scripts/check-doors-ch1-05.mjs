@@ -11,7 +11,7 @@ const sw = (id) => g.doors.switches.find((s) => s.id === id)
 const trap = (id) => g.traps.traps.find((t) => t.id === id)
 
 // A: the boulder lane. Pink's extra heart lies in it.
-holdCross(d, { plateX: 10.5, leverX: 34.5, afterX: 36.5, label: 'A (boulders)' }, check)
+holdCross(d, { plateX: 10.5, leverX: 34.5, afterX: 36.5, leaderOpts: { jumpEdge: [14.0] }, followerOpts: { jumpEdge: [14.0] }, label: 'A (boulders and the gap they roll into)' }, check)
 check('A: Pink took her extra heart in the lane: 4 hearts', P.maxHearts === 4 && P.hearts === 4 && B.maxHearts === 3)
 check('A: nobody was crushed', P.deaths + B.deaths === 0)
 
@@ -22,8 +22,18 @@ check('B: Blue took his extra heart: 4 hearts, and is now ahead of Pink', B.maxH
 
 // C: the collapsing floor. Blue leads now: Pink holds the plate that keeps it up.
 const d2 = duo(g, 'blue')
-holdCross(d2, { plateX: 52.5, leverX: 67.5, afterX: 69.5, label: 'C (collapsing floor)' }, check)
-check('C: the floor did not collapse', trap('collapse').mode === 'solid' && B.deaths + P.deaths === 0)
+const go2 = (limit, cond, dBlue, dPink) => d2.go(limit, cond, dBlue, dPink) // (Blue leads: first driver is Blue's)
+// The floor gives way 1.5 s after someone steps on it, so one of them has to sprint across before it goes. Its plate is on the
+// far side: Blue sprints over and holds it, which keeps the floor up once it is back for Pink to cross.
+const floor = trap('collapse')
+check('C: the plate that holds the floor up is on the far side', g.doors.plates.find((p) => p.id === 'pc').x > 63)
+go2(900, () => Math.abs(B.x - 65.5) < 0.2 && B.onGround, drive(65.5, { tol: 0.1, autoJump: false }), drive(52, { autoJump: false }))
+check('C: Blue sprinted across before the floor gave way and stands on the plate', g.doors.plates.find((p) => p.id === 'pc').held && B.deaths === 0, `blue x=${B.x.toFixed(1)}, deaths ${B.deaths}, floor ${floor.mode}`)
+go2(900, () => floor.mode === 'solid' && g.doors.plates.find((p) => p.id === 'pc').held && P.x > 50, drive(65.5, { tol: 0.1, autoJump: false }), drive(52, { autoJump: false }))
+go2(1500, () => P.x > 68, drive(65.5, { tol: 0.1, autoJump: false }), drive(70)) // (she hops over him)
+check('C: ...and Pink crossed the restored floor while he held it', P.x > 68 && P.deaths === 0, `pink x=${P.x.toFixed(1)}`)
+go2(600, () => sw('lv-c').on, drive(67.5, { tol: 0.1, interactAt: [67.5] }), drive(70, { autoJump: false }))
+check('C: Blue pulled the lever to fix the floor for good', sw('lv-c').on && B.deaths + P.deaths === 0)
 
 // D: the wall. Pink draws a ramp for Blue, who climbs over; his lever opens the door in it for her.
 d2.go(900, () => B.x > 82.7 && P.x > 79, drive(83.0, { tol: 0.1, autoJump: false }), drive(79.8, { tol: 0.1, autoJump: false }))
