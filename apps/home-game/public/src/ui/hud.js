@@ -194,6 +194,7 @@ function drawHud() {
   drawHudRail(left, top + 54 + 12, narrow);
   drawHudLog(right, dayBottom + 8, narrow, now);
   drawHudToast(now, narrow, top);
+  drawHudWaiting(top, narrow);
   for (const [i, pl] of state.players.entries()) if (pl.equipped === "torch" && getQty(state.inventories[i], "torch") <= 0) pl.equipped = null;   // the torch left the backpack
 
   // ---- bottom dock + sheets ----
@@ -210,6 +211,16 @@ function drawHud() {
     try { window.__r3d?.fitView?.(); } catch (_) {}
   }
   hudPlaceChatInput();
+}
+
+// ---- the person who asked (hug / kiss / hold hands / trade) sees "waiting..." with a way to take the request back ----
+function drawHudWaiting(top, narrow) {
+  const req = state.interactionRequest; if (!req || (state.activePlayer | 0) !== req.fromIndex) return;
+  const to = state.players[req.toIndex]?.name ?? "them", W = window.innerWidth, w = Math.min(330, W - 24), h = 54, x = (W - w) / 2, y = top + (narrow ? 62 : 8);
+  hudPanel(x, y, w, h, { r: h / 2, blur: 14 }); HUD.block.push({ x, y, w, h });
+  hudText(hudFit(`Waiting for ${to}…`, w - 130, 14, { weight: 600 }), x + 22, y + h / 2 - 7, 14, { weight: 600 });
+  hudText(req.type, x + 22, y + h / 2 + 11, 11, { color: HUD_C.inkSoft });
+  HUD.ui.reqCancel = hudButton(x + w - 98, y + 9, 86, h - 18, "Cancel", { kind: "plain", size: 13 });
 }
 
 // ---- top-left: who you are + stamina / hunger ----
@@ -385,7 +396,8 @@ function drawHudDock(left, right, y, h, narrow, inv) {
 
 // ---- backpack sheet ----
 function drawHudInventory(left, right, dockTop, narrow, inv) {
-  const a = HUD.inv.anim; if (a < 0.02) { HUD.ui.invPanel = null; HUD.ui.invGrid = null; return 0; }
+  const a = HUD.inv.anim; if (a < 0.02) { HUD.ui.invPanel = null; HUD.ui.invGrid = null; HUD.ui.invEat = null; HUD.drag = null; return 0; }
+  HUD.ui.invEat = null;
   const cols = hudInvCols(), rows = Math.ceil(INV_SLOTS / cols), gap = narrow ? 3 : 5, pad = 14;
   const avail = right - left, cellMax = 48;
   const panelW = narrow ? avail : Math.min(avail, cols * (cellMax + gap) - gap + pad * 2);
@@ -403,10 +415,12 @@ function drawHudInventory(left, right, dockTop, narrow, inv) {
   HUD.ui.invGrid = { x: gx, y: gy, cell, gap, cols, rows };
   for (let i = 0; i < INV_SLOTS; i++) {
     const r = Math.floor(i / cols), c = i % cols, sx = gx + c * (cell + gap), sy = gy + r * (cell + gap), st = inv[i];
-    const selected = !state.craftingOpen && i === state.selectedInvIdx;
+    const selected = !state.craftingOpen && i === state.selectedInvIdx, lifted = HUD.drag && HUD.drag.idx === i;
     hudPath(sx, sy, cell, cell, 9); ctx.fillStyle = selected ? HUD_C.blushSoft : (st ? "rgba(54,37,33,0.07)" : "rgba(54,37,33,0.045)"); ctx.fill();
     ctx.lineWidth = selected ? 2 : 1; ctx.strokeStyle = selected ? HUD_C.rose : "rgba(54,37,33,0.10)"; hudPath(sx + (selected ? 1 : 0), sy + (selected ? 1 : 0), cell - (selected ? 2 : 0), cell - (selected ? 2 : 0), 9); ctx.stroke();
     if (!st) continue;
+    if (HUD.drag && HUD.drag.over === i && HUD.drag.idx !== i) { ctx.lineWidth = 2; ctx.strokeStyle = HUD_C.gold; hudPath(sx + 1, sy + 1, cell - 2, cell - 2, 8); ctx.stroke(); }   // where it would land
+    if (lifted) continue;   // the stack being dragged is drawn under the finger instead
     drawCenteredEmoji(itemDef(st.id)?.icon ?? "❓", sx + cell / 2, sy + cell / 2 - (st.qty > 1 ? 1 : 0), Math.round(cell * 0.62));
     if (st.qty > 1) {
       ctx.font = `700 ${cell > 40 ? 11 : 10}px ${HUD_BODY}`; const tw = ctx.measureText(String(st.qty)).width + 8, bh = cell > 40 ? 15 : 14;
@@ -418,11 +432,21 @@ function drawHudInventory(left, right, dockTop, narrow, inv) {
   // footer: what's selected, or a hint
   const fy = gy + gridH + 10, sel = inv[state.selectedInvIdx], def = sel && itemDef(sel.id);
   if (def) {
-    hudText(hudFit(def.name ?? sel.id, panelW - pad * 2, 15, { family: HUD_DISPLAY, weight: 600 }), x + pad + 2, fy + 9, 15, { family: HUD_DISPLAY, weight: 600 });
-    const lines = hudWrap(def.description || (def.nourishment ? `Restores ${def.nourishment} hunger.` : ""), panelW - pad * 2 - 4, 12);
-    if (lines[0]) hudText(hudFit(lines[0] + (lines[1] ? " " + lines[1] : ""), panelW - pad * 2 - 4, 12), x + pad + 2, fy + 28, 12, { color: HUD_C.inkSoft });
-  } else hudText("Tap an item to select it · hold for options", x + pad + 2, fy + 18, 12, { color: HUD_C.inkSoft, family: HUD_HAND, weight: 600 });
+    // edible things get an Eat button (Drink for drinks)
+    const edible = typeof def.nourishment === "number" && !state.craftingOpen, bw = edible ? 86 : 0, textW = panelW - pad * 2 - 4 - (bw ? bw + 8 : 0);
+    if (edible) {
+      const r = HUD.ui.invEat = { x: x + panelW - pad - bw, y: fy - 2, w: bw, h: 34 };
+      hudButton(r.x, r.y, r.w, r.h, consumeVerb(def), { kind: "primary", size: 14 });
+    }
+    hudText(hudFit(def.name ?? sel.id, textW, 15, { family: HUD_DISPLAY, weight: 600 }), x + pad + 2, fy + 9, 15, { family: HUD_DISPLAY, weight: 600 });
+    const lines = hudWrap(def.description || (def.nourishment ? `Restores ${def.nourishment} hunger.` : ""), textW, 12);
+    if (lines[0]) hudText(hudFit(lines[0] + (lines[1] ? " " + lines[1] : ""), textW, 12), x + pad + 2, fy + 28, 12, { color: HUD_C.inkSoft });
+  } else hudText("Tap to select · hold for options · drag to move or drop", x + pad + 2, fy + 18, 12, { color: HUD_C.inkSoft, family: HUD_HAND, weight: 600 });
   ctx.restore();
+  if (HUD.drag) {   // the stack follows the finger
+    const d = HUD.drag, st = activeInv()[d.idx];
+    if (st) { ctx.save(); ctx.shadowColor = "rgba(54,37,33,0.4)"; ctx.shadowBlur = 10; drawCenteredEmoji(itemDef(st.id)?.icon ?? "❓", d.x, d.y - 4, Math.round(cell * 0.8)); ctx.restore(); if (st.qty > 1) hudText(`×${st.qty}`, d.x, d.y + cell * 0.45, 12, { weight: 700, align: "center" }); }
+  }
   return panelH + 8;
 }
 
@@ -435,9 +459,9 @@ function drawHudChat(left, right, dockTop, narrow, msgs) {
   hudPanel(x, y, w, h, { r: 20 }); const rect = HUD.ui.chatPanel = { x, y, w, h }; HUD.block.push(rect);
   hudText("Chat", x + 16, y + 24, 19, { family: HUD_DISPLAY, weight: 600, italic: true });
   // who's here
-  const slots = Array.isArray(state.net?.connectedSlots) ? state.net.connectedSlots : [], wsOpen = !!(state.net?.enabled && state.net?.ws?.readyState === 1), me = state.activePlayer | 0;
+  const pres = Array.isArray(state.net?.presenceUids) ? state.net.presenceUids : [], netOn = !!state.net?.enabled, me = state.activePlayer | 0;
   [["src/images/scott_thumbnail.jpg", 0], ["src/images/cristina_thumbnail.jpg", 1]].forEach(([src, i], k) => {
-    const online = wsOpen && (i === me || slots.includes(i)), ax = x + 84 + k * 28, ay = y + 22;
+    const online = netOn && (i === me || pres.some((u) => u !== state.net.uid)), ax = x + 84 + k * 28, ay = y + 22;
     hudAvatar(src, ax, ay, 11, { alpha: online ? 1 : 0.45, gray: !online }); if (online) hudDot(ax + 8, ay + 8, 3.4, "#46c46d");
   });
   const cb = HUD.ui.chatClose = { x: x + w - 46, y: y + 7, w: 32, h: 32 };
@@ -507,6 +531,8 @@ function handleHudTap(px, py) {
   if (hit(U.chatBtn)) { hudToggleChat(); return true; }
   if (HUD.inv.open && hit(U.invClose)) { hudToggleInventory(false); return true; }
   if (HUD.chat.open && hit(U.chatClose)) { hudToggleChat(false); return true; }
+  if (hit(U.reqCancel)) { cancelInteractionRequest(); return true; }
+  if (HUD.inv.open && hit(U.invEat)) { const st = activeInv()?.[state.selectedInvIdx]; if (st) eatItem(st.id, 1); return true; }
   if (hit(U.selClear)) { state.selectedInvIdx = -1; playSound?.("click"); return true; }
   if (hit(U.selChip)) { hudToggleInventory(true); return true; }
   // a finger on a backpack slot: remember it so a long press can open the item's menu
@@ -520,5 +546,34 @@ function handleHudTap(px, py) {
   if (hudHit(px, py)) { state.pointer.blocked = true; return true; }            // status card, day pill, toasts...: eat the press
   return false;
 }
-function hudPointerMove(px, py) { if (HUD.press && Math.hypot(px - HUD.press.x, py - HUD.press.y) > 10) { clearTimeout(HUD.press.timer); HUD.press = null; } }
+function hudPointerMove(px, py) {
+  if (HUD.drag) { HUD.drag.x = px; HUD.drag.y = py; HUD.drag.over = invIndexAtScreen(px, py); return; }
+  if (HUD.press && Math.hypot(px - HUD.press.x, py - HUD.press.y) > 10) {
+    clearTimeout(HUD.press.timer);
+    // dragging a stack: reorder in the backpack, or pull it out of the backpack to drop it on the ground
+    if (!HUD.press.fired && !state.craftingOpen && activeInv()?.[HUD.press.idx]) { HUD.drag = { idx: HUD.press.idx, x: px, y: py, over: invIndexAtScreen(px, py) }; if (state.selectedInvIdx !== HUD.press.idx) state.selectedInvIdx = HUD.press.idx; }
+    HUD.press = null;
+  }
+}
+/** Finger lifted while dragging a backpack stack. Returns true when a drag was in progress (the release is not a tap). */
+function hudDragEnd(px, py) {
+  const d = HUD.drag; if (!d) return false;
+  HUD.drag = null;
+  const inv = activeInv(), src = inv?.[d.idx]; if (!src) return true;
+  const target = invIndexAtScreen(px, py);
+  if (target >= 0) {
+    if (target === d.idx) return true;
+    const dst = inv[target];
+    if (!dst) { inv.splice(d.idx, 1); inv.push(src); state.selectedInvIdx = inv.length - 1; }     // onto an empty slot: to the end of the line
+    else if (dst.id === src.id && (itemDef(src.id)?.stack ?? 99) > dst.qty) {                      // same item: pour into it
+      const room = (itemDef(src.id)?.stack ?? 99) - dst.qty, mv = Math.min(room, src.qty); dst.qty += mv; src.qty -= mv;
+      if (src.qty <= 0) { inv.splice(d.idx, 1); state.selectedInvIdx = target > d.idx ? target - 1 : target; } else state.selectedInvIdx = d.idx;
+    } else { inv[d.idx] = dst; inv[target] = src; state.selectedInvIdx = target; }                    // different items: swap places
+    saveInventoriesSoon(); playSound?.("click");
+    return true;
+  }
+  if ((HUD.ui.invPanel && hitRect(px, py, HUD.ui.invPanel)) || hudHit(px, py)) return true;                               // let go over the sheet or another HUD part: nothing happens
+  dropInventoryStack(d.idx, src.qty);                                                               // out in the world: drop the whole stack
+  return true;
+}
 function hudPointerUp() { if (HUD.press) { clearTimeout(HUD.press.timer); const fired = HUD.press.fired; HUD.press = null; return fired; } return false; }

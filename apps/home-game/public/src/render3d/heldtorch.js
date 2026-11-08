@@ -23,7 +23,7 @@ export function createHeldTorches() {
       const fx = new THREE.Group();
       const flame = createFlipbook({ file: "fire_01_8x8.tga", w: 0.3, h: 0.36, fps: 30, offset: st.seed * 64, intensity: 1.15, tint: [1, 0.74, 0.42] }); flame.scale.set(0.3, 0.36, 1);
       const flame2 = createFlipbook({ file: "fire_01_8x8.tga", w: 0.22, h: 0.28, fps: 30, offset: st.seed * 64 + 29, intensity: 0.9, tint: [1, 0.55, 0.26] }); flame2.scale.set(0.22, 0.28, 1); flame2.position.set(0.03, 0, 0);
-      const light = new THREE.PointLight(0xff9a50, 6, 15, 1.1);
+      const light = new THREE.PointLight(0xff9a50, 9, 30, 1.1);
       fx.add(flame, flame2, light); st.fx = fx; st.flame = flame; st.flame2 = flame2; st.light = light;
     });
   }
@@ -56,7 +56,7 @@ export function createHeldTorches() {
     const home = actor.root.parent; if (home && st.fx.parent !== home) home.add(st.fx);
     st.fx.position.copy(_v);
     st.flame.userData.tick(t); st.flame2.userData.tick(t);
-    st.light.intensity = 5.4 + 1.3 * Math.sin(t * 13 + st.seed * 9) * Math.sin(t * 5.3 + st.seed);
+    st.light.intensity = 8.4 + 1.6 * Math.sin(t * 13 + st.seed * 9) * Math.sin(t * 5.3 + st.seed);
   }
   return { update };
 }

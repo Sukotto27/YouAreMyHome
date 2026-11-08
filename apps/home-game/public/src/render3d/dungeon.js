@@ -44,10 +44,10 @@ varying float vFade; varying vec3 vWP; varying vec3 vWN; uniform float uScale;`)
 export function createDungeonView({ renderer }) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x040508);
-  scene.fog = new THREE.FogExp2(0x040508, 0.045);
-  scene.add(new THREE.HemisphereLight(0x5a6a9a, 0x1a1410, 0.55));
-  const torch = new THREE.PointLight(0xffb070, 7, 22, 1.5); scene.add(torch);
-  const torch2 = new THREE.PointLight(0xffb070, 7, 22, 1.5); scene.add(torch2);   // the second player carries one too
+  scene.fog = new THREE.FogExp2(0x040508, 0.028);
+  scene.add(new THREE.HemisphereLight(0x5a6a9a, 0x1a1410, 0.8));
+  const torch = new THREE.PointLight(0xffb070, 15, 40, 1.2); scene.add(torch);
+  const torch2 = new THREE.PointLight(0xffb070, 15, 40, 1.2); scene.add(torch2);   // the second player carries one too
 
   const wallMat = stoneMaterial("castle-masonry.png", new THREE.Color(0xd8d4cc), 4, false);
   const floorMat = stoneMaterial("stone-rock.png", new THREE.Color(0x8e8a84).multiplyScalar(1.5), 2.4, false);
@@ -103,12 +103,12 @@ export function createDungeonView({ renderer }) {
   let flick = 0;
   function update(dt, camera, actorPositions) {
     flick += dt;
-    fadeWalls(camera, actorPositions, dt);   // (no fog of war down here: the dark and the torchlight are enough)
+    fadeWalls(camera, actorPositions.filter(Boolean), dt);   // (no fog of war down here: the dark and the torchlight are enough)
     const lights = [torch, torch2];
     lights.forEach((l, i) => {
       const p = actorPositions[i]; if (!p) { l.visible = false; return; }
       l.visible = true; l.position.set(p.x, 2.3, p.z);
-      l.intensity = 6.5 + Math.sin(flick * 11 + i) * 0.5 + Math.sin(flick * 23.7 + i * 2) * 0.35;
+      l.intensity = 14 + Math.sin(flick * 11 + i) * 0.9 + Math.sin(flick * 23.7 + i * 2) * 0.6;
     });
   }
   return { scene, build, update, get map() { return map; }, heightAt: () => 0, worldToTile: (x, z) => [Math.floor(x / TILE_M), Math.floor(z / TILE_M)], setPads() {}, set: () => set };

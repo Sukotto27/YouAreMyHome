@@ -8,7 +8,7 @@ const {
   auth, db, firebaseReady, rtdb, FIRESTORE, HOST_ROLE, PARTNER_ROLE, roleFor, rtdbPaths,
 } = window.__fb;
 
-const GAME_BUILD = 190;
+const GAME_BUILD = 191;
 const TILE_SIZE = 48;
 
 // Overworld dimensions
@@ -292,8 +292,8 @@ const HARVEST_STAMINA_COST_STONE = 8;
 const DOUBLE_CLICK_MS = 350;
 
 // ---- Time / Farming ----
-const DAY_SECONDS = 360;        // 6 minutes = 1 in-game day (4 min of daylight + 2 min of night)
-const DAYLIGHT_SECONDS = 240;   // 4 min day, 2 min night
+const DAY_SECONDS = 1200;       // 20 minutes = 1 in-game day (about 13 min of daylight + 7 min of night)
+const DAYLIGHT_SECONDS = 800;
 const GROW_DAYS = 3;
 
 // Dungeon dimensions (generated on entry)
@@ -687,6 +687,13 @@ function logAction(text) {
   if (typeof renderActivityLogDOM === "function") renderActivityLogDOM();
 }
 
+// A line only this client sees (presence changes): not sent to the shared log
+function logLocalOnly(text) {
+  state.actionLog.unshift(String(text));
+  if (state.actionLog.length > 200) state.actionLog.pop();
+  if (typeof renderActivityLogDOM === "function") renderActivityLogDOM();
+}
+
 // Apply a server log entry (dedupe by seq + pending local)
 function applyNetLogEntry(entry) {
   if (!entry) return;
@@ -732,6 +739,7 @@ const WORLDS_META_KEY = "yamhome_worlds_meta_v1";     // array of { id:number, s
 const ACTIVE_WORLD_KEY = "yamhome_world_active_v1";  // number
 const WORLD_DATA_PREFIX = "yamhome_world_data_v1_";  // + id
 const WORLD_INV_PREFIX = "yamhome_world_inv_v1_";
+const WORLD_MARKERS_PREFIX = "yamhome_world_markers_v1_";   // saved places the players marked / built
 const WORLD_RECIPES_PREFIX = "yamhome_world_recipes_v1_";   // learned recipes + the "one extra scroll" bookkeeping
 
 function invKey(worldId) {
@@ -741,6 +749,7 @@ function invKey(worldId) {
 function saveInventoriesForWorld(worldId) {
   try {
     localStorage.setItem(WORLD_RECIPES_PREFIX + String(worldId), JSON.stringify({ learned: [...state.learnedRecipes], extra: state.recipeLootExtra || {} }));
+    localStorage.setItem(WORLD_MARKERS_PREFIX + String(worldId), JSON.stringify(state.markers || []));
     localStorage.setItem(invKey(worldId), JSON.stringify(state.inventories || [[], []]));
   } catch (e) {
     console.warn("Inventory save failed:", e);
@@ -757,6 +766,10 @@ function loadRecipesForWorld(worldId) {
 
 function loadInventoriesForWorld(worldId) {
   loadRecipesForWorld(worldId);
+  try {
+    const m = JSON.parse(localStorage.getItem(WORLD_MARKERS_PREFIX + String(worldId)) || "null");
+    if (Array.isArray(m)) state.markers = m.filter((x) => x && typeof x.x === "number" && typeof x.y === "number");
+  } catch (e) { console.warn("Markers load failed:", e); }
   try {
     const raw = localStorage.getItem(invKey(worldId));
     if (!raw) return false;
@@ -1041,7 +1054,7 @@ resize();
 
 let _worldUnsub = null, _logUnsub = null, _chatUnsub = null;
 let _playersUnsub = null, _opsUnsub = null, _timeUnsub = null, _interactionUnsub = null, _presenceUnsub = null;
-let _posWriteTimer = null;
+let _posWriteTimer = null, _connUnsub = null, _offUnsub = null;
 let _appliedWorldVersion = null;
 
 function netCanSend() {
@@ -1064,10 +1077,10 @@ function connectOnline() {
   onAuthStateChanged(auth, (user) => {
     console.info(`[NET] onAuthStateChanged fired: user=${user ? user.uid : "null (not signed in)"}`);
     // Tear down any listeners from a previous user before (re)subscribing.
-    for (const unsub of [_worldUnsub, _logUnsub, _chatUnsub, _playersUnsub, _opsUnsub, _timeUnsub, _interactionUnsub, _presenceUnsub]) {
+    for (const unsub of [_worldUnsub, _logUnsub, _chatUnsub, _playersUnsub, _opsUnsub, _timeUnsub, _interactionUnsub, _presenceUnsub, _connUnsub, _offUnsub]) {
       if (typeof unsub === "function") unsub();
     }
-    _worldUnsub = _logUnsub = _chatUnsub = _playersUnsub = _opsUnsub = _timeUnsub = _interactionUnsub = null;
+    _worldUnsub = _logUnsub = _chatUnsub = _playersUnsub = _opsUnsub = _timeUnsub = _interactionUnsub = _presenceUnsub = _connUnsub = _offUnsub = null;
 
     if (!user) {
       state.net.enabled = false;
@@ -1192,8 +1205,10 @@ function connectOnline() {
       if (!data || state.net.isHost || !state.time) return;
       const t = state.time;
       const wasDay = t.isDay;
-      if (typeof data.phaseT === "number") t.phaseT = data.phaseT;
+      const lag = typeof data.at === "number" ? Math.max(0, Math.min(10, (Date.now() + (state.net.serverOffset || 0) - data.at) / 1000)) : 0;
+      if (typeof data.phaseT === "number") t.phaseT = data.phaseT + lag;
       if (typeof data.day === "number") t.day = data.day;
+      if (t.phaseT >= DAY_SECONDS) { t.phaseT -= DAY_SECONDS; t.day += 1; }
       if (typeof data.t === "number") t.t = data.t;
       t.isDay = t.phaseT < DAYLIGHT_SECONDS;
       if (t.isDay !== wasDay) playSound(t.isDay ? "day" : "night");
@@ -1206,14 +1221,29 @@ function connectOnline() {
     });
 
     const presenceRef = ref(rtdb, rtdbPaths.presence(wid, user.uid));
-    set(presenceRef, { online: true, name: user.displayName || user.email || "" });
-    onDisconnect(presenceRef).remove();
+    // (re)announce ourselves every time the connection (re)opens: onDisconnect() fires server-side on a drop and would otherwise leave us "offline" forever
+    _connUnsub = onValue(ref(rtdb, ".info/connected"), (snap) => {
+      if (snap.val() !== true) return;
+      set(presenceRef, { online: true, name: user.displayName || user.email || "" });
+      onDisconnect(presenceRef).remove();
+      onDisconnect(ref(rtdb, rtdbPaths.player(wid, user.uid))).remove();
+    });
+    _offUnsub = onValue(ref(rtdb, ".info/serverTimeOffset"), (snap) => { state.net.serverOffset = Number(snap.val()) || 0; });
+    let firstPresence = true;
     _presenceUnsub = onValue(ref(rtdb, `game/${wid}/presence`), (snap) => {
       const val = snap.val() || {};
+      const before = new Set(state.net.presenceUids || []);
       state.net.presenceUids = Object.keys(val);
+      // tell us when the other one comes or goes (local-only lines: each side sees the other's arrival, nothing to sync)
+      if (!firstPresence) {
+        const other = (state.activePlayer | 0) === 0 ? 1 : 0;
+        const nm = state.players?.[other]?.name || "Your partner";
+        for (const uid of state.net.presenceUids) if (uid !== state.net.uid && !before.has(uid)) logLocalOnly(`${nm} entered the game.`);
+        for (const uid of before) if (uid !== state.net.uid && !state.net.presenceUids.includes(uid)) logLocalOnly(`${nm} left the game.`);
+      }
+      firstPresence = false;
       updateOnlineIndicator();
     });
-    onDisconnect(ref(rtdb, rtdbPaths.player(wid, user.uid))).remove();
 
     updateOnlineIndicator();
   });
@@ -1248,6 +1278,8 @@ function applyPlayersSnapshot(val) {
         lp.stamina = Math.max(0, lp.stamina - (STAMINA_COST_PER_TILE * tilesMoved));
       }
     }
+    lp.remoteWhere = sp.where || "overworld:";
+    if (!lp.pose) lp.resting = !!sp.resting;
     lp.x = sp.x; lp.y = sp.y; lp.path = [];
     if (Math.hypot(sp.x - lp.fx, sp.y - lp.fy) > 4) { lp.fx = sp.x; lp.fy = sp.y; }   // far away (teleport, first sight): jump; otherwise updatePlayers glides
   }
@@ -1262,10 +1294,29 @@ function writePlayerPositionThrottled() {
     if (!netCanSend()) return;
     const p = state.players[state.activePlayer | 0];
     set(ref(rtdb, rtdbPaths.player(state.net.worldId, state.net.uid)), {
-      x: p.x, y: p.y, mode: state.mode, updatedAt: Date.now(),
+      x: p.x, y: p.y, mode: state.mode, where: mapKey(), resting: !!p.resting, updatedAt: Date.now(),
     });
   }, 90); // was ~110ms server round-trip cadence; close enough to feel the same
 }
+
+/** Which map the active player is in: "overworld:", "dungeon:<id>" or "interior:<id>". Two players only see each other when this matches. */
+function mapKey() {
+  return state.mode + ":" + (state.mode === "dungeon" ? (state.dungeonId || "") : state.mode === "interior" ? (state.interiorId || "") : "");
+}
+/** True for the partner while they are somewhere else (another dungeon / inside a house): their tile means nothing on our map. */
+function isAwayPlayer(pl) {
+  return !!(pl && pl.remoteWhere && pl.remoteWhere !== mapKey());
+}
+
+// Position is normally published as each tile is entered; this also catches everything else that changes where/how we are
+// (entering or leaving a dungeon, resting) so the partner's copy of us never gets stuck on an old tile.
+let _netSig = "";
+setInterval(() => {
+  if (!netCanSend()) return;
+  const p = state.players[state.activePlayer | 0]; if (!p) return;
+  const sig = `${p.x},${p.y},${mapKey()},${p.resting ? 1 : 0}`;
+  if (sig !== _netSig) { _netSig = sig; writePlayerPositionThrottled(); }
+}, 250);
 
 function movePlayerOnline(dx, dy) {
   const p = state.players[state.activePlayer | 0];
@@ -1338,7 +1389,8 @@ function publishChatMessage(text) {
 
 function publishTime(phaseT, day, t) {
   if (!netCanSend()) return;
-  set(ref(rtdb, rtdbPaths.time(state.net.worldId)), { phaseT, day, t, updatedAt: Date.now() });
+  // `at` is in (estimated) server time so the other device can add the seconds that passed in transit, whatever its own clock says
+  set(ref(rtdb, rtdbPaths.time(state.net.worldId)), { phaseT, day, t, updatedAt: Date.now(), at: Date.now() + (state.net.serverOffset || 0) });
 }
 
 function publishInteraction(msg) {
@@ -1350,8 +1402,9 @@ function applyInteractionMessage(msg) {
   const myIdx = state.activePlayer | 0;
   if (msg.kind === "interaction_request") {
     if (msg.fromIndex === myIdx) return;
-    if (!state.interactionRequest) {
+    if (!state.interactionRequest || state.interactionRequest.fromIndex !== myIdx) {
       state.interactionRequest = { type: msg.reqType, fromIndex: msg.fromIndex, toIndex: msg.toIndex, createdAt: Date.now() };
+      playSound("message");   // so a request is not missed
     }
   } else if (msg.kind === "interaction_respond") {
     if (msg.toIndex === myIdx) return;
@@ -1361,6 +1414,8 @@ function applyInteractionMessage(msg) {
       if (kind) beginCouple(kind, msg.fromIndex, msg.toIndex);
     }
     state.interactionRequest = null;
+  } else if (msg.kind === "interaction_cancel") {
+    if (state.interactionRequest && state.interactionRequest.fromIndex === msg.fromIndex) state.interactionRequest = null;   // the asker took it back
   } else if (msg.kind === "couple_end") {
     endHoldingHands(null, true);   // the other player let go of our hand (or got busy)
   } else if (msg.kind === "trade_inv") {
@@ -1396,6 +1451,7 @@ function sendNetInput(payload) {
     case "trade_state": return publishInteraction({ kind: "trade_state", senderIdx: payload.senderIdx, offer: payload.offer, confirmMe: payload.confirmMe, inv: payload.inv });
     case "trade_cancel": return publishInteraction({ kind: "trade_cancel" });
     case "couple_end": return publishInteraction({ kind: "couple_end" });
+    case "interaction_cancel": return publishInteraction({ kind: "interaction_cancel", fromIndex: payload.fromIndex, toIndex: payload.toIndex });
     default: console.warn("[NET] sendNetInput: unhandled payload type", payload.type);
   }
 }
@@ -1452,6 +1508,16 @@ function applyWorldOp(op) {
     if (op.kind === "pose") {   // a player sat in a chair / lay down in a bed / got up
       const pl = state.players[op.idx | 0];
       if (pl) { pl.pose = op.pose ? { ...op.pose, px: pl.x, py: pl.y } : null; if (pl.pose) { pl.resting = false; pl.sneak = false; } }
+      return;
+    }
+
+    if (op.kind === "time_skip") {   // the partner slept: the host moves the shared clock
+      if (state.net?.isHost && Number(op.secs) > 0) advanceTimeSeconds(Math.min(Number(op.secs), DAY_SECONDS));
+      return;
+    }
+
+    if (op.kind === "act") {   // the partner chopped / ate / fished...: play the same animation on their body
+      if (typeof window.__remoteAct === "function") window.__remoteAct(op);
       return;
     }
 
@@ -2323,6 +2389,11 @@ function addItem(inv, itemId, qty) {
   };
 }
 
+/** Drinks (milk, juice, coffee, soda...) are tagged "drink" in items.json: they say Drink / drank instead of Eat / ate. */
+function isDrinkDef(def) { return Array.isArray(def?.tags) && def.tags.includes("drink"); }
+function consumeVerb(def) { return isDrinkDef(def) ? "Drink" : "Eat"; }
+function consumedWord(def) { return isDrinkDef(def) ? "drank" : "ate"; }
+
 function eatItem(itemId, qty = 1) {
   const inv = activeInv();
   const p = activePlayer();
@@ -2344,7 +2415,7 @@ function eatItem(itemId, qty = 1) {
   // Remove items (multi-stack safe)
   removeItem(inv, itemId, eatN);
 
-  logAction(`${p.name} ate ${eatN} ${(def.name ?? itemId)}${eatN === 1 ? "" : "s"}.`);
+  logAction(`${p.name} ${consumedWord(def)} ${eatN} ${(def.name ?? itemId)}${eatN === 1 || isDrinkDef(def) ? "" : "s"}.`);
   playSound("eat");
 }
 
@@ -4446,7 +4517,7 @@ function isHuntableDef(def) {
 }
 
 function isOccupiedByPlayer(x, y) {
-  return state.players.some(p => p.x === x && p.y === y && state.mode === "overworld");
+  return state.players.some(p => p.x === x && p.y === y && state.mode === "overworld" && !isAwayPlayer(p));
 }
 
 function isPassableForAnimal(x, y) {
@@ -4664,6 +4735,7 @@ function animalPerceive(m, x, y, map, dungeon, now) {
   const fl = Math.hypot(m.fx, m.fy) || 1;
   let chance = 0, heardFrom = null;
   for (const p of state.players) {
+    if (isAwayPlayer(p)) continue;   // in a dungeon / house: their tile is on another map
     const dx = p.x - x, dy = p.y - y, d = Math.hypot(dx, dy);
     if (d > ANIMAL_HEAR_RADIUS) continue;
     if (d <= ANIMAL_SIGHT_RADIUS) {
@@ -4693,6 +4765,7 @@ function animalThink(obj, x, y, map, dungeon, canMoveTo, dt) {
 
   let nearest = null, nearestD = Infinity;
   for (const p of state.players) {
+    if (isAwayPlayer(p)) continue;
     const d = Math.hypot(x - p.x, y - p.y);
     if (d < nearestD) { nearestD = d; nearest = p; }
   }
@@ -4799,7 +4872,7 @@ function catThink(obj, x, y, dt) {
   const m = obj.meta = obj.meta || {}, now = Date.now(), snap = () => JSON.stringify([m.mode, m.perch, m.petUntil, m.run]), before = snap();
   m.run = 0;
   let near = null;
-  for (const p of state.players) { const d = Math.hypot(p.x - x, p.y - y); if (!near || d < near.d) near = { p, d }; }
+  for (const p of state.players) { if (isAwayPlayer(p)) continue; const d = Math.hypot(p.x - x, p.y - y); if (!near || d < near.d) near = { p, d }; }
   const face = () => { if (near && near.d > 0) { m.fx = near.p.x - x; m.fy = near.p.y - y; } };
   const done = (step = null) => ({ step, changed: snap() !== before });
 
@@ -5421,6 +5494,7 @@ function revealAroundPlayers() {
   let changed = false;
 
   for (const pl of state.players) {
+    if (isAwayPlayer(pl)) continue;   // their tile belongs to another map
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
         const x = pl.x + dx;
@@ -5871,6 +5945,8 @@ function markerKey(m) {
 function savedPlaces() {
   const me = state.activePlayer | 0, other = state.players[me === 0 ? 1 : 0];
   const list = [...(state.markers || [])];
+  const have = new Set(list.map(markerKey));
+  for (const a of autoPlaces()) if (!have.has(markerKey(a))) { list.push(a); have.add(markerKey(a)); }
   if (other) list.unshift({ type: "partner", label: other.name, x: other.x, y: other.y, playerIndex: me === 0 ? 1 : 0 });
   return list;
 }
@@ -5878,7 +5954,21 @@ function savedPlaces() {
 function addMarker(label, x, y, type) {
   // prevent duplicates for same type/coord
   const exists = state.markers.some(m => m.x === x && m.y === y && m.type === type);
-  if (!exists) state.markers.push({ label, x, y, type });
+  if (!exists) { state.markers.push({ label, x, y, type }); saveInventoriesSoon(); }
+}
+
+/** Campfires and stockpiles anywhere in the world are listed automatically (whoever built them, however long ago). */
+let _autoPlacesCache = { at: -1e9, list: [], world: null };
+function autoPlaces() {
+  const now = performance.now(), objs = state.world?.objects;
+  if (!objs) return [];
+  if (_autoPlacesCache.world === state.world && now - _autoPlacesCache.at < 500) return _autoPlacesCache.list;
+  const found = { campfire: [], stockpile: [] };
+  for (let y = 0; y < objs.length; y++) { const row = objs[y]; if (!row) continue; for (let x = 0; x < row.length; x++) { const id = row[x]?.id; if (id === "campfire" || id === "stockpile") found[id].push({ x, y }); } }
+  const list = [];
+  for (const [type, label] of [["campfire", "Campfire"], ["stockpile", "Stockpile"]]) found[type].forEach((c, i) => list.push({ type, label: found[type].length > 1 ? `${label} ${i + 1}` : label, x: c.x, y: c.y }));
+  _autoPlacesCache = { at: now, list, world: state.world };
+  return list;
 }
 
 function saveHouseAt(x, y) {
@@ -8213,6 +8303,24 @@ function sendInteractionRequest(type, fromIndex, toIndex) {
   }
 }
 
+/** The person who asked takes the request back (the other one never answered, or the dialog was missed). */
+function cancelInteractionRequest() {
+  const req = state.interactionRequest;
+  if (!req || state.activePlayer !== req.fromIndex) return;
+  logAction(`${state.players[req.fromIndex].name} cancelled: ${req.type}.`);
+  state.interactionRequest = null;
+  if (state.net?.enabled) sendNetInput({ type: "interaction_cancel", fromIndex: req.fromIndex, toIndex: req.toIndex });
+  playSound?.("click");
+}
+// A request nobody answered does not wait forever
+setInterval(() => {
+  const req = state.interactionRequest;
+  if (req && Date.now() - (req.createdAt || 0) > 60000) {
+    if (state.activePlayer === req.fromIndex) { logAction(`${state.players[req.toIndex].name} didn't answer: ${req.type} cancelled.`); if (state.net?.enabled) sendNetInput({ type: "interaction_cancel", fromIndex: req.fromIndex, toIndex: req.toIndex }); }
+    state.interactionRequest = null;
+  }
+}, 2000);
+
 function acceptInteractionRequest() {
   const req = state.interactionRequest;
   if (!req) return;
@@ -8743,7 +8851,7 @@ if (state.mode === "dungeon" && obj.id === "chest") {
       options: [
         // Eat (only if item has nourishment)
         ...(typeof itemDef(itemId)?.nourishment === "number" ? [{
-          label: `Eat (+${itemDef(itemId).nourishment})`,
+          label: `${consumeVerb(itemDef(itemId))} (+${itemDef(itemId).nourishment})`,
           disabledReason: tooFar ? "Too far" : null,
           action: withSfx("eat", () => { 
             if (tooFar) return;
@@ -8761,7 +8869,7 @@ if (state.mode === "dungeon" && obj.id === "chest") {
               obj.meta.qty = newQty;
             }
 
-            logAction(`${p.name} ate ${name}.`);
+            logAction(`${p.name} ${consumedWord(itemDef(itemId))} ${name}.`);
             closeMenu();
           })
         }] : []),
@@ -9957,7 +10065,18 @@ const STARTER_FURNITURE = ["f_chair_a", "f_table_a", "f_bed_double", "f_cupboard
 function seedStarterRecipes() {
   for (const id of STARTER_FURNITURE) { const rid = state.data?.furniture?.[id]?.recipe; if (rid) state.learnedRecipes.add(rid); }
 }
-function furnitureUnlocked(id) { if (window.__devMode) return !!state.data?.furniture?.[id]; const rid = state.data?.furniture?.[id]?.recipe; return !!rid && state.learnedRecipes.has(rid); }   // dev mode (?dev=1) has everything
+// Household furniture waits for a house (sofas, beds, fridges...); the things you hold and cook with do not.
+const NO_HOUSE_FURNITURE_CATS = new Set(["Pans", "Plates", "Bowls", "Cups", "Knives", "Utensils", "Kitchen Tools"]);
+const NO_HOUSE_FURNITURE_IDS = new Set(["f_pan", "f_pot", "f_plate", "f_bowl", "f_mug", "f_glass", "f_kettle", "f_broom"]);
+/** True once the players have built at least one house with a room (a modular structure, see src/render3d/building). */
+function houseBuilt() { return Object.values(state.world?.structures || {}).some((st) => (st?.rooms?.length || 0) > 0); }
+function furnitureNeedsHouse(f) { return !!f && !NO_HOUSE_FURNITURE_CATS.has(f.cat) && !NO_HOUSE_FURNITURE_IDS.has(f.id); }
+function furnitureUnlocked(id) {
+  const f = state.data?.furniture?.[id];
+  if (window.__devMode) return !!f;   // dev mode (?dev=1) has everything
+  if (furnitureNeedsHouse(f) && !houseBuilt()) return false;
+  return !!f?.recipe && state.learnedRecipes.has(f.recipe);
+}
 /** How many pieces are unlocked / exist (for the builder's list). */
 function furnitureUnlockCount() { const all = Object.values(state.data?.furniture ?? {}); return { have: all.filter((f) => state.learnedRecipes.has(f.recipe)).length, total: all.length }; }
 const CRAFT_MODE_TITLE = { craft: "Crafting", cook: "Cooking", prep: "Preparing", hand: "Crafting" };
@@ -10466,6 +10585,30 @@ function isTileOccupiedForDrop(x, y) {
   const def = objDef(obj.id);
   if (def?.blocks) return true;
 
+  return true;
+}
+
+/**
+ * Drop `qty` of the stack in backpack slot `invIdx` onto the ground at (or next to) the player.
+ * Checks the ground FIRST and only then takes the items out of that exact stack, so a failed drop can never duplicate or lose anything.
+ * (Items with stack size 1, like the cutting board, sit in many separate slots: taking "one cutting board" by id used to pull from the
+ * last slot while putting the revert copy back in this one.)
+ */
+function dropInventoryStack(invIdx, qty) {
+  const inv = activeInv(), st = inv[invIdx], p = activePlayer();
+  if (!st || !(st.qty > 0)) return false;
+  qty = Math.min(st.qty, Math.max(1, Math.floor(qty || 1)));
+  const name = itemDef(st.id)?.name ?? st.id;
+  const spot = findDropSpotNear(Math.round(p.x), Math.round(p.y), st.id, 4);
+  if (!spot) { playSound("deny"); logAction(`${p.name} had nowhere to drop ${name}.`); return false; }
+  if (!dropItemOnTile(st.id, qty, spot.x, spot.y)) { playSound("deny"); return false; }
+  st.qty -= qty;
+  if (st.qty <= 0) inv.splice(invIdx, 1);
+  if (state.selectedInvIdx >= inv.length) state.selectedInvIdx = -1;
+  saveInventoriesSoon();
+  if (state.mode === "overworld") { const o = state.world.objects[spot.y]?.[spot.x]; if (o) sendWorldOp({ kind: "set_obj", mode: "overworld", x: spot.x, y: spot.y, value: o }); }   // so the other player sees it too
+  playSound("pop");
+  logAction(`${p.name} dropped ${qty} ${name}${qty === 1 ? "" : "s"} at (${spot.x},${spot.y}).`);
   return true;
 }
 
@@ -11602,40 +11745,11 @@ function openMenuForInventoryItem(invIdx, screenX, screenY) {
   const emptyBucketId = firstExistingItemId(["bucket", "empty_bucket"]);
   const filledBucketId = firstExistingItemId(["bucket_water", "water_bucket", "bucket_of_water"]);
 
-    // NOTE: drop sometimes failed because p.x/p.y can be non-integers (movement smoothing).
-  // That made dropItemOnTile() return false, and the revert addItem() shoved the stack to the last slot.
-  const drop = (qty) => {
-    // Lock to a real tile coordinate
-    const tx = Math.round(p.x);
-    const ty = Math.round(p.y);
-
-    // Re-check occupancy at the moment of dropping (player may have moved since menu opened)
-    const blocked = isTileOccupiedForDrop(tx, ty);
-    if (blocked) return;
-
-    // Snapshot for a clean revert that preserves the slot
-    const beforeQty = st.qty;
-
-    if (!removeItem(inv, itemId, qty)) return;
-
-    const ok = dropItemOnTile(itemId, qty, tx, ty);
-    if (!ok) {
-      // Revert WITHOUT reordering inventory
-      if (beforeQty <= qty) {
-        // We removed the whole stack, so put it back in the same slot
-        inv.splice(invIdx, 0, { id: itemId, qty: beforeQty });
-      } else {
-        // We reduced qty on the existing stack, restore it
-        st.qty = beforeQty;
-      }
-      return;
-    }
-
-    logAction(`${p.name} dropped ${qty} ${itemName}${qty === 1 ? "" : "s"} at (${tx},${ty}).`);
-    closeMenu();
+    const drop = (qty) => {
+    if (dropInventoryStack(invIdx, qty)) closeMenu();
   };
 
-  const dropBlocked = isTileOccupiedForDrop(Math.round(p.x), Math.round(p.y));
+  const dropBlocked = !findDropSpotNear(Math.round(p.x), Math.round(p.y), itemId, 4);
 
   const canDump = filledBucketId && emptyBucketId && itemId === filledBucketId;
 
@@ -11665,12 +11779,12 @@ function openMenuForInventoryItem(invIdx, screenX, screenY) {
       }] : []),
       // Eat (only if this item has nourishment)
       ...(typeof def?.nourishment === "number" ? [{
-        label: `Eat (+${def.nourishment})`,
+        label: `${consumeVerb(def)} (+${def.nourishment})`,
         action: withSfx("eat", () => { 
           // hunger system uses "fills as you get hungry", so eating reduces hunger
           p.hunger = clamp((p.hunger ?? 0) - def.nourishment, 0, HUNGER_MAX);
           if (!removeItem(inv, itemId, 1)) return;
-          logAction(`${p.name} ate ${itemName}.`);
+          logAction(`${p.name} ${consumedWord(def)} ${itemName}.`);
           closeMenu();
         })
       }] : []),
@@ -11688,7 +11802,6 @@ function openMenuForInventoryItem(invIdx, screenX, screenY) {
   label: "Drop 1",
   disabledReason: dropBlocked ? "Tile occupied" : (st.qty >= 1 ? null : "None"),
   action: () => {
-    playSound("pop");
     drop(1);
   },
 },
@@ -11696,7 +11809,6 @@ function openMenuForInventoryItem(invIdx, screenX, screenY) {
   label: `Drop all (${st.qty})`,
   disabledReason: dropBlocked ? "Tile occupied" : null,
   action: () => {
-    playSound("pop");
     drop(st.qty);
   },
 },
@@ -12078,15 +12190,33 @@ function handleCoordsTap(px, py) {
   return true; // modal eats clicks
 }
 
-function handleStockpileTap(px, py) {
+/** Runs a stockpile change, then tells the other player what is in the stockpile now. */
+function stockpileWithSync(fn) {
   const key = state.stockpileOpen?.key, before = key && getStockpileByKey(key) ? JSON.stringify(getStockpileByKey(key).inv) : null;
-  const r = handleStockpileTapInner(px, py);
+  const r = fn();
   const sp = key && String(key).startsWith("stockpile:") ? getStockpileByKey(key) : null;
-  if (sp && JSON.stringify(sp.inv) !== before && state.net?.enabled) {   // tell the other player what is in it now
+  if (sp && JSON.stringify(sp.inv) !== before && state.net?.enabled) {
     const o = state.world.objects[sp.y]?.[sp.x];
     if (o) sendWorldOp({ kind: "set_obj", mode: "overworld", x: sp.x, y: sp.y, value: { ...o, meta: { ...o.meta, inv: JSON.parse(JSON.stringify(sp.inv)) } } });
   }
   return r;
+}
+function handleStockpileTap(px, py) { return stockpileWithSync(() => handleStockpileTapInner(px, py)); }
+
+/** Move the whole stack in slot `i` of `src` ("mine" = backpack, "pile" = the stockpile) to the other side. All or nothing, so nothing is ever lost or doubled. */
+function stockMoveStack(sp, src, i) {
+  const mine = src === "mine", from = mine ? activeInv() : sp.inv, to = mine ? sp.inv : activeInv(), toCap = mine ? (sp.cap || INV_SLOTS) : INV_SLOTS;
+  const st = from[i]; if (!st || !(st.qty > 0)) return false;
+  const probe = JSON.parse(JSON.stringify(to)), fit = addItem(probe, st.id, st.qty);
+  if (fit.remaining > 0 || probe.length > toCap) { logAction(`${mine ? (sp.title || "The stockpile") : "Your backpack"} is full.`); playSound("error"); return false; }
+  const id = st.id, qty = st.qty;
+  from.splice(i, 1);
+  addItem(to, id, qty);
+  const itemName = itemDef(id)?.name ?? id;
+  logAction(`${activePlayer().name} ${mine ? "stored" : "retrieved"} ${qty} ${itemName}${qty === 1 ? "" : "s"}.`);
+  playSound("pickup");
+  saveInventoriesSoon();
+  return true;
 }
 function handleStockpileTapInner(px, py) {
   const ui = state._stockUI;
@@ -12094,62 +12224,51 @@ function handleStockpileTapInner(px, py) {
   const sp = key ? getStockpileByKey(key) : null;
   if (!ui || !sp) return false;
 
-  const pName = activePlayer().name;
-
   if (hitRect(px, py, ui.close) || (ui.panel && !hitRect(px, py, ui.panel))) {
     state.stockpileOpen = null;
     return true;
   }
+  for (const r of ui.mine) if (hitRect(px, py, r)) { stockMoveStack(sp, "mine", r.i); return true; }   // tap = send that stack across
+  for (const r of ui.pile) if (hitRect(px, py, r)) { stockMoveStack(sp, "pile", r.i); return true; }
+  return true;
+}
 
-  // phone layout: Backpack | Stockpile tabs
-  if (ui._tab_mine && hitRect(px, py, ui._tab_mine)) { playSound("click"); state._stockTab = "mine"; return true; }
-  if (ui._tab_pile && hitRect(px, py, ui._tab_pile)) { playSound("click"); state._stockTab = "pile"; return true; }
-
-  // Move full stack from player -> stockpile
-  for (const r of ui.left) {
-    if (hitRect(px, py, r)) {
-      const inv = activeInv();
-      const st = inv[r.i];
-      if (!st) return true;
-
-      const qty = st.qty;
-      const id = st.id;
-
-      // try it on a copy first: it must fit the slot count, or nothing moves
-      const probe = JSON.parse(JSON.stringify(sp.inv)), fit = addItem(probe, id, qty);
-      if (fit.remaining > 0 || probe.length > (sp.cap || INV_SLOTS)) { logAction(`${sp.title || "The stockpile"} is full.`); playSound("error"); return true; }
-      removeItem(inv, id, qty);
-      addItem(sp.inv, id, qty);
-
-      const itemName = itemDef(id)?.name ?? id;
-      logAction(`${pName} stored ${qty} ${itemName}${qty === 1 ? "" : "s"}.`);
-
-      return true;
-    }
+// ---- stockpile sheet: press, hold and drag a stack over to the other grid (mouse: just drag; touch: hold a moment first so a swipe scrolls) ----
+const STOCK_HOLD_MS = 220;
+function stockPress(px, py, e) {
+  const ui = state._stockUI, sp = getStockpileByKey(state.stockpileOpen?.key);
+  if (state._stockPress) clearTimeout(state._stockPress.timer);
+  state._stockPress = null; state.stockDrag = null;
+  if (!ui || !sp) return;
+  for (const [src, list] of [["mine", ui.mine], ["pile", ui.pile]]) for (const r of list) if (hitRect(px, py, r)) {
+    const st = (src === "mine" ? activeInv() : sp.inv)?.[r.i]; if (!st) return;
+    const pr = state._stockPress = { src, i: r.i, x: px, y: py, touch: !!e?.pointerType && e.pointerType !== "mouse", item: { id: st.id, qty: st.qty } };
+    if (pr.touch) pr.timer = setTimeout(() => { if (state._stockPress === pr) beginStockDrag(pr, pr.x, pr.y); }, STOCK_HOLD_MS);
+    return;
   }
-
-  // Move full stack from stockpile -> player
-  for (const r of ui.right) {
-    if (hitRect(px, py, r)) {
-      const st = sp.inv[r.i];
-      if (!st) return true;
-
-      const qty = st.qty;
-      const id = st.id;
-
-      // try add, then remove from stockpile if success
-      const res = addItem(activeInv(), id, qty);
-      if (res.ok) {
-        removeItem(sp.inv, id, qty);
-
-        const itemName = itemDef(id)?.name ?? id;
-        logAction(`${pName} retrieved ${qty} ${itemName}${qty === 1 ? "" : "s"}.`);
-      }
-
-      return true;
-    }
-  }
-
+}
+function beginStockDrag(pr, x, y) {
+  clearTimeout(pr.timer); state._stockPress = null; SCROLL.press = null;   // a drag of a stack is not a scroll
+  state.stockDrag = { src: pr.src, i: pr.i, item: pr.item, x, y };
+  try { navigator.vibrate?.(12); } catch (_) {}
+}
+/** Returns true when the movement belongs to a stack drag (so the list must not scroll). */
+function stockDragMove(px, py) {
+  if (state.stockDrag) { state.stockDrag.x = px; state.stockDrag.y = py; return true; }
+  const pr = state._stockPress; if (!pr) return false;
+  const moved = Math.hypot(px - pr.x, py - pr.y);
+  if (!pr.touch && moved > 6) { beginStockDrag(pr, px, py); return true; }
+  if (pr.touch && moved > 10) { clearTimeout(pr.timer); state._stockPress = null; }   // a swipe: let it scroll
+  return false;
+}
+/** Finger / mouse released. Returns true when a drag was in progress (the release is then not a tap). */
+function stockDragEnd(px, py) {
+  if (state._stockPress) { clearTimeout(state._stockPress.timer); state._stockPress = null; }
+  const D = state.stockDrag; state.stockDrag = null;
+  if (!D) return false;
+  const ui = state._stockUI, sp = getStockpileByKey(state.stockpileOpen?.key); if (!ui || !sp) return true;
+  const other = D.src === "mine" ? ui.panePile : ui.paneMine;
+  if (other && hitRect(px, py, other)) stockpileWithSync(() => stockMoveStack(sp, D.src, D.i));
   return true;
 }
 
@@ -12545,6 +12664,7 @@ if (state.menu) {
   if (state.coordsOpen || state.collectiblesOpen || state.treasureOpen || state.stockpileOpen) {
     state.pointer.blocked = true;
     hudScrollDown(px, py);
+    if (state.stockpileOpen) stockPress(px, py, e);
     try { canvas.setPointerCapture(e.pointerId); } catch (_) {}
     return;
   }
@@ -12608,6 +12728,7 @@ if (state.craftingOpen) {
   return;
 }
 if (state.coordsOpen || state.collectiblesOpen || state.treasureOpen || state.stockpileOpen) {
+  if (state.stockpileOpen && stockDragMove(px, py)) return;
   hudScrollMove(px, py);
   return;
 }
@@ -12828,6 +12949,7 @@ state.ui.musicDragging = false;
     return;
   }
 
+  if (state.stockpileOpen && stockDragEnd(px, py)) { state.pointer.blocked = false; return; }   // dropped a stack onto the other grid (or let go of it)
   // a drag that scrolled a list is not a tap; neither is the release of the press that opened the sheet
   if ((state.coordsOpen || state.collectiblesOpen || state.treasureOpen || state.stockpileOpen) && (hudScrollUp() || !state.pointer.downOnModal)) { state.pointer.blocked = false; return; }
 
@@ -12836,6 +12958,7 @@ state.ui.musicDragging = false;
   if (state.collectiblesOpen) { handleCollectiblesTap(px, py); state.pointer.blocked = false; return; }
   if (state.treasureOpen) { handleTreasureTap(px, py); state.pointer.blocked = false; return; }
   if (state.stockpileOpen) { handleStockpileTap(px, py); state.pointer.blocked = false; return; }
+  if (hudDragEnd(px, py)) { state.pointer.blocked = false; return; }   // a backpack stack was being dragged
   hudPointerUp();   // a finger lifted off a backpack slot (a long press already opened its menu)
   if (state.menu) {
   // If a menu was opened on pointerdown, do NOT let the immediate pointerup auto-close it.
@@ -13255,20 +13378,7 @@ if (k === "x") {
   const p = activePlayer();
   const name = itemDef(st.id)?.name ?? st.id;
 
-  const spot = findDropSpotNear(p.x, p.y, st.id, 4);
-  if (!spot) {
-    playSound("deny");
-    logAction(`${p.name} had nowhere to drop ${name}.`);
-    return;
-  }
-
-  // Drop exactly 1
-  if (!removeItem(inv, st.id, 1)) return;
-
-  dropItemOnTile(st.id, 1, spot.x, spot.y);
-
-  playSound("pickup"); // swap sound if you want
-  logAction(`${p.name} dropped 1 ${name} at (${spot.x},${spot.y}).`);
+  dropInventoryStack(idx, 1);
   return;
 }
 
@@ -13715,7 +13825,7 @@ if (t.phaseT >= DAY_SECONDS) {
 // Host broadcasts authoritative time periodically so non-host stays in sync
 if (isHost && netEnabled) {
   state.net._timeSyncAccum = (state.net._timeSyncAccum || 0) + dt;
-  if (state.net._timeSyncAccum >= 5) {
+  if (state.net._timeSyncAccum >= 3) {
     state.net._timeSyncAccum = 0;
     sendNetInput({ type: "time_sync", phaseT: t.phaseT, day: t.day, t: t.t });
   }
@@ -13726,6 +13836,8 @@ if (isHost && netEnabled) {
 function advanceTimeSeconds(secs) {
   // Keep behavior consistent with updateTime(dt)
   if (state.title?.open || state.tutorial?.open) return;
+  // the host owns the clock: a guest asks it to skip ahead (and moves its own copy right away so bed feels instant)
+  if (state.net?.enabled && !state.net.isHost) sendWorldOp({ kind: "time_skip", secs });
 
   const t = state.time;
   const netEnabled = !!state.net?.enabled;
@@ -13760,6 +13872,7 @@ const isHost = !netEnabled || !!state.net?.isHost;
   if (t.isDay !== wasDay) {
     playSound(t.isDay ? "day" : "night");
   }
+  if (isHost && netEnabled) { state.net._timeSyncAccum = 0; sendNetInput({ type: "time_sync", phaseT: t.phaseT, day: t.day, t: t.t }); }   // tell the other device now, not in a few seconds
 }
 
 function startScreenFadeToBlackThenBack(opts = {}) {

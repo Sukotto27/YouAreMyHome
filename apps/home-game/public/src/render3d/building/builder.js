@@ -151,7 +151,7 @@ export function createBuilder({ scene, camera, rig, terrain, getWorld }) {
   }
   function evalFurn(tx, ty) {
     const hit = roomAtTile(S(), tx, ty); if (!hit) return { ok: false, reason: "Place it inside a room" };
-    if (typeof furnitureUnlocked === "function" && B.furn.item && !furnitureUnlocked(B.furn.item)) return { ok: false, reason: "Find this recipe first" };
+    if (typeof furnitureUnlocked === "function" && B.furn.item && !furnitureUnlocked(B.furn.item)) return { ok: false, reason: typeof houseBuilt === "function" && !houseBuilt() && furnitureNeedsHouse(furnitureDef(B.furn.item)) ? "Build a house first" : "Find this recipe first" };
     if (world().objects?.[ty]?.[tx]) return { ok: false, reason: "Something is already there" };
     if (typeof state !== "undefined" && state.players.some((p) => p.x === tx && p.y === ty)) return { ok: false, reason: "Someone is standing there" };
     return { ok: true, floorY: hit.structure.floorY ?? 0 };

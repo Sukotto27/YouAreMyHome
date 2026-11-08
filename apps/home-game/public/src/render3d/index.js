@@ -90,7 +90,7 @@ export async function start3D() {
       let px = wx, pz = wz, yaw = h.yaw;
       if (pk > 0 && lp) { px = wx + ((lp.tx + 0.5) * TILE_M - wx) * pk; pz = wz + ((lp.ty + 0.5) * TILE_M - wz) * pk; const dy = Math.atan2(Math.sin(lp.yaw - h.yaw), Math.cos(lp.yaw - h.yaw)); yaw = h.yaw + dy * pk; }
       if (ps?.kind === "sit" && pk > 0) { px += Math.sin(yaw) * (window.__seatFwd ?? 0.1) * pk; pz += Math.cos(yaw) * (window.__seatFwd ?? 0.1) * pk; }   // hips back against the backrest, not on the front edge
-      a.root.position.set(px, wy, pz); a.root.rotation.y = yaw; a.root.visible = !builder.active;   // build mode has no characters in the way
+      a.root.position.set(px, wy, pz); a.root.rotation.y = yaw; a.root.visible = !builder.active && !(typeof isAwayPlayer === "function" && isAwayPlayer(p));   // build mode has no characters in the way
       couple.apply(a, pi, bases, heading, pActors, dt, clock, (x, z) => curTerrain().heightAt(x, z));   // hug / kiss / holding hands
       // an action in progress (chopping, fishing...) keeps the body; walking away cancels it
       const speedScale = window.__animSpeed ?? 1; a.mixer.timeScale = speedScale;
@@ -176,11 +176,15 @@ export async function start3D() {
       const a = actorFor(state.players[state.activePlayer | 0] || state.players[0]);
       const t0 = performance.now(), ft0 = faceTile.get("last");
       const seated = action === "pet" && state.players[state.activePlayer | 0]?.pose?.kind === "sit";   // petting the cat on your lap: stay in the chair
-      startAction(a, seated ? "petSeated" : action, { playSfx: origPlaySound });
+      const actId = seated ? "petSeated" : action;
+      startAction(a, actId, { playSfx: origPlaySound });
       if (action === "pet") a.petAim = petAim;
       // the game may call harvestObject/pickupObject just before OR just after playing the sound: settle the target once its handler has finished
       queueMicrotask(() => {
-        const ft = faceTile.get("last"); if (!ft || performance.now() - ft.t > 400 || !a.act) return;
+        const ft = faceTile.get("last");
+        // tell the partner's game so the same animation plays on their screen
+        if (state.net?.enabled && typeof sendWorldOp === "function") sendWorldOp({ kind: "act", idx: state.activePlayer | 0, id: actId, tx: ft && performance.now() - ft.t < 400 ? ft.x : null, ty: ft && performance.now() - ft.t < 400 ? ft.y : null });
+        if (!ft || performance.now() - ft.t > 400 || !a.act) return;
         a.act.target = { x: ft.x, y: ft.y };
         const dx = (ft.x + 0.5) * TILE_M - a.root.position.x, dz = (ft.y + 0.5) * TILE_M - a.root.position.z;
         const h = heading.get(a); if (h && Math.hypot(dx, dz) > 0.2) h.yaw = Math.atan2(dx, dz);
@@ -188,6 +192,18 @@ export async function start3D() {
       return;     // the action plays the sound itself, on the strike
     }
     return origPlaySound(name);
+  };
+
+  // the partner's actions arrive as world ops: play the animation (silently, the sound already played on their device)
+  window.__remoteAct = (op) => {
+    const idx = op.idx | 0; if (idx === (state.activePlayer | 0)) return;
+    const pl = state.players[idx]; if (!pl || (typeof isAwayPlayer === "function" && isAwayPlayer(pl))) return;
+    const a = actorFor(pl);
+    startAction(a, op.id, { playSfx: () => {}, target: op.tx == null ? null : { x: op.tx, y: op.ty } });
+    if (op.tx != null) {
+      const dx = (op.tx + 0.5) * TILE_M - a.root.position.x, dz = (op.ty + 0.5) * TILE_M - a.root.position.z;
+      const h = heading.get(a); if (h && Math.hypot(dx, dz) > 0.2) h.yaw = Math.atan2(dx, dz);
+    }
   };
 
   // houses: built from City Builder components (see building/); structures live in state.world.structures
@@ -224,10 +240,11 @@ export async function start3D() {
   function updateFog(dt) {
     const ex = state.world?.explored; if (!ex) { terrain.setExplored(null); return; }
     fogClock += dt;
-    for (let i = 0; i < 2; i++) { const pl = state.players[i], a = pl && actorFor(pl); if (a) terrain.setSeen(i, a.root.position.x, a.root.position.z, (FOG_TILES + 0.45) * TILE_M); else terrain.setSeen(i, 0, 0, 0); }
+    for (let i = 0; i < 2; i++) { const pl = state.players[i], a = pl && actorFor(pl); if (a && !isAwayPlayer(pl)) terrain.setSeen(i, a.root.position.x, a.root.position.z, (FOG_TILES + 0.45) * TILE_M); else terrain.setSeen(i, 0, 0, 0); }
     if (fogClock < 0.2) return; fogClock = 0;
     let changed = false;
     for (const pl of state.players) {
+      if (isAwayPlayer(pl)) continue;
       const r = FOG_TILES * (state.holdingHands ? 1.5 : 1);
       for (let dy = -Math.ceil(r); dy <= Math.ceil(r); dy++) for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
         const x = pl.x + dx, y = pl.y + dy; if (dx * dx + dy * dy > r * r + 0.5 || !ex[y] || x < 0 || x >= ex[y].length) continue;
@@ -256,7 +273,7 @@ export async function start3D() {
       if (dungeon.map !== state.dungeon) { dungeon.build(state.dungeon); rig.override = null; }
       if (!dungeonObjects && !dungeonObjectsLoading) { dungeonObjectsLoading = true; createObjectLayer({ terrain: flat, scene: dungeon.scene, fog: false }).then((l) => { dungeonObjects = l; }); }
       renderer.toneMappingExposure = 0.9;
-      dungeon.update(dt, camera, state.players.map((pl) => actorFor(pl).root.position));
+      dungeon.update(dt, camera, state.players.map((pl) => (isAwayPlayer(pl) ? null : actorFor(pl).root.position)));
       dungeonObjects?.sync(state.dungeon, dt, clock);
       dungeonFx.update(dt);
     } else {

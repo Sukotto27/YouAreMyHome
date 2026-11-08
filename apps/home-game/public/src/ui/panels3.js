@@ -40,34 +40,45 @@ function hudDrawRunestone() {
 }
 
 // ------------------------------------------------------------------ stockpile (store / retrieve whole stacks)
+// Laid out like the trade sheet: the stockpile's slots on top, your backpack under it, both always visible (the sheet scrolls if the
+// screen is short). Tap a stack to send it across, or press and drag it over to the other grid (touch: hold a moment, then drag, so a
+// quick swipe still scrolls). The press / drag / drop logic is in main.js (stockPress / stockDragMove / stockDragEnd).
+function hudSlotAt(list, px, py) { for (const r of list) if (hitRect(px, py, r)) return r; return null; }
 function hudDrawStockpile() {
   const key = state.stockpileOpen?.key, sp = key ? getStockpileByKey(key) : null;
   if (!sp) { state.stockpileOpen = null; return; }
-  const title = sp.title || "Stockpile", L = hudSheetRect({ maxW: 720, maxH: 600 }), S = hudSheetDraw(L, title), b = S.body, wide = L.w >= 640;
-  const ui = state._stockUI = { close: S.close, panel: { x: L.x, y: L.y, w: L.w, h: L.h }, left: [], right: [] };
+  const title = sp.title || "Stockpile", L = hudSheetRect({ maxW: 580, maxH: 760 }), S = hudSheetDraw(L, title), b = S.body;
+  const ui = state._stockUI = { close: S.close, panel: { x: L.x, y: L.y, w: L.w, h: L.h }, mine: [], pile: [], paneMine: null, panePile: null };
   if (!sp.furniture) hudText(`at ${sp.x}, ${sp.y}`, L.x + 20 + 108, L.y + 31, 12, { color: HUD_C.inkSoft });
-  const pInv = activeInv() || [], sInv = sp.inv || [];
-  if (!state._stockTab) state._stockTab = "mine";
-  let cols;
-  if (wide) { const cw = (b.w - 14) / 2; cols = [["mine", { x: b.x, y: b.y + 26, w: cw, h: b.h - 26 }, pInv, ui.left], ["pile", { x: b.x + cw + 14, y: b.y + 26, w: cw, h: b.h - 26 }, sInv, ui.right]]; hudText("Your backpack", b.x + 2, b.y + 8, 13, { weight: 700, color: HUD_C.inkSoft }); hudText(`${title} (${sInv.length}/${sp.cap || INV_SLOTS})`, b.x + cw + 16, b.y + 8, 13, { weight: 700, color: HUD_C.inkSoft }); }
-  else {
-    hudSegmented({ x: b.x, y: b.y - 4, w: b.w, h: 38 }, [["mine", `Backpack (${pInv.length})`], ["pile", `${title} (${sInv.length}/${sp.cap || INV_SLOTS})`]], state._stockTab, (id, r) => { ui["_tab_" + id] = r; });
-    const list = { x: b.x, y: b.y + 46, w: b.w, h: b.h - 46 }; cols = [[state._stockTab, list, state._stockTab === "mine" ? pInv : sInv, state._stockTab === "mine" ? ui.left : ui.right]];
-  }
-  for (const [name, rect, inv, hits] of cols) {
-    const rowH = 54, off = hudScrollList("stock_" + name, rect, inv.length * rowH), mine = name === "mine";
-    if (!inv.length) hudText(mine ? "Your backpack is empty." : "Nothing in here yet.", rect.x + rect.w / 2, rect.y + 36, 19, { family: HUD_HAND, weight: 600, align: "center", color: HUD_C.inkSoft });
-    hudClip(rect, () => inv.forEach((st, i) => {
-      const def = itemDef(st.id), r = { i, x: rect.x, y: rect.y + i * rowH - off, w: rect.w - 8, h: rowH - 6 };
-      if (r.y + r.h < rect.y || r.y > rect.y + rect.h) return;
-      hudPath(r.x, r.y, r.w, r.h, 14); ctx.fillStyle = "rgba(54,37,33,0.05)"; ctx.fill();
-      drawCenteredEmoji(def?.icon ?? "❓", r.x + 26, r.y + r.h / 2, 28);
-      hudText(hudFit(def?.name ?? st.id, r.w - 150, 15, { weight: 600 }), r.x + 52, r.y + r.h / 2 - 6, 15, { weight: 600 });
-      hudText(`× ${st.qty}`, r.x + 52, r.y + r.h / 2 + 12, 12, { color: HUD_C.inkSoft });
-      hudText(mine ? "Store all ›" : "‹ Take all", r.x + r.w - 14, r.y + r.h / 2, 12, { weight: 700, color: HUD_C.rose, align: "right" });
-      const hit = hudClipRows(r, rect); if (hit) hits.push(hit);
-    }));
-  }
+  const pInv = activeInv() || [], sInv = sp.inv || [], cap = sp.cap || INV_SLOTS, D = state.stockDrag;
+  // a line of help (or the name of the stack under the finger / mouse)
+  const px0 = state.pointer?.x ?? -1, py0 = state.pointer?.y ?? -1;
+  const under = D ? D.item : (hudSlotAt(state._stockPrev?.mine ?? [], px0, py0) && pInv[hudSlotAt(state._stockPrev.mine, px0, py0).i]) || (hudSlotAt(state._stockPrev?.pile ?? [], px0, py0) && sInv[hudSlotAt(state._stockPrev.pile, px0, py0).i]) || null;
+  hudText(under ? `${itemDef(under.id)?.name ?? under.id}${under.qty > 1 ? "  ×" + under.qty : ""}` : "Tap a stack to move it across · or drag it", b.x + 2, b.y + 6, 13, { weight: 600, color: under ? HUD_C.ink : HUD_C.inkSoft });
+  const area = { x: b.x, y: b.y + 18, w: b.w, h: b.h - 18 };
+  const cols = hudInvCols(), gap = 4, sb = 8, cell = Math.min(48, Math.floor((area.w - sb - (cols - 1) * gap) / cols)), gridW = cols * cell + (cols - 1) * gap, gx = area.x + (area.w - sb - gridW) / 2;
+  const rowsP = Math.ceil(cap / cols), rowsM = Math.ceil(INV_SLOTS / cols), headH = 24, pileH = rowsP * (cell + gap), mineH = rowsM * (cell + gap), total = headH + pileH + 10 + headH + mineH;
+  const off = hudScrollList("stock", area, total);
+  const y0 = area.y - off, yPile = y0, yMine = y0 + headH + pileH + 10;
+  ui.panePile = hudClipRows({ x: area.x, y: yPile, w: area.w, h: headH + pileH + 5 }, area); ui.paneMine = hudClipRows({ x: area.x, y: yMine, w: area.w, h: headH + mineH }, area);
+  hudClip(area, () => {
+    const pane = (name, label, y, inv, n, hits) => {
+      const target = D && D.src !== name && ui["pane" + (name === "mine" ? "Mine" : "Pile")] && hitRect(D.x, D.y, ui["pane" + (name === "mine" ? "Mine" : "Pile")]);
+      if (target) { hudPath(area.x - 2, y - 2, area.w - sb + 4, headH + Math.ceil(n / cols) * (cell + gap) + 2, 14); ctx.fillStyle = "rgba(226,125,122,0.12)"; ctx.fill(); }
+      hudText(label, gx + 2, y + 10, 13, { weight: 700, color: HUD_C.inkSoft });
+      for (let i = 0; i < n; i++) {
+        const sx = gx + (i % cols) * (cell + gap), sy = y + headH + Math.floor(i / cols) * (cell + gap);
+        if (sy + cell < area.y || sy > area.y + area.h) continue;
+        const lifted = D && D.src === name && D.i === i;
+        hudSlotBox(sx, sy, cell, lifted ? null : (inv[i] ?? null), { ring: lifted ? HUD_C.gold : null });
+        const hit = hudClipRows({ i, x: sx, y: sy, w: cell, h: cell }, area); if (hit && inv[i]) hits.push(hit);
+      }
+    };
+    pane("pile", `${title} · ${sInv.length} of ${cap}`, yPile, sInv, cap, ui.pile);
+    pane("mine", `Your backpack · ${pInv.length} of ${INV_SLOTS}`, yMine, pInv, INV_SLOTS, ui.mine);
+  });
+  state._stockPrev = { mine: ui.mine, pile: ui.pile };
+  if (D) { ctx.save(); ctx.shadowColor = "rgba(54,37,33,0.4)"; ctx.shadowBlur = 10; drawCenteredEmoji(itemDef(D.item.id)?.icon ?? "❓", D.x, D.y - 4, 30); ctx.restore(); if (D.item.qty > 1) hudText(`×${D.item.qty}`, D.x, D.y + 20, 12, { weight: 700, align: "center" }); }
 }
 
 // ------------------------------------------------------------------ trade (two people swap items; drag a stack, or just tap it)

@@ -154,6 +154,8 @@ export function installInput3D({ renderer, camera, rig, terrain: overTerrain, ob
     openMenu({ screenX: pk.sx, screenY: pk.sy, title: "Door", options: [{ label: open ? "Close door" : "Open door", action: () => { closeMenu(); toggleDoorNow(pk.door); } }] });
     if (state.menu) state.menu._justOpened = false;
   }
+  const isAnimalObj = (obj) => !!obj && (objDef(obj.id)?.tags || []).includes("animal");
+  const isHuntAnimal = (obj) => !!obj && isHuntableDef(objDef(obj.id));
   function hasQuickAction(obj) {
     if (!obj || obj.meta?.depleted) return false;
     if (obj.id === "dropped_item") return true;
@@ -173,6 +175,7 @@ export function installInput3D({ renderer, camera, rig, terrain: overTerrain, ob
     const def = pk.obj && objDef(pk.obj.id);
     const canShoot = kind === "quick" && def && isHuntableDef(def) && manhattan(me().x, me().y, pk.tx, pk.ty) <= 3 && canShootBow(activeInv());
     if (adjacent(pk.tx, pk.ty) || canShoot) return runAction({ kind, tx: pk.tx, ty: pk.ty, sx: pk.sx, sy: pk.sy });
+    if (isHuntAnimal(pk.obj)) return;                                   // out of bow range: stay put, the animal would just run
     setPathTo(pk.tx, pk.ty);                                            // walk next to it, then act (see update())
     pending = { kind, tx: pk.tx, ty: pk.ty, sx: pk.sx, sy: pk.sy, t0: performance.now() };
   }
@@ -215,6 +218,7 @@ export function installInput3D({ renderer, camera, rig, terrain: overTerrain, ob
     const def = pk.obj && objDef(pk.obj.id);
     const canShoot = def && isHuntableDef(def) && manhattan(me().x, me().y, pk.tx, pk.ty) <= 3 && canShootBow(activeInv());
     if (adjacent(pk.tx, pk.ty) || canShoot) return openMenuAt(pk);
+    if (isHuntAnimal(pk.obj)) return;
     setPathTo(pk.tx, pk.ty);
     pending = { kind: pk.kind === "water" ? "water" : "menu", tx: pk.tx, ty: pk.ty, sx: pk.sx, sy: pk.sy, t0: performance.now() };
   }
@@ -305,6 +309,7 @@ export function installInput3D({ renderer, camera, rig, terrain: overTerrain, ob
       if (gp) { if (state.placingStockpile ? placeStockpileAt(gp.tx, gp.ty) : placehouseAt(gp.tx, gp.ty)) { state.placingStockpile = false; state.placinghouse = false; } }
       return;
     }
+    { const hit = pickAt(gg.x0, gg.y0); if (hit?.kind === "object" && isAnimalObj(hit.obj)) { showMarker(hit.tx, hit.ty, 0xffb0b0); return; } }   // an animal under the finger: never walk toward it (it would only scare it off)
     doMove(groundPick(gg.x0, gg.y0));                                   // single tap: walk there right away (a second tap quickly after turns it into "use")
   }, true);
   addEventListener("pointercancel", (e) => { pointers.delete(e.pointerId); if (g && g.id === e.pointerId) { clearHold(); g = null; resetMainPointer(); } pinch = null; }, true);

@@ -84,7 +84,8 @@ export function createBuilderUI(builder) {
       for (const d of have.filter((x) => x.cat === cat)) list.appendChild(mk("button", builder.furn.item === d.id ? "on" : "", `${d.icon} ${d.name}`, () => builder.setFurnItem(d.id)));
       const sel = furnitureDefs().find((d) => d.id === builder.furn.item);
       const note = sel ? `${sel.name}: ${furnitureCostText(sel)}` : typeof furnitureUnlockCount === "function" ? `${furnitureUnlockCount().have} of ${furnitureUnlockCount().total} pieces unlocked` : "";
-      if (note) catRow.parentElement.appendChild(mk("div", "label", note));
+      const lockedByHouse = typeof houseBuilt === "function" && !houseBuilt() && !window.__devMode;
+      if (note || lockedByHouse) catRow.parentElement.appendChild(mk("div", "label", lockedByHouse ? "Build a house to unlock furniture (kitchenware is ready now)" : note));
     }
     // paint: one panel, three scrolling lines (what, texture, colour)
     if (builder.mode === "paint" && builder.selected() && !collapsed) {
