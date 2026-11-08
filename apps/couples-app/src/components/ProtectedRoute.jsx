@@ -4,6 +4,9 @@ import { useAuth } from '../context/AuthContext'
 export default function ProtectedRoute({ children }) {
   const { user, loading } = useAuth()
 
+  // dev server only (stripped from production builds): skip the login so pages can be tried locally
+  if (import.meta.env.DEV) return children
+
   if (loading) {
     return (
       <div className="flex min-h-svh items-center justify-center bg-paper">

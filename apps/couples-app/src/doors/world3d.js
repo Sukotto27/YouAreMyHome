@@ -11,6 +11,7 @@ import { ABILITY, COLORS, VIEW3D } from './config.js'
 import { doorClosedTo } from './doors.js'
 import { isSolid } from './levels.js'
 import { createTrapView } from './trapview.js'
+import { buildScenery, crateCellSet, createCrateMesh } from './scenery.js'
 
 const DOOR_URL = `${import.meta.env.BASE_URL}doors/models/door.fbx`
 const OPEN_TIME = 0.4 // seconds for a door to swing fully open or shut
@@ -480,12 +481,14 @@ export async function createWorld(scene) {
     const depth = VIEW3D.TILE_FRONT - VIEW3D.TILE_BACK
     const midZ = (VIEW3D.TILE_FRONT + VIEW3D.TILE_BACK) / 2
     const cells = []
+    const crates = crateCellSet(level) // drawn as crates (scenery.js), not brick
+    const brick = (x, y) => isSolid(level, x, y) && !crates.has(`${x},${y}`)
     for (let ty = 0; ty < level.rows; ty++) {
       for (let tx = 0; tx < level.cols; tx++) {
-        if (!isSolid(level, tx, ty)) continue
-        const open =
-          !isSolid(level, tx, ty - 1) || !isSolid(level, tx + 1, ty) || !isSolid(level, tx - 1, ty) || !isSolid(level, tx, ty + 1)
-        if (open) cells.push({ tx, ty, top: !isSolid(level, tx, ty - 1) })
+        if (!brick(tx, ty)) continue
+        // (a crate counts as open air here, so the floor under a stack still shows its top)
+        const open = !brick(tx, ty - 1) || !brick(tx + 1, ty) || !brick(tx - 1, ty) || !brick(tx, ty + 1)
+        if (open) cells.push({ tx, ty, top: !brick(tx, ty - 1) })
       }
     }
 
@@ -686,8 +689,14 @@ export async function createWorld(scene) {
     root = new THREE.Group()
     buildBackdrop(level, root)
     buildTiles(level, root)
+    buildScenery(level, root)
     dynamic = buildObjects(game, root)
     dynamic.traps = createTrapView(root, game)
+    dynamic.crates = game.crates.map((c, i) => {
+      const mesh = createCrateMesh(i)
+      root.add(mesh)
+      return mesh
+    })
     scene.add(root)
   }
 
@@ -696,6 +705,14 @@ export async function createWorld(scene) {
   // door is open for one player and shut for the other.
   function apply(game, focus, paneIndex, dt) {
     if (!dynamic) return
+    game.crates.forEach((c, i) => {
+      const m = dynamic.crates?.[i]
+      if (!m) return
+      m.visible = c.mode !== 'lost'
+      const ease = c.t * c.t * (3 - 2 * c.t)
+      const shake = c.mode === 'idle' && c.push.t > 0 ? Math.sin(performance.now() / 18) * 0.012 : 0
+      m.position.set(c.x + 0.5 + (c.mode === 'slide' ? c.dx * ease : 0) + shake, -((c.mode === 'fall' ? c.fy : c.y) + 0.5), 0)
+    })
     const sys = game.doors
     const swing = (door, shouldOpen) => {
       const open = door.open[paneIndex]
@@ -806,6 +823,10 @@ export async function createWorld(scene) {
     }
   }
 
-  return { build, apply, dispose: clear }
+  function setVisible(visible) {
+    if (root) root.visible = visible
+  }
+
+  return { build, apply, setVisible, dispose: clear }
 }
 

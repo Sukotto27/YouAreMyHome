@@ -25,11 +25,12 @@ import { ABILITY, KEYS, PLAYER } from './config.js'
 import { isSolid } from './levels.js'
 import { doorBlocksCell } from './doors.js'
 import { collapseSolid } from './traps.js'
+import { crateCovers, crateSolid } from './crates.js'
 import { bodyCenter, bodyBottom, bodyTop, headY } from './gravity.js'
 import { buildRects, isFrozen } from './drawing.js'
 
 export const ABILITY_IDS = ['solidLight', 'jumpBoost', 'teleport', 'lightEcho', 'lightRope']
-export const ABILITY_NAMES = { solidLight: 'Solid Light', jumpBoost: 'Jump Boost', teleport: 'Teleport', lightEcho: 'Light Echo', lightRope: 'Light Rope' }
+export const ABILITY_NAMES = { solidLight: 'Solid Light', jumpBoost: 'Jump Boost', teleport: 'Teleport', lightEcho: 'Light Echo', lightRope: 'Light Rope', heart: 'Extra Heart' }
 export const TELEPORT_LABEL = { partner: 'To partner', swap: 'Swap places' }
 const ROMAN = ['', 'I', 'II', 'III']
 export const levelName = (n) => ROMAN[n] || String(n)
@@ -68,7 +69,10 @@ export function startingAbilities(level, carried) {
   }
   return out
 }
-export const exportAbilities = (game) => ({ blue: { ...game.players[0].abilities }, pink: { ...game.players[1].abilities } })
+export const exportAbilities = (game) => ({
+  blue: { ...game.players[0].abilities, maxHearts: game.players[0].maxHearts },
+  pink: { ...game.players[1].abilities, maxHearts: game.players[1].maxHearts },
+})
 
 // ---------------------------------------------------------------------------
 // effects and notices (pure data; view3d / overlay draw them)
@@ -83,7 +87,7 @@ export function updateFx(game, dt) {
   for (const f of game.fx) f.age += dt
   game.fx = game.fx.filter((f) => f.age < f.life)
   for (const n of game.notices) n.age += dt
-  game.notices = game.notices.filter((n) => n.age < ABILITY.NOTICE_TIME)
+  game.notices = game.notices.filter((n) => n.age < (n.life || ABILITY.NOTICE_TIME))
 }
 
 // ---------------------------------------------------------------------------
@@ -91,7 +95,7 @@ export function updateFx(game, dt) {
 // ---------------------------------------------------------------------------
 export function createCrystals(level) {
   return (level.objects.crystals || []).map((c) => {
-    if (!ABILITY_IDS.includes(c.ability)) throw new Error(`Level "${level.name}": crystal "${c.id}" has unknown ability "${c.ability}"`)
+    if (!ABILITY_IDS.includes(c.ability) && c.ability !== 'heart') throw new Error(`Level "${level.name}": crystal "${c.id}" has unknown ability "${c.ability}"`)
     if (c.for !== 'blue' && c.for !== 'pink') throw new Error(`Level "${level.name}": crystal "${c.id}" must be "for" blue or pink`)
     return { id: c.id, x: c.x, y: c.y, ability: c.ability, for: c.for, taken: false }
   })
@@ -99,10 +103,18 @@ export function createCrystals(level) {
 
 export function updateCrystals(game) {
   for (const c of game.crystals) {
-    if (c.taken) continue
+    if (c.taken || crateCovers(game, c.x, c.y)) continue // (a crate on top of it hides it)
     const p = game.players.find((q) => q.id === c.for)
     if (Math.abs(p.x - (c.x + 0.5)) > ABILITY.CRYSTAL_REACH || Math.abs(bodyCenter(p) - (c.y + 0.5)) > ABILITY.CRYSTAL_REACH + 0.4) continue
     c.taken = true
+    if (c.ability === 'heart') {
+      // an extra heart: one more hit before the room restarts, and a full refill
+      p.maxHearts = Math.min(ABILITY.MAX_HEARTS, p.maxHearts + 1)
+      p.hearts = p.maxHearts
+      game.dialogs.push({ player: p.id, ability: 'heart', level: p.maxHearts, upgraded: true })
+      addFx(game, 'collect', c.x + 0.5, c.y + 0.5, 'heart', 0.9)
+      continue
+    }
     const before = abilityLevel(p, c.ability)
     const after = Math.min(ABILITY.MAX_LEVEL, before + 1)
     p.abilities[c.ability] = after
@@ -151,7 +163,7 @@ export function boxFree(game, p, x, feetY, grav, ignorePartner = false) {
   const half = p.w / 2
   const top = grav < 0 ? feetY : feetY - p.h
   const bottom = top + p.h
-  const solid = (tx, ty) => isSolid(game.level, tx, ty) || doorBlocksCell(game.doors, p, tx, ty) || collapseSolid(game.traps, tx, ty)
+  const solid = (tx, ty) => isSolid(game.level, tx, ty) || doorBlocksCell(game.doors, p, tx, ty) || collapseSolid(game.traps, tx, ty, p) || crateSolid(game, tx, ty)
   for (let ty = Math.floor(top + BODY_EPS); ty <= Math.floor(bottom - BODY_EPS); ty++) {
     for (let tx = Math.floor(x - half + BODY_EPS); tx <= Math.floor(x + half - BODY_EPS); tx++) if (solid(tx, ty)) return false
   }
@@ -204,6 +216,14 @@ export function useTeleport(game, p) {
     return true
   }
   if (p.tpCooldown > 0) return false
+  // some gates are teleport-proof (the level lists them): you cannot skip a puzzle by popping over to your partner on the far side of it
+  const target = action === 'marker' ? p.tpMarker?.x : q.x
+  const crossed = (game.level.objects.teleportBarriers || []).some((b) => (p.x < b.x) !== (target < b.x) && !(b.open && game.doors.switches.some((s) => s.id === b.open && s.on)))
+  if (crossed) {
+    addFx(game, 'fail', p.x, bodyCenter(p), color, 0.35)
+    addNotice(game, p.id, 'Something here blocks the teleport')
+    return false
+  }
   const from = { x: p.x, y: bodyCenter(p) }
   const fail = () => {
     addFx(game, 'fail', p.x, bodyCenter(p), color, 0.35)
@@ -247,61 +267,69 @@ export function abilityDialog(d, touch = false) {
   const who = d.player === 'blue' ? 'Blue' : 'Pink'
   const L = d.level
   const lines = []
-  // with the touch controls: the toolbelt selects, the USE and NEXT buttons act, the joystick and JUMP move
-  const pick = (name) => `Select ${name} on the toolbelt and tap USE`
-  switch (d.ability) {
-    case 'solidLight': {
-      const s = ABILITY.SOLID_LIGHT[L]
-      if (L === 1) {
-        lines.push(
-          touch
-            ? `${pick('Solid Light')} to aim, then drag your finger anywhere on the screen to draw a beam of solid light that your partner can stand on. You are frozen in place while it exists.`
-            : `Press ${k('draw')} to aim, then drag the mouse anywhere (in either view) to draw a beam of solid light that your partner can stand on. You are frozen in place while it exists.`,
-        )
-      }
-      lines.push(L === 3 ? `Now it reaches ${s.ink} tiles and lasts until you move.` : `The beam can be ${s.ink} tiles long and lasts ${s.life} seconds.`)
-      break
+  // every description is the same shape: what it is for, then how to use it ("Controls: ...")
+  const say = (what, controls) => {
+    lines.push(what)
+    if (controls) lines.push(`Controls: ${controls}`)
+  }
+  if (d.ability === 'heart') {
+    return {
+      title: `${who} found an extra heart`,
+      subtitle: `Now ${L} hearts`,
+      lines: ['You can take one more hit before the room starts over. Reaching an exit refills all hearts.'],
+      color: ABILITY.COLORS.heart,
     }
+  }
+  const pick = (name) => `pick ${name} on the toolbelt and tap USE`
+  switch (d.ability) {
+    case 'solidLight':
+      if (L === 1) {
+        say(
+          'A beam of solid light that your partner can walk on to get to hard-to-reach areas. It can also be used to temporarily block projectiles. You will be frozen in place while using it.',
+          touch ? `${pick('Solid Light')}, then drag a line on the screen.` : `press ${k('draw')}, then drag the mouse.`,
+        )
+      } else say(L === 3 ? 'Your beams are longer still, and they last until you move.' : 'Your beams are longer and last longer.')
+      break
     case 'jumpBoost':
-      if (L === 1) lines.push('A small burst of light now boosts your jump.')
-      if (L === 2) lines.push(`${touch ? 'Tap JUMP' : 'Press jump'} again in mid-air: a stepping stone of solid light appears under your feet and you jump a second time.`)
+      if (L === 1) say("Jump higher and farther, to reach ledges and gaps you couldn't before.", 'just jump as usual.')
+      if (L === 2) say('A second jump in mid-air, off a step of light.', touch ? 'tap JUMP again in the air.' : `press ${k('jump')} again in the air.`)
       if (L === 3) {
-        lines.push(
-          touch
-            ? 'You can jump up to three more times in mid-air. Hold nothing to go straight up, push the joystick sideways to jump diagonally, or sideways and down to dash straight forward.'
-            : 'You can jump up to three more times in mid-air. Hold nothing to go straight up, hold a direction to jump diagonally, or hold a direction and crouch to dash straight forward.',
+        say(
+          'Up to three jumps in mid-air, in any direction.',
+          touch ? 'jump in the air with the joystick centered for straight up, sideways for diagonal, or sideways and down to dash forward.' : 'jump in the air with nothing held for straight up, a direction for diagonal, or a direction and crouch to dash forward.',
         )
       }
       break
     case 'teleport':
-      if (L === 1) lines.push(touch ? `${pick('Teleport')} to teleport instantly to your partner.` : `Press ${k('teleport')} to teleport instantly to your partner.`)
-      if (L === 2) lines.push(touch ? 'You can now swap places with your partner. Tap NEXT to choose between the two, then USE.' : `You can now swap places with your partner. Press ${k('cycle')} to choose between the two, then ${k('teleport')} to use it.`)
+      if (L === 1) say('Instantly teleport to your partner, wherever they are.', touch ? `${pick('Teleport')}.` : `press ${k('teleport')}.`)
+      if (L === 2) say('You can also swap places with your partner.', touch ? 'tap NEXT to choose between the two, then USE.' : `press ${k('cycle')} to choose between the two, then ${k('teleport')}.`)
       if (L === 3) {
-        lines.push(
-          touch
-            ? 'New action: Marker. Tap NEXT until it is selected, then USE to place a mark where you stand. Use it again from anywhere else to teleport back to the mark, or while standing on it to pick it up.'
-            : `New action: Marker. Press ${k('cycle')} until it is selected, then ${k('teleport')} to place a mark where you stand. Use it again from anywhere else to teleport back to the mark, or while standing on it to pick it up.`,
+        say(
+          'A new action, Marker: drop a mark, then teleport back to it from anywhere.',
+          touch ? 'tap NEXT until Marker is chosen, then USE to place the mark. USE again anywhere else to go back to it, or on top of it to pick it up.' : `press ${k('cycle')} until Marker is chosen, then ${k('teleport')} to place the mark. Press it again anywhere else to go back to it, or on top of it to pick it up.`,
         )
       }
       break
     case 'lightEcho':
-      lines.push(touch ? `${pick('Light Echo')} while standing on the ground to leave a glowing copy of yourself, which holds down a pressure plate for you.` : `Press ${k('echo')} while standing on the ground to leave a glowing copy of yourself, which holds down a pressure plate for you.`)
-      lines.push(`It stays for ${ABILITY.ECHO_LIFE[L]} seconds${L < 3 ? ', and longer at higher levels' : ''}.`)
+      say(
+        `A glowing copy of yourself that stands on a pressure plate in your place. It lasts ${ABILITY.ECHO_LIFE[L]} seconds.`,
+        touch ? `${pick('Light Echo')}, while standing on the ground.` : `press ${k('echo')}, while standing on the ground.`,
+      )
       break
     case 'lightRope':
       if (L === 1) {
-        lines.push(
+        say(
+          'A rope of light to swing from, or to pull your partner or a loose key over to you.',
           touch
-            ? `${pick('Light Rope')}, then tap a spot on the screen (the ceiling is ideal). A rope of light shoots out and latches on to the first thing it meets: swing from it (push the joystick sideways to pump the swing, down to reel it in, JUMP to let go), or aim at a loose key or at your partner and pull the joystick down to reel them in.`
-            : `Press ${k('rope')}, then click a spot in either view (the ceiling is ideal). A rope of light shoots out and latches on to the first thing it meets: swing from it (left/right pump the swing, crouch reels it in, jump lets go), or aim at a loose key or at your partner and crouch to reel them in.`,
+            ? `${pick('Light Rope')}, then tap where to aim. Push the joystick sideways to swing, down to reel in, JUMP to let go.`
+            : `press ${k('rope')}, then click where to aim. Left and right swing, crouch reels in, jump lets go.`,
         )
-      }
-      lines.push(`The rope reaches ${ABILITY.ROPE_RANGE[L]} tiles and lasts ${ABILITY.ROPE_LIFE[L]} seconds.`)
+      } else say(`Your rope reaches ${ABILITY.ROPE_RANGE[L]} tiles and holds for ${ABILITY.ROPE_LIFE[L]} seconds.`)
       break
     default:
   }
   return {
-    title: `${who} has obtained ${ABILITY_NAMES[d.ability]}${d.upgraded ? ' ' + levelName(L) : ''}`,
+    title: `${who} found ${ABILITY_NAMES[d.ability]}${d.upgraded ? ' ' + levelName(L) : ''}`,
     subtitle: d.upgraded ? `Upgraded to level ${levelName(L)}` : 'Level I',
     lines,
     color: ABILITY.COLORS[d.ability],

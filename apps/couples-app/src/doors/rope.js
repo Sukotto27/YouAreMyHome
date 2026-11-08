@@ -13,6 +13,7 @@ import { ABILITY, PLAYER } from './config.js'
 import { isSolid } from './levels.js'
 import { doorBlocksCell } from './doors.js'
 import { collapseSolid } from './traps.js'
+import { crateSolid } from './crates.js'
 import { bodyBottom, bodyCenter, bodyTop } from './gravity.js'
 import { isFrozen } from './drawing.js'
 import { abilityLevel, addFx, addNotice, boxFree } from './abilities.js'
@@ -65,7 +66,7 @@ export function fireRope(game, p, point) {
   const solidAt = (x, y) => {
     const tx = Math.floor(x)
     const ty = Math.floor(y)
-    return isSolid(game.level, tx, ty) || doorBlocksCell(game.doors, p, tx, ty) || collapseSolid(game.traps, tx, ty)
+    return isSolid(game.level, tx, ty) || doorBlocksCell(game.doors, p, tx, ty) || collapseSolid(game.traps, tx, ty) || crateSolid(game, tx, ty)
   }
   const keys = game.doors.keys.filter((k) => !k.holder && !k.used)
   let hit = null

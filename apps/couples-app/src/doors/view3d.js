@@ -6,6 +6,7 @@ import { ABILITY, CAMERA, COLORS, DRAW, PLAYER, VIEW3D } from './config.js'
 import { isSolid } from './levels.js'
 import { createWorld, getHaloTexture } from './world3d.js'
 import { ropeEnd, ropeHand } from './rope.js'
+import { createIntroRig } from './introrig.js'
 import { loadCharacters } from './characterRig.js'
 import { bodyCenter } from './gravity.js'
 
@@ -31,7 +32,8 @@ export async function createView3D(container) {
   container.insertBefore(canvas, container.firstChild)
 
   const scene = new THREE.Scene()
-  scene.add(new THREE.HemisphereLight(0xd9ccff, 0x5a4a52, 1.5))
+  const hemi = new THREE.HemisphereLight(0xd9ccff, 0x5a4a52, 1.5)
+  scene.add(hemi)
   const sun = new THREE.DirectionalLight(0xfff1dd, 2.4)
   sun.position.set(-7, 12, 14) // from the upper left, in front: tops and left faces catch the light
   scene.add(sun)
@@ -41,6 +43,7 @@ export async function createView3D(container) {
   scene.add(fill)
 
   const world = await createWorld(scene)
+  const introRig = createIntroRig(scene) // the cutscene door in the back wall (only in rooms with an intro)
 
   // --- players: stand-in capsules until the real models have loaded ---
   const players = {}
@@ -86,6 +89,7 @@ export async function createView3D(container) {
   function setLevel(level, game) {
     currentLevel = level
     world.build(level, game)
+    introRig.setLevel(level)
   }
 
   // Replaces the stand-in capsules with Scott and Cristina once they're ready.
@@ -246,11 +250,13 @@ export async function createView3D(container) {
       view.roll += (target - view.roll) * Math.min(1, dt * 10)
       if (Math.abs(target - view.roll) < 0.002) view.roll = target
       const half = p.h / 2
+      const cine = p.cine // set by the opening scene: front-on, depth, turn and animation come from it
+      view.root.visible = !(cine && cine.hidden)
       view.root.rotation.order = 'ZYX'
-      view.root.rotation.set(0, (p.grav * p.facing * Math.PI) / 2, view.roll)
-      view.root.position.set(p.x + half * Math.sin(view.roll), -bodyCenter(p) - half * Math.cos(view.roll), 0)
+      view.root.rotation.set(0, cine ? cine.yaw : (p.grav * p.facing * Math.PI) / 2, view.roll)
+      view.root.position.set(p.x + half * Math.sin(view.roll), -bodyCenter(p) - half * Math.cos(view.roll), cine ? cine.z : 0)
       if (view.actor) {
-        const clip = clipFor(p)
+        const clip = cine ? { name: cine.clip, rate: cine.rate } : clipFor(p)
         view.actor.play(clip.name, { once: !!clip.once, speed: clip.rate || 1 })
         view.actor.mixer.update(dt)
         raiseArms(view, p, dt)
@@ -269,7 +275,7 @@ export async function createView3D(container) {
         view.capsule.scale.y = p.h / PLAYER.HEIGHT_STAND
         view.capsule.position.y = p.h / 2
       }
-      const floor = p.grav > 0 && view.roll < 0.05 ? floorBelow(p) : null // (no blob shadow on the ceiling)
+      const floor = p.grav > 0 && view.roll < 0.05 && !cine ? floorBelow(p) : null // (no blob shadow on the ceiling, or in the cutscene)
       view.shadow.visible = floor !== null
       if (floor !== null) {
         const fall = Math.max(0, floor - p.y) // how far above the floor they are
@@ -407,7 +413,23 @@ export async function createView3D(container) {
   }
 
   // panes: [{x,y,w,h}] in CSS px; cams: the follow-cameras ({x,y} in tiles)
-  function render(game, panes, cams, dt) {
+  // how far the camera sits so that `tiles` tiles fit the pane's height
+  const cameraDistance = (tiles) => tiles / 2 / Math.tan((VIEW3D.FOV * Math.PI) / 360)
+  const dirFront = new THREE.Vector3(0, 0.1, 1).normalize()
+  const dirSide = offset.clone().normalize()
+  const dirNow = new THREE.Vector3()
+  const clearColor = new THREE.Color()
+
+  // cine: the opening scene's camera, if it is running ({ front, viewTiles, target, world, door, light, lock })
+  function render(game, panes, cams, dt, cine = null) {
+    world.setVisible(cine ? cine.world : true)
+    // before the room appears it is pitch black: the only light is what comes through the door
+    // (then the room's own light comes up slowly, so it fades in rather than switching on)
+    const rv = cine ? (cine.world ? cine.reveal : 0) : 1
+    renderer.setClearColor(clearColor.setRGB(0.05 * rv, 0.04 * rv, 0.07 * rv), 1)
+    hemi.intensity = 0.04 + (1.5 - 0.04) * rv
+    sun.intensity = 0.05 + (2.4 - 0.05) * rv
+    introRig.apply(cine)
     poseCharacters(game, dt)
     poseEchoes(game, dt)
     poseRopes(game)
@@ -422,13 +444,22 @@ export async function createView3D(container) {
       const camera = cameras[i]
       camera.aspect = pane.w / pane.h
       camera.updateProjectionMatrix()
-      target.set(cams[i].x, -cams[i].y, 0)
-      // the pane rolls with its player: upside-down on the ceiling, the ceiling is their floor
-      const roll = players[game.players[i].id].roll
-      rigOffset.copy(offset).applyAxisAngle(AXIS_Z, roll)
-      camera.up.set(-Math.sin(roll), Math.cos(roll), 0)
-      camera.position.copy(target).add(rigOffset)
-      camera.lookAt(target)
+      if (cine && i === 0) {
+        // the opening scene: a camera that swings from head-on to the side view, and zooms
+        target.set(cine.target.x, -cine.target.y, 0)
+        dirNow.copy(dirSide).lerp(dirFront, cine.front).normalize()
+        camera.up.set(0, 1, 0)
+        camera.position.copy(target).addScaledVector(dirNow, cameraDistance(cine.viewTiles))
+        camera.lookAt(target)
+      } else {
+        target.set(cams[i].x, -cams[i].y, 0)
+        // the pane rolls with its player: upside-down on the ceiling, the ceiling is their floor
+        const roll = players[game.players[i].id].roll
+        rigOffset.copy(offset).applyAxisAngle(AXIS_Z, roll)
+        camera.up.set(-Math.sin(roll), Math.cos(roll), 0)
+        camera.position.copy(target).add(rigOffset)
+        camera.lookAt(target)
+      }
       camera.updateMatrixWorld(true)
 
       world.apply(game, game.players[i], i, dt)

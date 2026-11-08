@@ -91,6 +91,15 @@ export const COLORS = {
   pink: '#ec4899',
 }
 
+// Crates (crates.js): blocks the players push.
+export const CRATES = {
+  SLIDE_TIME: 0.3, // seconds to slide one cell
+  PUSH_DELAY: 0.18, // seconds of pushing before it starts to move
+  GRAVITY: 30,
+  MAX_FALL: 20,
+  RESPAWN: 3, // a crate lost down a pit comes back where it started after this long
+}
+
 // Traps (traps.js).
 export const TRAPS = {
   TELEGRAPH: 0.4, // seconds of warning before a jet/laser pulse or an arrow shot
@@ -129,7 +138,7 @@ export const CARRY = {
 // The co-op drawing mechanic (drawing.js).
 export const DRAW = {
   LINE_LIFETIME: 3, // seconds a drawn line lasts (it starts when you let go of the mouse)
-  INK_MAX: 12, // maximum line length, in tiles
+  INK_MAX: 24, // the longest line any level of Solid Light can draw, in tiles (Solid Light I draws 3: see ABILITY.SOLID_LIGHT)
   DRAW_COOLDOWN: 2, // seconds before you can draw again after a line vanishes
   LINE_THICKNESS: 0.2, // how thick the solid line is, in tiles
   MIN_LINE: 0.4, // shorter scribbles are thrown away
@@ -143,8 +152,8 @@ export const DRAW = {
 export const ABILITY = {
   MAX_LEVEL: 3,
   // Solid Light: the drawing. Level 1 is how the drawing has always worked here; Infinity = until the caster moves.
-  SOLID_LIGHT: [null, { ink: DRAW.INK_MAX, life: DRAW.LINE_LIFETIME }, { ink: 18, life: 5 }, { ink: 24, life: Infinity }],
-  JUMP_BOOST: 1.08, // Jump Boost 1+: multiplier on the jump's launch speed (a slight lift)
+  SOLID_LIGHT: [null, { ink: 3, life: DRAW.LINE_LIFETIME }, { ink: 18, life: 5 }, { ink: 24, life: Infinity }],
+  JUMP_BOOST: 1.15, // Jump Boost 1+: multiplier on the jump's launch speed (about a third higher: a 3-tile ledge becomes reachable)
   EXTRA_JUMPS: [0, 0, 1, 3], // mid-air jumps by Jump Boost level (each off a stone of solid light)
   STONE: { life: 0.5, width: 1.2 }, // the stepping stones
   DIAGONAL_SPEED: 7.5, // horizontal speed cap after a diagonal stone jump
@@ -153,7 +162,8 @@ export const ABILITY = {
   CRYSTAL_REACH: 0.8, // how close you must get to your crystal to take it
   NOTICE_TIME: 3.5, // seconds a "found X" message stays up
   // each ability has its own colour (crystal, HUD, effects)
-  COLORS: { solidLight: '#22d3ee', jumpBoost: '#facc15', teleport: '#a855f7', lightEcho: '#4ade80', lightRope: '#fb923c' },
+  COLORS: { solidLight: '#22d3ee', jumpBoost: '#facc15', teleport: '#a855f7', lightEcho: '#4ade80', lightRope: '#fb923c', heart: '#ff4d6d' },
+  MAX_HEARTS: 6, // three to start with, and extra-heart crystals add more
   // Light Echo: how long the copy stays, by level
   ECHO_LIFE: [0, 5, 10, 20],
   ECHO_COOLDOWN: 1.5,

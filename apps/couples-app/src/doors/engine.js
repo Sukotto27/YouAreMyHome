@@ -12,6 +12,8 @@ import { initDraw, initDrawingState, isFrozen, releaseOnMove, solidLinesFor, tog
 import { addFx, createCrystals, cycleTeleport, exportAbilities, extraJumps, jumpMultiplier, spawnStone, startingAbilities, updateCrystals, updateEchoes, updateFx, useEcho, useTeleport, abilityLevel } from './abilities.js'
 import { initRope, toggleRope, updateRopes } from './rope.js'
 import { collapseSolid, createTrapSystem, updateCheckpoints, updateTraps } from './traps.js'
+import { crateSolid, createCrates, updateCrates } from './crates.js'
+import { updateFeedback } from './feedback.js'
 import { bodyBottom, bodyTop, headY } from './gravity.js'
 
 const EPS = 1e-4
@@ -52,6 +54,9 @@ function makePlayer(id, spawn) {
     tpMarker: null, // Teleport 3: { x, y, grav } of the marked spot
     teleportHeldPrev: false,
     cycleHeldPrev: false,
+    hearts: 3, // lives left in this room (campaign rooms only); reaching an exit refills them
+    maxHearts: 3,
+    heartsOn: false,
     grav: 1, // +1 walking on the floor, -1 flipped: walking on the ceiling (gravity.js)
     carriedBy: null, // id of the partner whose shoulders this player is riding (M3b)
     carrying: null, // id of the partner riding on this player's shoulders
@@ -67,6 +72,7 @@ export function createGame(level, carried = null) {
     players: [makePlayer('blue', level.spawns.blue), makePlayer('pink', level.spawns.pink)],
     doors: createDoorSystem(level),
     traps: createTrapSystem(level),
+    crates: createCrates(level), // pushable blocks (crates.js)
     crystals: createCrystals(level),
     echoes: [], // Light Echoes standing about (abilities.js)
     fx: [], // little visual events (jump bursts, teleports, ...): { id, type, x, y, color, age, life }
@@ -77,7 +83,15 @@ export function createGame(level, carried = null) {
     complete: false, // both players reached the exit
   }
   game.startAbilities = startingAbilities(level, carried)
-  for (const p of game.players) Object.assign(p.abilities, game.startAbilities[p.id])
+  game.startMaxHearts = {}
+  for (const p of game.players) {
+    Object.assign(p.abilities, game.startAbilities[p.id])
+    p.maxHearts = Math.min(ABILITY.MAX_HEARTS, carried?.[p.id]?.maxHearts ?? 3)
+    p.hearts = p.maxHearts
+    p.heartsOn = !!level.campaign // the older test rooms never run out of hearts
+    game.startMaxHearts[p.id] = p.maxHearts
+  }
+  game.outOfHearts = false // set when someone's last heart goes: the room restarts (index.js)
   return game
 }
 export { exportAbilities }
@@ -87,13 +101,22 @@ export { exportAbilities }
 export function resetGame(game) {
   game.time = 0
   game.players = [makePlayer('blue', game.level.spawns.blue), makePlayer('pink', game.level.spawns.pink)]
-  for (const p of game.players) Object.assign(p.abilities, game.startAbilities[p.id]) // crystals respawn, so the abilities go back too
+  for (const p of game.players) {
+    Object.assign(p.abilities, game.startAbilities[p.id]) // crystals respawn, so the abilities go back too
+    p.maxHearts = game.startMaxHearts[p.id]
+    p.hearts = p.maxHearts
+    p.heartsOn = !!game.level.campaign
+  }
+  game.outOfHearts = false
   game.doors = createDoorSystem(game.level)
   game.traps = createTrapSystem(game.level)
+  game.crates = createCrates(game.level)
+  game._crateClear = null
   game.crystals = createCrystals(game.level)
   game.echoes = []
   game.fx = []
   game.notices = []
+  game.feedbackPrev = null
   game.dialogs = []
   Object.assign(game, initDrawingState())
   game.complete = false
@@ -120,6 +143,7 @@ export function killPlayer(player, cause = 'fell') {
   player.invuln = TRAPS.RESPAWN_PROTECTION
   player.lastDeath = cause // what got them (a trap id, or 'fell'), for the debug panel
   player.deaths++
+  if (player.heartsOn) player.hearts = Math.max(0, player.hearts - 1)
 }
 
 // What counts as solid for ONE player right now: the tile grid plus any door
@@ -127,7 +151,7 @@ export function killPlayer(player, cause = 'fell') {
 // open to a player are simply not there for that player.
 function solidFor(game, player) {
   const { level, doors, traps } = game
-  return (tx, ty) => isSolid(level, tx, ty) || doorBlocksCell(doors, player, tx, ty) || collapseSolid(traps, tx, ty)
+  return (tx, ty) => isSolid(level, tx, ty) || doorBlocksCell(doors, player, tx, ty) || collapseSolid(traps, tx, ty, player) || crateSolid(game, tx, ty)
 }
 
 // Does an axis-aligned box overlap any solid tile?
@@ -501,6 +525,7 @@ export function stepGame(game, inputs, dt) {
   stepPlayer(game, pink, blue, moves[1], dt)
   updateRopes(game, inputs, dt)
   updateCarry(game, before)
+  updateCrates(game, inputs, dt)
 
   game.players.forEach((player, i) => {
     const pressed = !!inputs[i].interact && !player.interactHeldPrev
@@ -525,6 +550,7 @@ export function stepGame(game, inputs, dt) {
     if (player.tpCooldown > 0) player.tpCooldown = Math.max(0, player.tpCooldown - dt)
   })
   updateCrystals(game)
+  if (!game.outOfHearts && game.players.some((p) => p.heartsOn && p.hearts <= 0)) game.outOfHearts = true
   updateEchoes(game, dt)
   updateFx(game, dt)
   updateDrawing(game, dt)
@@ -532,4 +558,5 @@ export function stepGame(game, inputs, dt) {
   updateTraps(game, dt, (player, cause) => killPlayer(player, cause))
   updateCheckpoints(game)
   updateDoorSystem(game, dt)
+  updateFeedback(game)
 }

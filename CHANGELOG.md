@@ -5,6 +5,155 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.48.2
+
+- Doors opening scene: the room stays pitch black and the only light is what comes
+  through the door as it opens (no more white flood filling the screen); the room fades
+  in from black afterwards.
+- Doors opening scene: the pair now walk at a steady pace with the walk animation
+  matched to it, so their feet no longer slide ("walking in place").
+
+## v1.53.0
+
+- Doors on a phone: the game goes fullscreen and locks to landscape. Browsers that won't lock the orientation
+  (iPhone) show a "Turn your phone sideways" cover while the phone is held upright. Leaving the game unlocks it again.
+
+## v1.52.2
+
+- Doors: scenery keeps clear of the opening scene's door (a barrel was standing behind it).
+
+## v1.52.1
+
+- Doors: each player's picture (Scott for Blue, Cristina for Pink) sits beside their hearts, framed in their colour,
+  with the partner's smaller picture beside the partner's hearts.
+
+## v1.52.0
+
+- Doors: Solid Light I is now 3 tiles at most (it was 12). Levels II and III are unchanged (18 and 24 tiles).
+  The rooms that used long drawn lines were reworked to fit:
+  - Room 3: the gap is 6 wide and Pink draws a 3-tile stepping stone in the middle of it for Blue to hop across.
+  - Room 4: the same for the second pit; the spike field is 6 spikes and Pink's 3-tile roof covers the start of it,
+    so Blue waits under it for the uncovered spikes to land and then jumps the rest of the field.
+  - Rooms 5 and 6: the tall wall is 4 tiles, and Pink draws a short, steep ramp for Blue to jump from.
+    (Rooms 9 and 10 give Pink Solid Light II, so their long bridges and ramp are unchanged.)
+- Doors: arrows are now the home game's arrow (wooden shaft, steel head, fletching), and flame jets use the home
+  game's fire effect (the campfire flipbook): a column of flames along the jet, a small pilot flame while it warns.
+- Doors: the "Whoever falls opens the door..." message at the start of room 1 is gone.
+
+## v1.51.1
+
+- Doors: ability descriptions simplified. Each is now what it is for in a sentence or two, then a "Controls:" line.
+
+## v1.51.0
+
+- Doors: a new obstacle, pushable crates (`src/doors/crates.js`, `"crates": [{ x, y }]` in a level).
+  Walk into one and it slides along the floor a cell at a time (not while someone stands on it or in the way).
+  - **Climb:** a crate is solid like a tile, so you can stand on it and jump from its top.
+  - **Weight:** a crate resting on a pressure plate holds it down (plates that take either player).
+  - **Reveal:** a crate sitting on a lever, key or crystal hides it until it is pushed off; you cannot pull,
+    take or collect what is under one.
+  - It also blocks fire, lasers, arrows, boulders and spikes like a wall, falls if you push it off a ledge,
+    and is lost down a pit and comes back where it started after a few seconds.
+  - A crate can never go through a door, into the cells beside a door or the exit, or onto a lever, key or crystal,
+    so it cannot wall anyone in.
+- Room 2 introduces them: the key behind the plate door is hidden under a crate you have to push aside.
+- New `scripts/check-doors-crates.mjs` covers pushing, climbing, weight, hiding, falling and the keep-clear rules.
+
+## v1.50.0
+
+- Doors scenery for chapter 1 (the basement), built from simple shapes and painted textures, no new art files
+  (`src/doors/scenery.js`).
+- Things you jump over or onto are now stacks of crates instead of bare brick: the steps in room 1, the five-tall
+  walls in rooms 6 and 10 and the tall pillar in room 8. The floating platforms (rooms 3, 5, 6, 7, 9, 10) are a row
+  of crates held up by a pile set back against the wall, so they read as part of a stack but the space under them is
+  still free to walk through. The crates are the same solid cells as before, so nothing about the physics changed.
+- Dressing, set back against the far wall and kept clear of everything you use: crate piles, barrels, sacks, shelves of
+  jars, pipes and valves, hanging lamps, cobwebs, puddles. Each room has its own mix: pipes and puddles in room 2,
+  window light shafts in room 3, leaning mirrors in room 6, ladders in room 7, boilers in room 8, roof beams with
+  ropes in room 9 and glowing furnaces in room 10. Placement is seeded by the room, so a room looks the same every time.
+- Dev server only: `?room=N` on the page address starts the Doors campaign at room N without the opening scene.
+
+## v1.49.0
+
+- Doors: a "Room clear" stays up for about three seconds before the next room.
+- Doors: confirmations when you do something that has an effect: "Door unlocked", "Arrows stopped",
+  "Spikes disarmed", "Boulder hole sealed", "Bridge lowered"...
+- Doors: arrow hints only appear for obstacles that are new in that room (rooms 2-10), and the
+  opening hint text is gone after room 1.
+- Doors: ability descriptions rewritten to read like a person wrote them, and the odd
+  "(in either view)" is gone.
+- Room 4: the jump pit is now 5 tiles wide (an ordinary jump tops out at 4, a boosted one reaches
+  5), and so are the "needs a boost" pits in rooms 7, 9 and 10. The falling spikes are now a dense
+  field that is deadly on the floor as well as falling, so you cannot run or wade through; they
+  have to be roofed.
+- Boulders (rooms 5, 10) now drop out of a hole in the ceiling, are bigger and more frequent, and
+  holding the plate seals the hole with an iron lid and crumbles any boulders still rolling.
+- Room 6: the first plate is Blue's alone, so only his Light Echo can hold it for him; Pink can no
+  longer stand in for it.
+- Exploit sweep of all ten rooms: crushers are now four in a row, staggered (rooms 7, 9, 10),
+  room 8's first blade has two more out of step, and Teleport can't hop a gate
+  (`teleportBarriers`). New `scripts/check-doors-exploits.mjs` runs a lone player at every
+  hazard gate at every start time, and checks the pits and teleport.
+
+## v1.48.6
+
+- Doors: a room is finished the moment both players have gone through the exit. Reaching
+  the exit counts for good (no more standing in it together for half a second), and the
+  next room starts after under a second instead of two and a half.
+- Doors opening scene: once the camera has pulled back, the first player to move says
+  "Let's find a way out of here!" and the other answers "Ok, my love!" (the game keeps running).
+- Removed the leftover "1-9, 0 rooms" key hint above the game.
+
+## v1.48.5
+
+- Doors: the trapdoor no longer flickers (its top and its yellow stripe were at exactly
+  the same height, so the two surfaces fought for the pixels).
+
+## v1.48.4
+
+- Doors opening scene: the doorway stays white while the room fades in (and the white
+  goes out as the door shuts), instead of showing the bricks through it.
+- The room now fades in gradually (its lighting comes up) rather than cutting in.
+- The pair start behind the lit doorway and walk out of the light into view, instead of
+  appearing suddenly when the door opens.
+
+## v1.48.3
+
+- Doors opening scene: the light is now shaped by the door. It shows through the gap
+  between the door and its frame (a slit that widens as the door swings), a wedge of
+  light spreads across the floor from the gap, and a spotlight from the gap lights the
+  pair as they step into the dark room.
+- The pair walk in closer together (side by side), then spread apart as the camera turns.
+
+## v1.48.1
+
+- Doors: footstep sounds while walking or running on the ground (slower and
+  quieter when crouching).
+- Doors: the old test rooms and number-key room jumping are gone; only the
+  Chapter 1 campaign rooms remain, along with the check scripts that depended
+  on the test rooms.
+
+## v1.48.0
+
+- Doors: the story mode begins. After "Tap to Start" there is now an opening scene
+  (a door opens on a growing white light, the pair walk toward the camera, the
+  camera turns to side view, a speech bubble over each head: "Where are we?" /
+  "I'm not sure...", the door locks, the camera zooms out and one of you falls
+  through a trapdoor to the lower level).
+- Chapter 1 (the brick basement) has ten rooms, each built around a few new
+  obstacles and needing both players: plates, levers, trapdoors, pits, fire,
+  arrows, falling spikes, boulders, collapsing floors, crushers, lasers, blades
+  and wind. Arrows on screen show what to do for each new obstacle.
+- Abilities are found in rooms 3, 6 and 9 (a different one for each player, both
+  needed to finish the room); extra hearts hide in rooms 5, 8 and 10.
+- Hearts: three each. A death returns you to your last checkpoint; reaching the
+  exit refills both players; losing all hearts restarts the room.
+- Plates and levers can both switch a hazard off (`offWhile`), doors can open for
+  a plate or a lever (`orSwitches`). Prompt text can name the echo, teleport and
+  rope keys.
+- `src/doors/CAMPAIGN.md` outlines the chapters (skyscraper with ladders, rooftops,
+  outer space are planned, not built). A scripted playthrough proves every room.
+
 ## v1.47.1
 
 - Doors is marked "Still in testing": a note on its card in the Games menu and

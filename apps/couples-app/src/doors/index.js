@@ -10,6 +10,7 @@ import { trapDebugLines } from './traps.js'
 import { beginStroke, drawDebugLines, endStroke, extendStroke, setAim } from './drawing.js'
 import { fireRope } from './rope.js'
 import { abilityDialog } from './abilities.js'
+import { INTRO, bubbleState, cineParams, createIntro, introClick, tapToStart, updateIntro } from './intro.js'
 import { createTouchUI } from './touchui.js'
 import { PAL, PIXEL_FONT } from './pixel.js'
 import { createInput } from './input.js'
@@ -17,18 +18,12 @@ import { parseLevel } from './levels.js'
 import { createDebugOverlay } from './debug.js'
 import { makeCamera, updateCamera } from './camera.js'
 import { createOverlay } from './overlay.js'
-import room1 from './levels/room-1-movement.json'
-import room2 from './levels/room-2-doors.json'
-import room3 from './levels/room-3-drawing.json'
-import room4 from './levels/room-4-crushers-wind.json'
-import room5 from './levels/room-5-carry.json'
-import room6 from './levels/room-6-doors-gallery.json'
-import room7 from './levels/room-7-gravity.json'
-import room8 from './levels/room-8-crystals.json'
-import room9 from './levels/room-9-abilities.json'
-import room10 from './levels/room-10-echo-rope.json'
+import { createFootsteps } from './footsteps.js'
 
-const ROOMS = [room1, room2, room3, room4, room5, room6, room7, room8, room9, room10]
+// the campaign: every levels/chNN-*.json, in order
+const CAMPAIGN = Object.entries(import.meta.glob('./levels/ch*-*.json', { eager: true }))
+  .sort(([a], [b]) => a.localeCompare(b))
+  .map(([, module]) => module.default)
 
 const PANE_GAP = 4
 const PX = (size, line = '') => `font:${size}px${line ? '/' + line : ''} ${PIXEL_FONT};` // text in the pixel font
@@ -51,10 +46,13 @@ function layoutPanes(w, h) {
 }
 
 export function startDoors(container) {
-  let level = parseLevel(ROOMS[0])
+  // dev server only: ?room=N starts at room N of the campaign (no opening scene), for looking at a room quickly
+  const devRoom = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get('room')) || 0 : 0
+  const startIndex = devRoom > 0 && devRoom <= CAMPAIGN.length ? devRoom - 1 : 0
+  let level = parseLevel(CAMPAIGN[startIndex])
   let game = createGame(level)
-  let roomIndex = 0
   const input = createInput()
+  const footsteps = createFootsteps()
   const debug = createDebugOverlay(container)
   container.style.touchAction = 'none' // (the touch controls and drawing use pointer events; the page must not scroll or zoom)
   // the on-screen controls (touchui.js): on by default on a phone, and the T key shows them anywhere
@@ -95,10 +93,13 @@ export function startDoors(container) {
     PX(16, '1.5') + `color:${PAL.gold};background:${PAL.ink};text-align:center;pointer-events:none;z-index:6;display:none;` +
     `border:4px solid ${PAL.gold};box-shadow:6px 6px 0 #000`
   function bannerHtml() {
+    const last = campaignIndex >= 0 && campaignIndex === CAMPAIGN.length - 1
     const more = touchUI.enabled
-      ? 'TAP FOR THE NEXT ROOM<br>(YOU KEEP YOUR ABILITIES)'
-      : 'N: NEXT ROOM (KEEPS YOUR ABILITIES)<br>R: PLAY AGAIN · NUMBER KEYS PICK A ROOM'
-    return `ROOM CLEAR!<div style="${PX(8, '1.8')}color:#fff;margin-top:12px">${more}</div>`
+      ? last ? 'TAP TO PLAY THE CHAPTER AGAIN' : 'NEXT ROOM STARTING...<br>(TAP TO SKIP THE WAIT)'
+      : last ? 'N: PLAY THE CHAPTER AGAIN' : 'NEXT ROOM STARTING...<br>(N: SKIP THE WAIT)'
+    const title = last ? 'CHAPTER COMPLETE!' : 'ROOM CLEAR!'
+    const teaser = last ? `<div style="${PX(8, '1.8')}color:${PAL.gold};margin-top:12px">NEXT: CHAPTER 2 - THE SKYSCRAPER<br>(COMING SOON)</div>` : ''
+    return `${title}${teaser}<div style="${PX(8, '1.8')}color:#fff;margin-top:12px">${more}</div>`
   }
   container.appendChild(banner)
 
@@ -166,22 +167,163 @@ export function startDoors(container) {
     if (visible && level.hint) hintTimer = setTimeout(() => (hintEl.style.display = 'none'), 20000)
   }
 
-  function updateHud() {
-    hud.textContent = touchUI.enabled
-      ? `ROOM ${roomIndex + 1}: ${level.name}`.toUpperCase()
-      : `ROOM ${roomIndex + 1}/${ROOMS.length}: ${level.name}   ·   KEYS ${ROOMS.length > 9 ? '1-9, 0' : `1-${ROOMS.length}`}: ROOM   ·   H: HINT   ·   T: TOUCH CONTROLS`.toUpperCase()
+  // ---- the campaign: title screen, the opening scene, room title cards, "out of hearts" ----
+  let stage = 'play' // 'title' (black, waiting for a tap) | 'intro' (the opening scene) | 'play'
+  let campaignIndex = -1 // which campaign room this is
+  let intro = null
+  let failTimer = 0
+  const layer = (css) => {
+    const node = document.createElement('div')
+    node.style.cssText = css
+    container.appendChild(node)
+    return node
+  }
+  const titleEl = layer('position:absolute;inset:0;z-index:9;background:#000;display:none;flex-direction:column;align-items:center;justify-content:center;gap:34px;cursor:pointer;touch-action:none')
+  titleEl.innerHTML =
+    `<div style="${PX(30, '1.2')}color:${PAL.gold};text-shadow:4px 4px 0 #6b3b00;letter-spacing:4px">DOORS</div>` +
+    `<div class="px-blink" style="${PX(12)}color:#fff">[ TAP TO START ]</div>`
+  const flashEl = layer('position:absolute;inset:0;z-index:6;background:#000;opacity:0;pointer-events:none')
+  // a chat bubble over each head in the opening scene; tapping one makes that character speak
+  function makeBubble(who) {
+    const color = who === 'blue' ? '#3b82f6' : '#ec4899'
+    const node = layer(
+      `position:absolute;z-index:7;display:none;padding:7px 10px;background:#fff;color:${PAL.ink};border:4px solid ${PAL.ink};box-shadow:4px 4px 0 ${color};` +
+        `${PX(14)}cursor:pointer;touch-action:none;transform:translate(-50%,-100%)`,
+    )
+    node.innerHTML = `<span>...</span><div style="position:absolute;left:50%;bottom:-14px;margin-left:-8px;width:0;height:0;border:8px solid transparent;border-top-color:${PAL.ink}"></div>`
+    node.addEventListener('pointerdown', (event) => {
+      event.stopPropagation()
+      event.preventDefault()
+      if (intro) introClick(intro, who)
+    })
+    return node
+  }
+  const bubbleEls = { blue: makeBubble('blue'), pink: makeBubble('pink') }
+  const talkEl = layer(
+    'position:absolute;left:50%;bottom:16%;transform:translateX(-50%);z-index:7;display:none;min-width:200px;max-width:86%;padding:12px 16px;' +
+      `${PX(10, '1.8')}color:#fff;background:${PAL.ink};border:4px solid #fff;box-shadow:5px 5px 0 #000;pointer-events:none`,
+  )
+  const cardEl = layer(
+    'position:absolute;left:50%;top:14%;transform:translateX(-50%);z-index:5;display:none;padding:10px 16px;text-align:center;' +
+      `${PX(10, '1.8')}color:#fff;background:${PAL.ink};border:4px solid ${PAL.gold};box-shadow:5px 5px 0 #000;pointer-events:none;white-space:nowrap`,
+  )
+  let cardTimer = 0
+  function showRoomCard() {
+    const c = level.campaign
+    if (!c) return
+    cardEl.innerHTML = `<div style="color:${PAL.gold}">CHAPTER ${c.chapter} - ROOM ${c.index}</div><div style="margin-top:6px">${escapeHtml(c.title.toUpperCase())}</div>`
+    cardEl.style.display = 'block'
+    clearTimeout(cardTimer)
+    cardTimer = setTimeout(() => (cardEl.style.display = 'none'), 3400)
+  }
+  const failEl = layer(
+    'position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);z-index:8;display:none;padding:16px 22px;text-align:center;' +
+      `${PX(14, '1.8')}color:${PAL.danger};background:${PAL.ink};border:4px solid ${PAL.danger};box-shadow:6px 6px 0 #000;pointer-events:none`,
+  )
+  failEl.innerHTML = `OUT OF HEARTS!<div style="${PX(8, '1.8')}color:#fff;margin-top:10px">THE ROOM RESTARTS WITH ALL YOUR HEARTS</div>`
+
+  function beginIntro() {
+    if (!intro || stage !== 'title') return
+    titleEl.style.display = 'none'
+    tapToStart(intro, game)
+    stage = 'intro'
+  }
+  titleEl.addEventListener('pointerdown', (event) => {
+    event.stopPropagation()
+    beginIntro()
+  })
+  function onTitleKey(event) {
+    if (stage !== 'title' || (event.code !== 'Enter' && event.code !== 'Space' && event.code !== 'NumpadEnter')) return
+    event.preventDefault()
+    beginIntro()
+  }
+  window.addEventListener('keydown', onTitleKey)
+
+  // The opening scene's screen furniture, once a frame: the white flash, the bubbles over the heads, the dialogue.
+  // After the opening scene: whoever moves first says the first line and the other answers (the game keeps running)
+  let afterTalk = null // { state: 'wait' | 'talk' | 'done', who?, text?, t, second? }
+  const AFTER_LINES = { first: "Let's find a way out of here!", second: 'Ok, my love!' }
+  function watchFirstMove(inputs) {
+    if (afterTalk?.state !== 'wait') return
+    const i = inputs.findIndex((s) => s && (s.left || s.right || s.jump))
+    if (i < 0) return
+    afterTalk = { state: 'talk', who: game.players[i].id, text: AFTER_LINES.first, t: 0, second: false }
+  }
+  function updateAfterTalk(dt) {
+    if (afterTalk?.state !== 'talk') return
+    afterTalk.t += dt
+    if (afterTalk.t < INTRO.LINE) return
+    if (afterTalk.second) afterTalk = { state: 'done' }
+    else afterTalk = { state: 'talk', who: afterTalk.who === 'blue' ? 'pink' : 'blue', text: AFTER_LINES.second, t: 0, second: true }
   }
 
-  // carry: bring the abilities found so far into the room (after finishing the previous one). Picking a
-  // room with a number key starts it with only what the room itself provides.
-  function loadRoom(index, carry = null) {
-    roomIndex = index
-    level = parseLevel(ROOMS[index])
+  function updateIntroDom() {
+    flashEl.style.opacity = intro ? String(intro.flash) : '0'
+    const states = intro && stage === 'intro' ? bubbleState(intro) : []
+    for (const who of ['blue', 'pink']) {
+      const node = bubbleEls[who]
+      const b = states.find((s) => s.who === who)
+      if (!b || !b.visible || !view) {
+        node.style.display = 'none'
+        continue
+      }
+      const p = game.players[who === 'blue' ? 0 : 1]
+      const at = view.project(0, panes[0], p.x, p.y - 1.75 - 0.35)
+      node.style.display = 'block'
+      node.style.left = `${at.x}px`
+      node.style.top = `${at.y}px`
+      node.classList.toggle('px-blink', !!b.ready)
+    }
+    if (intro && stage === 'intro' && intro.dialog) {
+      const who = intro.dialog.who
+      talkEl.style.display = 'block'
+      talkEl.style.borderColor = who === 'blue' ? '#3b82f6' : '#ec4899'
+      talkEl.innerHTML = `<div style="color:${who === 'blue' ? '#7db4ff' : '#ff8cc6'};margin-bottom:6px">${who.toUpperCase()}</div>${escapeHtml(intro.dialog.text)}`
+    } else if (afterTalk?.state === 'talk' && stage === 'play') {
+      const who = afterTalk.who
+      talkEl.style.display = 'block'
+      talkEl.style.borderColor = who === 'blue' ? '#3b82f6' : '#ec4899'
+      talkEl.innerHTML = `<div style="color:${who === 'blue' ? '#7db4ff' : '#ff8cc6'};margin-bottom:6px">${who.toUpperCase()}</div>${escapeHtml(afterTalk.text)}`
+    } else talkEl.style.display = 'none'
+  }
+
+  function loadCampaign(index, carry = null, { withIntro = false } = {}) {
+    campaignIndex = index
+    afterTalk = null
+    level = parseLevel(CAMPAIGN[index])
     game = createGame(level, carry)
     snapCameras = true
     view?.setLevel(level, game)
+    failTimer = 0
+    failEl.style.display = 'none'
+    showHint(false)
     updateHud()
-    showHint(true)
+    if (withIntro && level.intro) {
+      intro = createIntro(game)
+      stage = 'title'
+      titleEl.style.display = 'flex'
+    } else {
+      intro = null
+      stage = 'play'
+      titleEl.style.display = 'none'
+      showRoomCard()
+    }
+  }
+
+  let autoNext = 0
+  // on to the next room, keeping the abilities and hearts found so far (after a room is complete)
+  function nextRoom() {
+    if (!game.complete) return
+    if (campaignIndex >= 0) loadCampaign(campaignIndex + 1 < CAMPAIGN.length ? campaignIndex + 1 : 0, campaignIndex + 1 < CAMPAIGN.length ? exportAbilities(game) : null)
+  }
+
+  function updateHud() {
+    if (level.campaign) {
+      const c = level.campaign
+      hud.textContent = `CHAPTER ${c.chapter} - ROOM ${c.index}: ${c.title}`.toUpperCase()
+      return
+    }
+    hud.textContent = level.name.toUpperCase()
   }
 
   // handy for poking at the game from the browser console while testing
@@ -239,9 +381,7 @@ export function startDoors(container) {
   banner.addEventListener('pointerdown', (event) => {
     // (touch) tap the "room clear" box for the next room
     event.stopPropagation()
-    if (!game.complete) return
-    if (roomIndex + 1 < ROOMS.length) loadRoom(roomIndex + 1, exportAbilities(game))
-    else resetGame(game)
+    nextRoom()
   })
   container.addEventListener('pointerdown', onPointerDown)
   container.addEventListener('pointermove', onPointerMove)
@@ -290,6 +430,15 @@ export function startDoors(container) {
     view?.resize(size.w, size.h)
     snapCameras = true
   }
+  // start-up: the first campaign room, in the dark, waiting for a tap (rooms without an opening scene just begin)
+  if (level.campaign && level.intro && startIndex === 0 && !devRoom) {
+    campaignIndex = 0
+    intro = createIntro(game)
+    stage = 'title'
+    titleEl.style.display = 'flex'
+    showHint(false)
+  } else if (level.campaign) campaignIndex = startIndex
+  updateHud()
   touchUI.setEnabled(!!window.matchMedia?.('(hover: none) and (pointer: coarse)').matches)
   const observer = new ResizeObserver(resize)
   observer.observe(container)
@@ -326,34 +475,69 @@ export function startDoors(container) {
       touchUI.setEnabled(!touchUI.enabled)
       updateHud()
     }
-    const wanted = currentPanes()
+    const cine = intro && !intro.done ? cineParams(intro) : null
+    if (intro && !intro.done) updateIntro(intro, game, elapsed)
+    if (intro && intro.done && stage === 'intro') {
+      stage = 'play'
+      afterTalk = { state: 'wait', t: 0 }
+      snapCameras = true
+      showRoomCard()
+    }
+    touchUI.suspend(stage !== 'play')
+    hud.style.display = stage === 'play' ? 'block' : 'none'
+    const wanted = cine ? [{ x: 0, y: 0, w: size.w, h: size.h }, DEAD_PANE] : currentPanes()
     if (JSON.stringify(wanted) !== JSON.stringify(panes)) {
       panes = wanted
       snapCameras = true
     }
     if (input.consumeHint()) showHint(hintEl.style.display === 'none')
-    const roomKey = input.consumeRoom()
-    if (roomKey !== null && roomKey < ROOMS.length) loadRoom(roomKey)
-    if (input.consumeNext() && game.complete && roomIndex + 1 < ROOMS.length) loadRoom(roomIndex + 1, exportAbilities(game))
+    input.consumeRoom() // (the number keys used to jump between test rooms)
+    if (input.consumeNext()) nextRoom()
+    // in the campaign the next room follows by itself a moment after the exit (N / a tap just skips the wait)
+    if (game.complete && campaignIndex >= 0 && campaignIndex + 1 < CAMPAIGN.length) {
+      autoNext += elapsed
+      if (autoNext > 3.2) {
+        autoNext = 0
+        nextRoom()
+      }
+    } else autoNext = 0
     if (input.consumeReset()) {
       resetGame(game)
       snapCameras = true
     }
 
-    // fixed-step simulation, independent of the display's refresh rate (paused while a dialog is up)
-    if (game.dialogs.length > 0) {
+    // out of hearts: a moment to read it, then the room restarts with every heart refilled
+    if (game.outOfHearts && failTimer <= 0 && stage === 'play') {
+      failTimer = 2.4
+      failEl.style.display = 'block'
+    }
+    if (failTimer > 0) {
+      failTimer -= elapsed
+      if (failTimer <= 0) {
+        resetGame(game)
+        failEl.style.display = 'none'
+        snapCameras = true
+      }
+    }
+
+    // fixed-step simulation, independent of the display's refresh rate (paused during a dialog, the cutscene, a failure)
+    if (stage !== 'play' || failTimer > 0 || game.dialogs.length > 0) {
       input.players() // (discard anything pressed meanwhile)
       accumulator = 0
     } else {
       accumulator += elapsed
       let steps = 0
       while (accumulator >= SIM.STEP && steps < SIM.MAX_STEPS_PER_FRAME) {
-        stepGame(game, input.players(), SIM.STEP)
+        const inputs = input.players()
+        watchFirstMove(inputs)
+        stepGame(game, inputs, SIM.STEP)
+        footsteps.update(game, SIM.STEP)
         accumulator -= SIM.STEP
         steps++
       }
       if (steps === SIM.MAX_STEPS_PER_FRAME) accumulator = 0 // fell far behind (tab was hidden) — don't spiral
     }
+    updateAfterTalk(elapsed)
     renderDialog()
 
     game.players.forEach((player, i) => {
@@ -362,8 +546,10 @@ export function startDoors(container) {
     snapCameras = false
 
     container.style.cursor = drawer() || ropeAimer() ? 'crosshair' : ''
-    view?.render(game, panes, cams, elapsed)
-    overlay.draw(game, panes, view, debug.visible, input.mode, { touch: touchUI.enabled })
+    view?.render(game, panes, cams, elapsed, cine)
+    if (cine) overlay.clear()
+    else overlay.draw(game, panes, view, debug.visible, input.mode, { touch: touchUI.enabled })
+    updateIntroDom()
     debug.update(debugText())
     banner.style.display = game.complete ? 'block' : 'none'
     if (game.complete) {
@@ -390,6 +576,9 @@ export function startDoors(container) {
       container.removeEventListener('pointerup', onPointerUp)
       container.removeEventListener('pointercancel', onPointerUp)
       window.removeEventListener('keydown', onDialogKey)
+      window.removeEventListener('keydown', onTitleKey)
+      for (const node of [titleEl, flashEl, talkEl, cardEl, failEl, ...Object.values(bubbleEls)]) node.remove()
+      clearTimeout(cardTimer)
       touchUI.dispose()
       dialogEl.remove()
       container.style.cursor = ''

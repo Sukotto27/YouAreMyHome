@@ -1,5 +1,7 @@
 # Doors — roadmap & design decisions
 
+> The story mode (opening scene, chapter 1, outlines for later chapters) is described in [CAMPAIGN.md](CAMPAIGN.md).
+
 Working title. A 2-player co-op side-view platformer: Blue (Scott) and Pink
 (Cristina), one room per level, both must reach the brown exit door. Game core
 is plain framework-free ES modules in this folder; `components/games/DoorsGame.jsx`

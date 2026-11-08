@@ -35,11 +35,31 @@ export function parseLevel(json) {
     keys: json.keys || [],
     gravity: json.gravity || [],
     crystals: json.crystals || [],
+    prompts: json.prompts || [], // tutorial arrows: { x, y, dir, text, for?, range? } (drawn by overlay.js)
     portals: json.portals || [],
+    crates: json.crates || [], // pushable crates: [{ id?, x, y }] (crates.js)
+    crateKeepClear: json.crateKeepClear || [], // extra cells a crate may not be pushed into: [{ x, y, w?, h? }]
+    // [{ x, open? }]: a line a teleport may not cross (so a gate cannot be skipped); it stops counting once lever `open` is flipped
+    teleportBarriers: json.teleportBarriers || [],
   }
   // abilities every player has at least on entering (rooms that don't say get Solid Light 1, as before)
   const abilities = json.abilities ?? { solidLight: 1 }
-  return { name: json.name, notes: json.notes || '', hint: json.hint || '', cols, rows, solid, spawns, objects, abilities }
+  // campaign rooms ("campaign": { chapter, index, title }) use hearts; the older test rooms never run out
+  return {
+    name: json.name,
+    notes: json.notes || '',
+    hint: json.hint || '',
+    cols,
+    rows,
+    solid,
+    spawns,
+    objects,
+    abilities,
+    campaign: json.campaign || null,
+    theme: json.theme || 'basement',
+    scenery: json.scenery || {}, // { crates: [{x,y,w,h}], shelves: [{x,y,w}] }: see scenery.js
+    intro: json.intro || null, // the opening cutscene's door: { doorX, doorY }
+  }
 }
 
 // Solid-tile lookup. The left, right and top edges of the room are solid; the

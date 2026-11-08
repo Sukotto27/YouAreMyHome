@@ -4,6 +4,7 @@
 import * as THREE from 'three'
 import { VIEW3D } from './config.js'
 import { crusherBox } from './traps.js'
+import { createFlame } from './vfx.js'
 
 const DEPTH = VIEW3D.TILE_FRONT - VIEW3D.TILE_BACK
 const MID_Z = (VIEW3D.TILE_FRONT + VIEW3D.TILE_BACK) / 2
@@ -32,18 +33,41 @@ export function createTrapView(group, game) {
         const core = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), glow(fire ? 0xfff2a8 : 0xffffff, 0.9))
         beam.visible = false
         core.visible = false
-        group.add(beam, core)
-        Object.assign(view, { eye, beam, core, fire })
+        // a fire jet burns with the game's flame sprite (vfx.js): a row of flames along the jet, each turned the way it points
+        const flames = []
+        if (fire) {
+          const [fx, fy] = DIR_VEC[trap.dir]
+          for (let i = 0; i < Math.ceil((trap.length ?? 12) / 0.7) + 1; i++) {
+            const f = createFlame({ w: 1.5, h: 1.5, offset: i * 9.7 })
+            f.userData.setDirection(fx, fy)
+            f.visible = false
+            f.position.z = 0.35
+            group.add(f)
+            flames.push(f)
+          }
+        } else group.add(beam, core)
+        Object.assign(view, { eye, beam, core, fire, flames })
         break
       }
       case 'arrow': {
         const slot = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.9), solid('#111827'))
         slot.position.set(trap.x + (trap.dir === 'left' ? 0.25 : -0.25), -trap.y, 0.1)
         group.add(slot)
-        const mat = new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+        // the home game's arrow: a wooden shaft, a steel head and pale fletching (see render3d/pose.js there)
+        const wood = new THREE.MeshStandardMaterial({ color: 0xb58a55, roughness: 0.8 })
+        const steel = new THREE.MeshStandardMaterial({ color: 0x8a8f96, roughness: 0.5, metalness: 0.4 })
+        const feather = new THREE.MeshStandardMaterial({ color: 0xe8e0d0 })
+        const shaftGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.8, 6).rotateZ(Math.PI / 2)
+        const tipGeo = new THREE.ConeGeometry(0.07, 0.2, 6).rotateZ(-Math.PI / 2).translate(0.5, 0, 0)
+        const fletchGeo = new THREE.BoxGeometry(0.2, 0.2, 0.012).translate(-0.34, 0, 0)
         const pool = []
         for (let i = 0; i < 8; i++) {
-          const a = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.07, 0.07), mat)
+          const a = new THREE.Group()
+          a.add(new THREE.Mesh(shaftGeo, wood), new THREE.Mesh(tipGeo, steel))
+          const f1 = new THREE.Mesh(fletchGeo, feather)
+          const f2 = f1.clone()
+          f2.rotation.x = Math.PI / 2
+          a.add(f1, f2)
           a.visible = false
           group.add(a)
           pool.push(a)
@@ -79,6 +103,20 @@ export function createTrapView(group, game) {
         Object.assign(view, { tiles })
         break
       }
+      case 'trapdoor': {
+        // one hinged panel the width of the opening; it swings down on its left edge, then is bolted shut
+        const pivot = new THREE.Group()
+        pivot.position.set(trap.x, -trap.y, 0)
+        const panel = new THREE.Mesh(new THREE.BoxGeometry(trap.w, 0.9, DEPTH), solid('#8a5a2b', { roughness: 0.95 }))
+        panel.position.set(trap.w / 2, -0.455, MID_Z) // (a hair below the floor's top and the stripe a hair above, so the faces are never at the same height and cannot z-fight)
+        pivot.add(panel)
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(trap.w * 0.96, 0.12, DEPTH * 0.9), solid('#f2c14e', { roughness: 0.6 }))
+        stripe.position.set(trap.w / 2, -0.045, MID_Z + 0.02)
+        pivot.add(stripe)
+        group.add(pivot)
+        Object.assign(view, { pivot, panel })
+        break
+      }
       case 'boulder': {
         const g = new THREE.Group()
         g.add(new THREE.Mesh(new THREE.IcosahedronGeometry(trap.radius, 1), solid('#78716c', { flatShading: true, roughness: 1 })))
@@ -86,7 +124,15 @@ export function createTrapView(group, game) {
         stripe.position.z = trap.radius * 0.85
         g.add(stripe)
         g.visible = false
-        Object.assign(view, { g, pool: [] })
+        // the hole in the ceiling the boulders come out of, and the iron lid that seals it while its plate is held
+        const ceilingY = trap.y - trap.radius
+        const hole = new THREE.Mesh(new THREE.BoxGeometry(trap.radius * 2.1, 0.5, DEPTH * 0.9), solid('#050408'))
+        hole.position.set(trap.x, -ceilingY + 0.05, MID_Z)
+        const lid = new THREE.Mesh(new THREE.BoxGeometry(trap.radius * 2.3, 0.22, DEPTH * 0.95), solid('#4b5563', { metalness: 0.6, roughness: 0.5 }))
+        lid.position.set(trap.x, -ceilingY - 0.12, MID_Z + 0.02)
+        lid.visible = false
+        group.add(hole, lid)
+        Object.assign(view, { g, pool: [], lid })
         break
       }
       case 'crusher': {
@@ -208,8 +254,24 @@ export function createTrapView(group, game) {
           const warn = t.phase === 'warn'
           v.eye.material.color.setHex(t.phase === 'on' ? 0xffffff : warn ? (Math.floor(time * 20) % 2 ? 0xffffff : 0xf97316) : v.fire ? 0x7c2d12 : 0x7f1d1d)
           const b = t.beam
-          v.beam.visible = v.core.visible = !!b
-          if (b) {
+          v.beam.visible = v.core.visible = !!b && !v.fire
+          if (v.fire) {
+            // the jet: flames along its length while it is on, a small pilot flame while it warns
+            const [fx, fy] = DIR_VEC[t.dir]
+            const len = b ? Math.hypot(b.x1 - b.x0, b.y1 - b.y0) : 0
+            v.flames.forEach((f, i) => {
+              const along = i * 0.7
+              const live = !!b && along <= len + 0.35
+              const pilot = !b && t.phase === 'warn' && i === 0
+              f.visible = live || pilot
+              if (!f.visible) return
+              f.position.set(t.x + fx * along, -t.y + fy * along, 0.35)
+              f.userData.tick(time)
+              const k = pilot ? 0.4 : 1 + 0.08 * Math.sin(time * 25 + i)
+              f.userData.setSize(t.thickness * 2.1 * k, 1.5 * k)
+            })
+          }
+          if (b && !v.fire) {
             const horizontal = t.dir === 'left' || t.dir === 'right'
             const len = Math.max(0.01, Math.hypot(b.x1 - b.x0, b.y1 - b.y0))
             const cx = (b.x0 + b.x1) / 2
@@ -230,7 +292,7 @@ export function createTrapView(group, game) {
             m.visible = !!a
             if (a) {
               m.position.set(a.x, -a.y, 0)
-              m.scale.x = t.dir === 'left' ? 1 : -1
+              m.scale.x = t.dir === 'left' ? -1 : 1 // (the head points along +x)
             }
           })
           break
@@ -248,18 +310,29 @@ export function createTrapView(group, game) {
           })
           break
         }
+        case 'trapdoor': {
+          const target = t.mode === 'open' ? -1.45 : 0 // radians: swings down about the left edge
+          v.angle = (v.angle ?? 0) + (target - (v.angle ?? 0)) * 0.35
+          v.pivot.rotation.z = v.angle
+          const shake = t.mode === 'warn' ? 0.04 : 0
+          v.pivot.position.set(t.x + Math.sin(time * 90) * shake, -t.y, 0)
+          v.panel.material.color.setHex(t.mode === 'sealed' ? 0x4b5563 : t.mode === 'warn' ? 0xc2410c : 0x8a5a2b)
+          break
+        }
         case 'boulder': {
           while (v.pool.length < t.boulders.length) {
             const clone = v.g.clone()
             group.add(clone)
             v.pool.push(clone)
           }
+          v.lid.visible = !!t.off
           v.pool.forEach((m, i) => {
             const b = t.boulders[i]
             m.visible = !!b
             if (b) {
               m.position.set(b.x, -b.y, 0)
               m.rotation.z = -b.ang
+              m.scale.setScalar(b.dying ? Math.max(0.05, 1 - b.dying / 0.4) : 1) // a sealed hole: the ones still rolling crumble away
             }
           })
           break

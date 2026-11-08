@@ -264,6 +264,10 @@ export function createTouchUI(container, input, { onSwitch, onReset } = {}) {
     get enabled() {
       return enabled
     },
+    // hide the controls without turning them off (during the opening scene)
+    suspend(on) {
+      root.style.visibility = on ? 'hidden' : 'visible'
+    },
     dispose() {
       root.remove()
     },

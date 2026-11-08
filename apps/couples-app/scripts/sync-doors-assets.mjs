@@ -20,6 +20,8 @@ const FILES = [
   [path.join(source, 'assets/chars/UAL2_Clips.glb'), 'characters3d/assets/chars/UAL2_Clips.glb'],
   // the plain household door used for every door in the game
   [path.join(doorModels, 'Door B.fbx'), 'models/door.fbx'],
+  // the fire sprite sheet (the home game's campfire flame), used for the flame jets
+  [path.resolve(root, '../home-game/public/assets3d/VFX/flipbooks/fire_01_8x8.tga'), 'vfx/fire_01_8x8.tga'],
 ]
 
 let copied = 0

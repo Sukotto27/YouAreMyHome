@@ -29,7 +29,7 @@ function room(traps = [], checkpoints = [], holes = []) {
     grid.push(line)
   }
   grid[21] = grid[21].slice(0, 4) + 'B' + grid[21].slice(5, 7) + 'P' + grid[21].slice(8)
-  return parseLevel({ name: 'trap-test', grid, traps, checkpoints })
+  return parseLevel({ name: 'trap-test', grid, traps, checkpoints, abilities: { solidLight: 3 } }) // (long beams: these tests are about the traps, not the length of a beam)
 }
 const step = (g, blue = none, pink = none, frames = 1) => {
   for (let f = 0; f < frames; f++) stepGame(g, [blue, pink], SIM.STEP)

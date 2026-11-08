@@ -6,10 +6,41 @@ const ABILITY_COLORS = ABILITY.COLORS
 import { solidLightParams } from './drawing.js'
 import { ABILITY_IDS, ABILITY_NAMES, levelName, teleportLabel } from './abilities.js'
 import { PIXEL_FONT } from './pixel.js'
+import scottUrl from '../assets/images/scott.jpg'
+import cristinaUrl from '../assets/images/cristina.jpg'
+
+// Blue is Scott and Pink is Cristina: their pictures sit beside their hearts
+const AVATARS = {}
+for (const [id, url] of [['blue', scottUrl], ['pink', cristinaUrl]]) {
+  const img = new Image()
+  img.src = url
+  AVATARS[id] = img
+}
 
 // The pixel font only has plain capitals and a little punctuation, so all canvas text goes through this.
 const px = (text) => String(text).toUpperCase().replace(/[—–]/g, '-').replace(/·/g, '|').replace(/[✏◆●]/g, '*')
-import { bodyBottom, bodyTop, headY } from './gravity.js'
+import { bodyBottom, bodyCenter, bodyTop, headY } from './gravity.js'
+
+// pixel art for the HUD: '.' empty, 'x' filled
+const HEART = ['.xx.xx.', 'xxxxxxx', 'xxxxxxx', '.xxxxx.', '..xxx..', '...x...']
+const ARROW_DOWN = ['...xxx...', '...xxx...', '...xxx...', '...xxx...', 'xxxxxxxxx', '.xxxxxxx.', '..xxxxx..', '...xxx...', '....x....']
+
+// rotates a bitmap a quarter turn clockwise
+function rotate(rows) {
+  const h = rows.length
+  const w = rows[0].length
+  const out = []
+  for (let x = 0; x < w; x++) {
+    let line = ''
+    for (let y = h - 1; y >= 0; y--) line += rows[y][x]
+    out.push(line)
+  }
+  return out
+}
+const ARROWS = { down: ARROW_DOWN }
+ARROWS.left = rotate(ARROWS.down)
+ARROWS.up = rotate(ARROWS.left)
+ARROWS.right = rotate(ARROWS.up)
 
 export function createOverlay(canvas) {
   const ctx = canvas.getContext('2d')
@@ -125,7 +156,7 @@ export function createOverlay(canvas) {
     ctx.font = `10px ${PIXEL_FONT}`
     ctx.textAlign = 'center'
     game.notices.forEach((n, i) => {
-      const left = ABILITY.NOTICE_TIME - n.age
+      const left = (n.life || ABILITY.NOTICE_TIME) - n.age
       ctx.globalAlpha = Math.max(0, Math.min(1, left / 0.8, n.age / 0.15))
       const y = pane.y + pane.h * 0.18 + i * 26
       ctx.lineWidth = 4
@@ -136,6 +167,115 @@ export function createOverlay(canvas) {
     })
     ctx.globalAlpha = 1
     ctx.textAlign = 'start'
+  }
+
+  // a bitmap in `fill`, with a 1-cell dark outline so it reads on any background
+  function bitmap(rows, x, y, cell, fill, outline = '#0b0820') {
+    ctx.fillStyle = outline
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) {
+        if (rows[r][c] !== 'x') continue
+        for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) ctx.fillRect(x + (c + dx) * cell, y + (r + dy) * cell, cell, cell)
+      }
+    }
+    ctx.fillStyle = fill
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) if (rows[r][c] === 'x') ctx.fillRect(x + c * cell, y + r * cell, cell, cell)
+    }
+  }
+
+  // top-left of each pane (under the name): this player's hearts, and their partner's smaller ones
+  function drawHearts(game, player, pane) {
+    if (!player.heartsOn) return
+    const cell = 3
+    const draw = (p, x, y, scale) => {
+      for (let i = 0; i < p.maxHearts; i++) {
+        const full = i < p.hearts
+        bitmap(HEART, x + i * (HEART[0].length + 2) * scale, y, scale, full ? ABILITY_COLORS.heart : '#3a3a55')
+      }
+    }
+    // a framed square portrait in the player's colour (cropped to the face, kept chunky like the rest of the HUD)
+    const avatar = (p, x, y, size) => {
+      const img = AVATARS[p.id]
+      ctx.fillStyle = COLORS[p.id]
+      ctx.fillRect(x - 3, y - 3, size + 6, size + 6)
+      ctx.fillStyle = '#0b0820'
+      ctx.fillRect(x - 1, y - 1, size + 2, size + 2)
+      if (img && img.complete && img.naturalWidth) {
+        const side = Math.min(img.naturalWidth, img.naturalHeight)
+        ctx.imageSmoothingEnabled = false
+        ctx.drawImage(img, (img.naturalWidth - side) / 2, 0, side, side, x, y, size, size)
+        ctx.imageSmoothingEnabled = true
+      }
+    }
+    const big = HEART.length * cell + 14 // a portrait as tall as the hearts, a little taller
+    avatar(player, pane.x + 15, pane.y + 33, big)
+    draw(player, pane.x + 15 + big + 12, pane.y + 30 + (big - HEART.length * cell) / 2, cell)
+    const partner = game.players.find((p) => p !== player)
+    const small = HEART.length * 2 + 8
+    const row2 = pane.y + 33 + big + 12
+    avatar(partner, pane.x + 15, row2, small)
+    draw(partner, pane.x + 15 + big + 12, row2 + (small - HEART.length * 2) / 2, 2)
+  }
+
+  // Replaces {jump}/{crouch}/{act} in a tutorial prompt with what THIS player presses.
+  function promptText(text, player, touch) {
+    const blue = player.id === 'blue'
+    const keys = touch ? { jump: 'JUMP', crouch: 'STICK DOWN', act: 'ACT', draw: 'USE', echo: 'USE', teleport: 'USE', rope: 'USE' } : blue ? { jump: 'W', crouch: 'S', act: 'E', draw: 'Q', echo: 'X', teleport: 'F', rope: 'C' } : { jump: 'UP', crouch: 'DOWN', act: '/', draw: '.', echo: ';', teleport: ',', rope: "'" }
+    return text.replace(/\{(jump|crouch|act|draw|echo|teleport|rope)\}/g, (_, k) => keys[k])
+  }
+
+  // The tutorial arrows: a bobbing arrow at an obstacle, with what to do, shown to whoever is near it.
+  function drawPrompts(game, player, pane, ui, project) {
+    const list = game.level.objects.prompts
+    if (!list.length) return
+    const cy = bodyCenter(player)
+    for (const prm of list) {
+      if (prm.for && prm.for !== player.id) continue
+      if (player.x < prm.x - (prm.range ?? 8) || player.x > prm.x + (prm.after ?? 4)) continue
+      if (Math.abs(cy - prm.y) > (prm.rangeY ?? 6)) continue
+      const at = project(prm.x, prm.y)
+      const cell = Math.max(3, Math.round(pane.h / 120))
+      const bob = Math.sin(performance.now() / 160) * cell * 2
+      const dir = prm.dir || 'down'
+      const rows = ARROWS[dir]
+      const w = rows[0].length * cell
+      const h = rows.length * cell
+      const off = { down: [0, bob], up: [0, -bob], left: [-bob, 0], right: [bob, 0] }[dir]
+      const ax = at.x - w / 2 + off[0]
+      const ay = at.y - h / 2 + off[1]
+      bitmap(rows, ax, ay, cell, ABILITY_COLORS.jumpBoost)
+      // the words, in a little pixel box on the far side of the arrow
+      const text = px(promptText(prm.text, player, ui.touch))
+      ctx.font = `${Math.max(8, Math.round(pane.h / 50))}px ${PIXEL_FONT}`
+      const tw = ctx.measureText(text).width
+      const padX = 8
+      const boxW = tw + padX * 2
+      const boxH = 24
+      let bx = at.x - boxW / 2
+      let by = ay - boxH - 8
+      if (dir === 'up') by = ay + h + 8
+      if (dir === 'right') {
+        bx = ax - boxW - 10
+        by = at.y - boxH / 2
+      }
+      if (dir === 'left') {
+        bx = ax + w + 10
+        by = at.y - boxH / 2
+      }
+      bx = Math.max(pane.x + 6, Math.min(pane.x + pane.w - boxW - 6, bx))
+      ctx.fillStyle = '#0b0820'
+      ctx.fillRect(bx - 3, by - 3, boxW + 6, boxH + 6)
+      ctx.fillStyle = '#f8f8f8'
+      ctx.fillRect(bx - 1, by - 1, boxW + 2, boxH + 2)
+      ctx.fillStyle = '#0b0820'
+      ctx.fillRect(bx + 1, by + 1, boxW - 2, boxH - 2)
+      ctx.fillStyle = '#ffd23f'
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(text, bx + padX, by + boxH / 2 + 1)
+      ctx.textBaseline = 'alphabetic'
+    }
   }
 
   function drawPane(game, pane, index, view, debug, mode, ui = {}) {
@@ -189,6 +329,8 @@ export function createOverlay(canvas) {
 
     drawHud(game, game.players[index], pane, ui)
     if (!ui.touch) drawAbilities(game, game.players[index], pane) // (the touch toolbelt shows them instead)
+    drawHearts(game, game.players[index], pane)
+    drawPrompts(game, game.players[index], pane, ui, project)
     drawNotices(game, pane)
 
     // pane label; when playing solo, show which character you are controlling
@@ -216,5 +358,9 @@ export function createOverlay(canvas) {
     })
   }
 
-  return { resize, draw }
+  function clear() {
+    ctx.clearRect(0, 0, width, height)
+  }
+
+  return { resize, draw, clear }
 }

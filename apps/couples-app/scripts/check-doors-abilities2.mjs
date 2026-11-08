@@ -71,7 +71,7 @@ const ROPE = { ...none, rope: true }
 
 // ---------------- drawing: the caster turns toward the line and points at it ----------------
 {
-  const g = withAbilities({ solidLight: 1 })
+  const g = withAbilities({ solidLight: 2 })
   place(g, BLUE, 30)
   step(g, { ...none, draw: true })
   step(g)

@@ -15,6 +15,8 @@
 //                            "holdOpen": seconds it stays open after the plates are released
 //     type "switch"        open while its switches are on:
 //                            "switches": ["id", ...], "mode": "all"|"any" (default all)
+//                          a plate door may add "orSwitches": ["leverId"]: while any of those levers is
+//                          flipped it is open for good (hold, pass, pull the lever, let your partner through)
 //     plate/switch doors are gray unless a "color" is given, which then also
 //     restricts who may pass once it's open.
 //   "plates":   [{ "id", "x", "y", "w"?, "color"?: "any"|"blue"|"pink" }]
@@ -52,6 +54,7 @@
 // collision does the rest.
 import { DOORS, PLAYER } from './config.js'
 import { isSolid } from './levels.js'
+import { crateCovers, crateOnPlate } from './crates.js'
 import { bodyBottom, bodyCenter, bodyTop, headY, setGravity } from './gravity.js'
 
 const DOOR_TYPES = new Set(['gray', 'blue', 'pink', 'plate', 'switch', 'key', 'flip', 'linked', 'oneway', 'swap', 'random'])
@@ -142,13 +145,16 @@ export function createDoorSystem(level) {
       timer: 0,
     }
     if (d.type === 'random') door.randOpen = door.rng() < door.openChance
-    if (d.type === 'plate') door.control = { kind: 'plates', ids: d.plates || [], mode: d.mode || 'all', holdOpen: d.holdOpen || 0 }
+    if (d.type === 'plate') door.control = { kind: 'plates', ids: d.plates || [], mode: d.mode || 'all', holdOpen: d.holdOpen || 0, orSwitches: d.orSwitches || [] }
     if (d.type === 'switch') door.control = { kind: 'switches', ids: d.switches || [], mode: d.mode || 'all', holdOpen: 0 }
     for (let ty = door.y; ty < door.y + door.h; ty++) {
       if (isSolid(level, door.x, ty)) fail(level, `door "${door.id}" overlaps a solid tile at (${door.x},${ty})`)
     }
     if (door.bypass && !switches.some((sw) => sw.id === door.bypass)) {
       fail(level, `door "${door.id}" refers to missing bypass switch "${door.bypass}"`)
+    }
+    for (const id of door.control?.orSwitches || []) {
+      if (!switches.some((s) => s.id === id)) fail(level, `door "${door.id}" refers to missing switch "${id}" in orSwitches`)
     }
     if (door.control) {
       if (!door.control.ids.length) fail(level, `door "${door.id}" has no ${door.control.kind} to control it`)
@@ -184,7 +190,7 @@ export function createDoorSystem(level) {
   }
 
   const exit = def.exit
-    ? { x: def.exit.x, y: def.exit.y, w: def.exit.w || 1, h: def.exit.h || 3, inside: [false, false], timer: 0 }
+    ? { x: def.exit.x, y: def.exit.y, w: def.exit.w || 1, h: def.exit.h || 3, inside: [false, false], through: [false, false], timer: 0 }
     : null
 
   const system = { doors, plates, switches, keys, portals, gravity, exit }
@@ -223,7 +229,9 @@ function controlMet(system, door) {
     const item = pool.find((entry) => entry.id === id)
     return door.control.kind === 'plates' ? item.held : item.on
   })
-  return door.control.mode === 'any' ? states.some(Boolean) : states.every(Boolean)
+  const met = door.control.mode === 'any' ? states.some(Boolean) : states.every(Boolean)
+  // a plate door may also name levers ("orSwitches"): while one is flipped the door is open for good
+  return met || (door.control.orSwitches || []).some((id) => system.switches.find((s) => s.id === id)?.on)
 }
 
 // Opens/closes every door from the current plate and switch states. A door
@@ -305,6 +313,7 @@ export function tryInteract(game, player) {
   let bestDistance = Infinity
   for (const sw of game.doors.switches) {
     if (sw.who !== 'any' && sw.who !== player.id) continue
+    if (crateCovers(game, sw.x, sw.y)) continue // a crate in front of a lever hides it
     const dx = Math.abs(player.x - (sw.x + 0.5))
     const dy = Math.abs(centerY - (sw.y + 0.5))
     if (dx > DOORS.SWITCH_REACH || dy > DOORS.SWITCH_REACH + 0.5) continue
@@ -340,7 +349,7 @@ function handOverKey(game, player) {
 
 // Keys: picked up by walking onto them, carried above the head, dropped back home when their holder dies,
 // and spent when the holder reaches the door they open.
-function updateKeys(system, players) {
+function updateKeys(system, players, game) {
   for (const key of system.keys) {
     if (key.used) continue
     if (key.holder) {
@@ -354,7 +363,7 @@ function updateKeys(system, players) {
         key.py = headY(holder) - holder.grav * 0.4
       }
     }
-    if (!key.holder) {
+    if (!key.holder && !crateCovers(game, Math.floor(key.px), Math.floor(key.py))) { // (a crate on top of a key hides it)
       for (const p of players) {
         if (system.keys.some((o) => o.holder === p.id)) continue // one key at a time
         if (Math.abs(p.x - key.px) < 0.6 && key.py > bodyTop(p) - 0.2 && key.py < bodyBottom(p) + 0.2) {
@@ -475,8 +484,8 @@ export function updateDoorSystem(game, dt) {
   const { players } = game
 
   // a Light Echo presses plates just like a player (it has the owner's id and stands where it was cast)
-  for (const plate of system.plates) plate.held = players.some((p) => playerOnPlate(p, plate)) || (game.echoes || []).some((e) => playerOnPlate(e, plate))
-  updateKeys(system, players)
+  for (const plate of system.plates) plate.held = players.some((p) => playerOnPlate(p, plate)) || (game.echoes || []).some((e) => playerOnPlate(e, plate)) || (plate.color === 'any' && crateOnPlate(game, plate)) // (a crate's weight counts for any plate that takes either player)
+  updateKeys(system, players, game)
   updatePasses(system, players)
   updateRandomDoors(system, dt)
   updatePortals(game)
@@ -490,12 +499,15 @@ export function updateDoorSystem(game, dt) {
       const cy = p.y - (p.grav * PLAYER.HEIGHT_STAND) / 2
       return cx > exit.x && cx < exit.x + exit.w && cy > exit.y && cy < exit.y + exit.h
     })
-    if (exit.inside.every(Boolean)) {
-      exit.timer += dt
-      if (exit.timer >= DOORS.EXIT_HOLD) game.complete = true
-    } else {
-      exit.timer = 0
-    }
+    players.forEach((p, i) => {
+      if (exit.inside[i] && p.heartsOn) p.hearts = p.maxHearts // reaching an exit restores all your hearts
+    })
+    // reaching the exit counts for good: whoever has gone through stays through, so the room is done the moment the
+    // second one arrives (they do not have to stand in it together, or wait there)
+    exit.inside.forEach((here, i) => {
+      if (here) exit.through[i] = true
+    })
+    if (exit.through.every(Boolean)) game.complete = true
   }
 }
 
@@ -525,7 +537,7 @@ export function doorDebugLines(system) {
   }
   if (system.exit) {
     const e = system.exit
-    lines.push(`exit  blue ${e.inside[0] ? 'IN' : '-'}  pink ${e.inside[1] ? 'IN' : '-'}  ${e.timer.toFixed(2)}s`)
+    lines.push(`exit  blue ${e.inside[0] ? 'IN' : '-'}  pink ${e.inside[1] ? 'IN' : '-'}  through ${e.through.map((t) => (t ? 'Y' : 'n')).join('')}`)
   }
   return lines
 }

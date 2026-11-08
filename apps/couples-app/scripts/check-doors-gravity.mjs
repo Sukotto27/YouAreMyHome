@@ -30,7 +30,7 @@ function room(extra = {}) {
     grid.push(line)
   }
   grid[21] = grid[21].slice(0, 4) + 'B' + grid[21].slice(5, 7) + 'P' + grid[21].slice(8)
-  return parseLevel({ name: 'gravity-test', grid, ...rest })
+  return parseLevel({ name: 'gravity-test', grid, abilities: { solidLight: 3 }, ...rest })
 }
 const BLUE = 0
 const PINK = 1

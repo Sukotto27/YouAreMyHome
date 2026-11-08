@@ -37,13 +37,21 @@
 //       Sideways it adds "speed" tiles/s to whoever is in it; up it lifts, down it
 //       slams. Harmless by itself: it pushes you into other things. A drawn line
 //       cuts the stream off, so everything behind it is calm.
+//   { "type": "trapdoor", "x", "y", "w", "delay"?, "open"?, "startOpen"?, "closeWhen"? }
+//       a floor that gives way under the first person to stand on it, drops them, and then SEALS shut
+//       for good (it never reopens): how the tutorial room splits the pair across two levels.
+//   Any hazard may also say "offWhile": "plateId": while that plate is held it is switched off
+//       (jets, lasers and wind go out, arrows stop, crushers wait, spikes and boulders don't trigger, collapsing floors
+//       hold, blades go harmless).
+//       It may name a lever instead: the hazard is then off for good once the lever is flipped.
 // "checkpoints": [{ "id", "x", "y" }]  a flag standing in cell (x,y); touching it
 //   makes that player respawn there from now on.
 import { TRAPS } from './config.js'
 import { isSolid } from './levels.js'
+import { crateSolid } from './crates.js'
 import { bodyBottom, bodyCenter, bodyTop } from './gravity.js'
 
-const TYPES = new Set(['fire', 'laser', 'arrow', 'spikes', 'collapse', 'boulder', 'crusher', 'blade', 'wind'])
+const TYPES = new Set(['fire', 'laser', 'arrow', 'spikes', 'collapse', 'boulder', 'crusher', 'blade', 'wind', 'trapdoor'])
 const DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
 const EPS = 1e-6
 
@@ -101,6 +109,14 @@ export function createTrapSystem(level) {
           if (isSolid(level, d.x + i, d.y)) fail(level, `collapsing floor "${trap.id}" overlaps a solid tile (leave those cells empty in the grid)`)
         }
         Object.assign(trap, { delay: d.delay ?? 0.6, respawn: d.respawn ?? 5, mode: 'solid', t: 0 })
+        break
+      }
+      case 'trapdoor': {
+        for (let i = 0; i < d.w; i++) {
+          if (isSolid(level, d.x + i, d.y)) fail(level, `trapdoor "${trap.id}" overlaps a solid tile (leave those cells empty in the grid)`)
+        }
+        // "startOpen": it begins open (a gap) and "closeWhen": "leverId" closes it for good when that lever is flipped (a drawbridge)
+        Object.assign(trap, { delay: d.delay ?? 0.3, openTime: d.open ?? 1.4, mode: d.startOpen ? 'open' : 'closed', startOpen: !!d.startOpen, closeWhen: d.closeWhen || null, t: 0 })
         break
       }
       case 'boulder':
@@ -177,8 +193,15 @@ export function createTrapSystem(level) {
 const doorCell = (game, tx, ty) => game.doors.doors.some((d) => !d.open && tx === d.x && ty >= d.y && ty < d.y + d.h)
 
 // Is this tile cell occupied by an intact collapsing floor?
-export function collapseSolid(system, tx, ty) {
+// (`player`, when given, is who is asking: an open trapdoor only drops whoever triggered it; to anyone else
+// it stays a floor, so exactly one of a pair falls even if they walk onto it together)
+export function collapseSolid(system, tx, ty, player = null) {
   for (const trap of system.traps) {
+    if (trap.type === 'trapdoor') {
+      const open = trap.mode === 'open' && (!player || !trap.victim || player.id === trap.victim)
+      if (!open && ty === trap.y && tx >= trap.x && tx < trap.x + trap.w) return true
+      continue
+    }
     if (trap.type !== 'collapse' || trap.mode === 'gone') continue
     if (ty === trap.y && tx >= trap.x && tx < trap.x + trap.w) return true
   }
@@ -198,7 +221,7 @@ function makeBlocker(game) {
       segments.push({ x0: a.x, y0: a.y, x1: b.x, y1: b.y, r: TRAPS.LINE_RADIUS })
     }
   }
-  const cellSolid = (tx, ty) => isSolid(level, tx, ty) || collapseSolid(sys, tx, ty) || doorCell(game, tx, ty)
+  const cellSolid = (tx, ty) => isSolid(level, tx, ty) || collapseSolid(sys, tx, ty) || doorCell(game, tx, ty) || crateSolid(game, tx, ty)
   const pointBlocked = (x, y) => {
     if (cellSolid(Math.floor(x), Math.floor(y))) return true
     for (const b of bricks) if (x >= b.x0 && x <= b.x1 && y >= b.y0 && y <= b.y1) return true
@@ -403,14 +426,22 @@ export function updateTraps(game, dt, kill) {
   for (const p of game.players) p.push = { vx: 0, ay: 0, capUp: 0 } // wind below re-applies it
   const live = game.players.filter((p) => !(p.invuln > 0))
   const hit = (p, trap) => {
-    if (p.invuln > 0) return
+    if (p.invuln > 0 || trap.off) return // (a trap switched off by a plate is harmless)
     kill(p, trap.id)
   }
+  // a hazard's "offWhile" names a plate (off while held) or a lever (off for good once flipped)
+  const plateHeld = (id) => game.doors.plates.some((pl) => pl.id === id && pl.held) || game.doors.switches.some((sw) => sw.id === id && sw.on)
 
   for (const trap of sys.traps) {
+    trap.off = !!trap.offWhile && [].concat(trap.offWhile).some(plateHeld)
     switch (trap.type) {
       case 'fire':
       case 'laser': {
+        if (trap.off) {
+          trap.phase = 'off'
+          trap.beam = null
+          break
+        }
         trap.phase = beamPhase(trap, time)
         trap.beam = trap.phase === 'on' ? castBeam(trap, blocker) : null
         if (trap.beam) {
@@ -420,6 +451,12 @@ export function updateTraps(game, dt, kill) {
         break
       }
       case 'arrow': {
+        if (trap.off) {
+          trap.arrows = []
+          trap.phase = 'idle'
+          trap.lastShot = Math.floor((time - trap.offset) / trap.period)
+          break
+        }
         const tc = (((time - trap.offset) % trap.period) + trap.period) % trap.period
         trap.phase = time >= trap.offset && tc >= trap.period - trap.telegraph ? 'warn' : 'idle'
         const shot = Math.floor((time - trap.offset) / trap.period)
@@ -452,7 +489,7 @@ export function updateTraps(game, dt, kill) {
       case 'spikes': {
         const halfW = 0.4
         const halfH = 0.45
-        if (trap.mode === 'armed') {
+        if (trap.mode === 'armed' && !trap.off) {
           for (const p of live) {
             if (bodyCenter(p) < trap.cy) continue // only people below it
             const fall = Math.sqrt((2 * Math.max(0, bodyCenter(p) - trap.cy)) / TRAPS.SPIKE_GRAVITY)
@@ -482,12 +519,15 @@ export function updateTraps(game, dt, kill) {
             for (const p of live) if (overlaps(p, trap.x - halfW, trap.cy - halfH, trap.x + halfW, trap.cy + halfH)) hit(p, trap)
           }
         } else if (trap.mode === 'landed') {
+          // spikes standing on the floor are as deadly as falling ones: nobody wades through them
+          for (const p of live) if (overlaps(p, trap.x - halfW, trap.cy - halfH, trap.x + halfW, trap.cy + halfH)) hit(p, trap)
           trap.t += dt
           if (trap.t >= trap.rest) {
             trap.mode = 'resetting'
             trap.t = 0
           }
         } else if (trap.mode === 'resetting') {
+          for (const p of live) if (overlaps(p, trap.x - halfW, trap.cy - halfH, trap.x + halfW, trap.cy + halfH)) hit(p, trap)
           trap.t += dt
           if (trap.t >= trap.reset) {
             trap.mode = 'armed'
@@ -498,10 +538,40 @@ export function updateTraps(game, dt, kill) {
         }
         break
       }
+      case 'trapdoor': {
+        const standingOn = (p) => p.onGround && Math.abs(p.y - (p.grav < 0 ? trap.y + 1 : trap.y)) < 0.06 && p.x > trap.x && p.x < trap.x + trap.w
+        if (trap.mode === 'closed') {
+          const first = game.players.find(standingOn)
+          if (first) {
+            trap.mode = 'warn'
+            trap.victim = first.id // the one who stepped on it first is the one who falls
+            trap.t = 0
+          }
+        } else if (trap.mode === 'warn') {
+          trap.t += dt
+          if (trap.t >= trap.delay) {
+            trap.mode = 'open'
+            trap.t = 0
+          }
+        } else if (trap.mode === 'open' && trap.closeWhen) {
+          // a drawbridge: closes for good once its lever is flipped (and nobody is standing in the gap)
+          const flipped = game.doors.switches.some((sw) => sw.id === trap.closeWhen && sw.on)
+          if (flipped && !game.players.some((p) => overlaps(p, trap.x, trap.y, trap.x + trap.w, trap.y + 1))) trap.mode = 'sealed'
+        } else if (trap.mode === 'open') {
+          trap.t += dt
+          // it shuts for good once whoever fell is clear of it
+          const faller = game.players.find((p) => p.id === trap.victim)
+          if (trap.t >= trap.openTime && !(faller && overlaps(faller, trap.x, trap.y, trap.x + trap.w, trap.y + 1))) {
+            trap.mode = 'sealed'
+            trap.t = 0
+          }
+        }
+        break
+      }
       case 'collapse': {
         const standing = (p) => p.onGround && Math.abs(p.y - (p.grav < 0 ? trap.y + 1 : trap.y)) < 0.06 && p.x + p.w / 2 > trap.x && p.x - p.w / 2 < trap.x + trap.w
         if (trap.mode === 'solid') {
-          if (game.players.some(standing)) {
+          if (!trap.off && game.players.some(standing)) { // (held up while its plate is held)
             trap.mode = 'shaking'
             trap.t = 0
           }
@@ -523,13 +593,18 @@ export function updateTraps(game, dt, kill) {
       }
       case 'boulder': {
         const shot = Math.floor((time - trap.offset) / trap.period)
-        if (time >= trap.offset && shot > trap.lastSpawn) {
+        // the boulders come out of a hole in the ceiling at (x, y); holding its plate (or flipping its lever) seals the hole:
+        // nothing more comes out and the ones already rolling crumble away
+        if (trap.off) trap.lastSpawn = shot
+        if (!trap.off && time >= trap.offset && shot > trap.lastSpawn) {
           trap.lastSpawn = shot
           trap.boulders.push({ x: trap.x, y: trap.y, vx: (trap.dir || -1) * trap.speed, vy: 0, ang: 0, age: 0 })
           if (trap.boulders.length > 4) trap.boulders.shift()
         }
         const alive = []
         for (const b of trap.boulders) {
+          if (trap.off) b.dying = (b.dying || 0) + dt
+          if (b.dying > 0.4) continue
           b.age += dt
           stepBoulder(b, trap.radius, blocker, dt)
           if (b.y > game.level.rows + 8 || b.x < -4 || b.x > game.level.cols + 4 || b.age > TRAPS.BOULDER_LIFE) continue
@@ -544,6 +619,10 @@ export function updateTraps(game, dt, kill) {
         break
       }
       case 'crusher': {
+        if (trap.off && trap.mode === 'rest') {
+          trap.t = 0 // waiting up in its slot while the plate is held
+          break
+        }
         trap.t += dt
         const blockedAt = (dist) => {
           const [bx0, by0, bx1, by1] = crusherBox(trap, dist)
@@ -611,6 +690,11 @@ export function updateTraps(game, dt, kill) {
         break
       }
       case 'wind': {
+        if (trap.off) {
+          trap.phase = 'off'
+          trap.beam = null
+          break
+        }
         trap.phase = beamPhase(trap, time)
         trap.beam = trap.phase === 'on' ? castBeam(trap, blocker) : null
         if (trap.beam) {
@@ -653,7 +737,7 @@ export function trapDebugLines(system) {
     if (t.type === 'fire' || t.type === 'laser') detail = t.phase
     else if (t.type === 'arrow') detail = `${t.phase}, ${t.arrows.length} in flight`
     else if (t.type === 'spikes') detail = t.mode
-    else if (t.type === 'collapse') detail = `${t.mode} ${t.t.toFixed(1)}s`
+    else if (t.type === 'collapse' || t.type === 'trapdoor') detail = `${t.mode} ${t.t.toFixed(1)}s`
     else if (t.type === 'boulder') detail = `${t.boulders.length} rolling`
     else if (t.type === 'crusher') detail = `${t.mode} out ${t.dist.toFixed(1)}`
     else if (t.type === 'blade') detail = `angle ${((t.ang * 180) / Math.PI).toFixed(0)}deg`

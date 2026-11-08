@@ -1,0 +1,53 @@
+// Headless check of the opening scene's timeline:
+//   node scripts/check-doors-intro.mjs
+import { loadRoom, makeChecker } from './lib/pilot.mjs'
+import { INTRO, LINES, bubbleState, cineParams, createIntro, introClick, tapToStart, updateIntro } from '../src/doors/intro.js'
+
+const { check, finish } = makeChecker()
+const g = loadRoom('ch1-01-separated')
+const intro = createIntro(g)
+const run = (seconds, dt = 1 / 60) => {
+  for (let t = 0; t < seconds; t += dt) updateIntro(intro, g, dt)
+}
+
+check('starts on the title screen (black), with the room hidden', intro.phase === 'title' && !intro.world && !intro.bubbles)
+run(5)
+check('...and waits for a tap', intro.phase === 'title')
+tapToStart(intro, g)
+check('tapping starts the scene: the door begins to open', intro.phase === 'door')
+run(INTRO.DOOR / 2)
+const half = cineParams(intro)
+check('the door swings open and light shows through the gap from the first crack', half.door > 0.3 && half.door < 0.8 && half.light > 0.9 && !half.world)
+check('...the pair are hidden behind it until it is open', g.players.every((p) => p.cine?.hidden))
+run(INTRO.DOOR / 2 + 0.05)
+check('then they walk out toward the camera', intro.phase === 'walk' && g.players.every((p) => p.cine && p.cine.front && !p.cine.hidden))
+run(INTRO.WALK / 2)
+check('...in a walking animation, getting closer', g.players.every((p) => p.cine.clip === 'Walk_Loop' && p.cine.z > INTRO.WALK_FROM && p.cine.z < 0))
+run(INTRO.WALK / 2 + 0.05)
+check('then the camera turns to the side view', intro.phase === 'turn' && intro.world)
+run(INTRO.TURN + 0.1)
+check('...ending zoomed in on the pair, side-on', intro.phase === 'bubbles' && intro.front === 0 && intro.viewTiles === INTRO.VIEW_CLOSE && g.players.every((p) => p.cine && !p.cine.front && Math.abs(p.cine.yaw - Math.PI / 2) < 1e-6))
+check('...with a chat bubble over each head', bubbleState(intro).length === 2 && bubbleState(intro).every((b) => b.visible && !b.ready))
+run(2)
+check('(nothing happens until someone taps)', intro.phase === 'bubbles')
+check('tapping a bubble reveals "Where are we?" from that character', introClick(intro, 'pink') && intro.dialog.who === 'pink' && intro.dialog.text === LINES.first)
+check('...the bubbles hide while they talk, and the other one is lined up to reply', bubbleState(intro).find((b) => b.who === 'blue').ready && !bubbleState(intro).some((b) => b.visible))
+check('(a tap on a bubble while someone is talking does nothing)', !introClick(intro, 'blue'))
+run(INTRO.LINE + 0.1)
+check('...after the line, the other bubble is ready to answer', bubbleState(intro).find((b) => b.who === 'blue').ready && bubbleState(intro).find((b) => b.who === 'blue').visible)
+check('...the same character cannot answer themselves', !introClick(intro, 'pink'))
+check('...the other replies "I\'m not sure..."', introClick(intro, 'blue') && intro.dialog.text === LINES.second && intro.dialog.who === 'blue')
+run(INTRO.LINE + 0.1)
+check('then the door closes behind them', intro.phase === 'lock')
+run(1.0)
+check('...shutting', intro.door < 0.5)
+run(INTRO.LOCK)
+check('...and locks', intro.lock >= 1 && intro.door === 0)
+check('then the camera pulls back from its close-up', intro.phase === 'zoom')
+run(INTRO.ZOOM / 2)
+check('...zooming out to show the room', intro.viewTiles > INTRO.VIEW_CLOSE && intro.viewTiles < INTRO.VIEW_FULL)
+run(INTRO.ZOOM / 2 + 0.1)
+check('the game then begins, with the pair free to move', intro.done && intro.phase === 'done' && g.players.every((p) => p.cine === undefined) && intro.viewTiles === INTRO.VIEW_FULL)
+check('...standing on the upper floor, either side of the door', g.players.every((p) => p.y === 9 && p.onGround) && g.players[0].x < g.players[1].x)
+
+finish('Opening scene')
