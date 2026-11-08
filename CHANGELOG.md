@@ -13,6 +13,11 @@ bottom of Home always reflects the latest entry below.
 - Doors opening scene: the pair now walk at a steady pace with the walk animation
   matched to it, so their feet no longer slide ("walking in place").
 
+## v1.54.1
+
+- Doors on a phone fills the whole screen (no app header or tab bar), like Our Little Paradise, with a small close button.
+- Doors on a phone: the lever hint says "ACT" (not "E") and the ACT button swells and blinks whenever a lever is in reach.
+
 ## v1.54.0
 
 - Boulders (rooms 5 and 10) roll along the floor and drop into a gap in it instead of vanishing. The gap is 3 tiles

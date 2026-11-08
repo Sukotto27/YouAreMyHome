@@ -8,7 +8,8 @@
 //   top left     switch which character this device controls / restart the room (handy for one-device testing)
 //
 // Sizes come from one CSS variable, --u (1% of the shorter side), so it fits any phone in either orientation.
-import { ABILITY } from './config.js'
+import { ABILITY, DOORS } from './config.js'
+import { bodyCenter } from './gravity.js'
 import { ABILITY_NAMES, levelName } from './abilities.js'
 import { PAL, PIXEL_CIRCLE, PIXEL_SQUARE, injectPixelCss, pixelIconURL } from './pixel.js'
 import { beltAbilities, useLabel } from './touchstate.js'
@@ -237,6 +238,11 @@ export function createTouchUI(container, input, { onSwitch, onReset } = {}) {
     use.outer.style.opacity = id ? '1' : '0.45'
     const showCycle = id === 'teleport' && player.abilities.teleport > 1
     cycle.outer.style.display = showCycle ? 'block' : 'none'
+    // the ACT button (levers, handing over a key) swells and blinks whenever a lever is within reach
+    const near = game.doors.switches.some((sw) => (sw.who === 'any' || sw.who === player.id) && Math.abs(player.x - (sw.x + 0.5)) <= DOORS.SWITCH_REACH && Math.abs(bodyCenter(player) - (sw.y + 0.5)) <= DOORS.SWITCH_REACH + 0.5)
+    act.outer.style.transform = near ? 'scale(1.35)' : 'none'
+    act.outer.style.transformOrigin = 'right bottom'
+    act.outer.classList.toggle('px-blink', near)
     belt.style.display = items.length ? 'flex' : 'none'
   }
   update.last = null

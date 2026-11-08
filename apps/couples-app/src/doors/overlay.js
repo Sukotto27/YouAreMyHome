@@ -314,7 +314,7 @@ export function createOverlay(canvas) {
         if (sw.who !== 'any' && sw.who !== q.id) continue
         if (Math.abs(q.x - (sw.x + 0.5)) > DOORS.SWITCH_REACH) continue
         const spot = project(sw.x + 0.5, sw.ceiling ? sw.y + 1.35 : sw.y - 0.35)
-        const key = q.id === 'blue' ? 'E' : '/'
+        const key = ui.touch ? 'ACT' : q.id === 'blue' ? 'E' : '/' // (on a phone the button is called ACT)
         ctx.font = `${Math.max(10, Math.round(pane.h / 28))}px ${PIXEL_FONT}`
         ctx.textAlign = 'center'
         ctx.lineWidth = 4

@@ -62,6 +62,34 @@ export default function DoorsGame({ onBack }) {
     }
   }, [])
 
+  const touch = isTouchDevice()
+  // On a phone the game takes over the whole screen (like Our Little Paradise): no app header or tab bar, just the game
+  // and a small back button. On a computer it stays inside the app.
+  if (touch) {
+    return (
+      <div className="fixed inset-0 z-[100] bg-black" style={{ height: '100dvh' }}>
+        <div ref={containerRef} className="absolute inset-0 overflow-hidden bg-black" />
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="Back to games"
+          className="absolute right-2 top-2 z-[120] flex h-9 w-9 items-center justify-center rounded-full bg-black/50 text-lg text-white"
+          style={{ top: 'max(0.5rem, env(safe-area-inset-top))', right: 'max(0.5rem, env(safe-area-inset-right))' }}
+        >
+          ✕
+        </button>
+        {portrait && (
+          <div className="absolute inset-0 z-[110] flex flex-col items-center justify-center gap-4 bg-ink px-8 text-center text-paper">
+            <div className="text-6xl" style={{ transform: 'rotate(90deg)' }} aria-hidden>
+              📱
+            </div>
+            <p className="font-hand text-2xl">Turn your phone sideways to play</p>
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <div className="flex items-center gap-3 px-4 pt-3 sm:px-6">
@@ -80,17 +108,6 @@ export default function DoorsGame({ onBack }) {
         </span>
       </div>
       <div ref={containerRef} className="relative mt-2 min-h-0 flex-1 overflow-hidden bg-black" />
-      {portrait && isTouchDevice() && (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-ink px-8 text-center text-paper">
-          <div className="text-6xl" style={{ transform: 'rotate(90deg)' }} aria-hidden>
-            📱
-          </div>
-          <p className="font-hand text-2xl">Turn your phone sideways to play</p>
-          <button type="button" onClick={onBack} className="font-body text-sm underline decoration-dotted underline-offset-4">
-            ← Back to games
-          </button>
-        </div>
-      )}
     </div>
   )
 }
