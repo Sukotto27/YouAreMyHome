@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 4 (Stepping Stones):
 //   node scripts/check-doors-ch1-04.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { drawLine, duo, holdCross } from './lib/routines.mjs'
 
@@ -53,6 +54,6 @@ check('D: Blue’s lever closed the drawbridge and opened the door', sw('lv-d').
 go(900, () => P.draw.mode === 'idle', drive(101, { autoJump: false }), drive(40, { autoJump: false }))
 go(1500, () => P.x > 96.5, drive(101, { autoJump: false }), drive(97.5, { autoJump: false }))
 check('D: ...so Pink crosses the bridge and walks through', P.x > 96.5 && P.deaths === 0, `pink x=${P.x.toFixed(1)}`)
-go(1200, () => g.complete, drive(106.4), drive(107.4))
+playAnnex(d, check, 'annex')
 check('both reach the exit with their hearts intact', g.complete && B.hearts === 3 && P.hearts === 3, `deaths ${B.deaths + P.deaths}`)
 finish('Chapter 1 room 4')

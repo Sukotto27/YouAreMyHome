@@ -19,6 +19,16 @@ finished by one player alone. Level files live in `levels/chN-NN-name.json`; the
 - No exploits: `scripts/check-doors-exploits.mjs` checks that a lone player cannot run a hazard gate, an ordinary jump cannot clear a boost-only pit, and that gates can't be skipped by teleporting (`teleportBarriers` in the level JSON).
 - Proof: every room has a scripted playthrough (`scripts/check-doors-ch1-NN.mjs`) driving both players with only legal inputs.
 
+## The annex (the long ending of every room)
+
+After each room's last gate the exit has been moved into an **annex**, appended to the room by the level JSON (`"annex"` holds
+its metadata): a corridor 6 tiles tall, `44 + 2 x room` tiles long, full of permanent hazards that are never switched off
+(hurdles and crawlspaces from room 1, + flame lanes from room 2, + arrow walls from room 4, + crushers from room 7, + blades
+from room 8: a new kind only appears once its room has taught it). Rooms 3, 5, 6, 7, 8, 9, 10 have 2 to 4 **stories**: each corridor
+ends in a 3-wide drop shaft to the story below, which runs back the other way (a serpent), and the exit is on the last story.
+Every story has checkpoints. `scripts/check-doors-annex.mjs` proves each annex is passable: the pilot clones the game, looks
+2.5 s ahead and only walks on if it survives; otherwise it waits or backs off.
+
 ## Opening scene (`intro.js`, `introrig.js`)
 
 After **Tap to Start** the screen is black; a central door opens and a white light grows as it does. The two walk toward the

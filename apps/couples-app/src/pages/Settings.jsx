@@ -12,6 +12,8 @@ import {
   setSoundsEnabled,
   soundsEnabled,
 } from '../lib/deviceSettings'
+import AppLockPanel from '../components/AppLockPanel'
+import DevicesPanel from '../components/DevicesPanel'
 import EncryptionMigrationPanel from '../components/EncryptionMigrationPanel'
 import ChatCustomizationPanel from '../components/chat/ChatCustomizationPanel'
 
@@ -261,6 +263,13 @@ export default function Settings() {
         <hr className="my-6 border-ink/10" />
 
         <section>
+          <p className="mb-2 font-body text-xs font-medium text-ink-soft">Devices</p>
+          <DevicesPanel />
+        </section>
+
+        <hr className="my-6 border-ink/10" />
+
+        <section>
           <p className="font-body text-xs font-medium text-ink-soft">Security</p>
           {hasKey ? (
             <div className="mt-1.5 space-y-3">
@@ -281,6 +290,7 @@ export default function Settings() {
                 </button>
               )}
               <EncryptionMigrationPanel cryptoKey={cryptoKey} />
+              <AppLockPanel />
             </div>
           ) : (
             <p className="mt-1.5 font-body text-xs text-ink-soft">

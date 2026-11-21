@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 5 (Heartbeat):
 //   node scripts/check-doors-ch1-05.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { drawLine, duo, holdCross, slabCarry } from './lib/routines.mjs'
 
@@ -46,6 +47,6 @@ check('D: Blue’s lever opened the door in the wall', sw('lv-d').on && g.doors.
 d2.go(900, () => P.draw.mode === 'idle', drive(97, { autoJump: false }), drive(40, { autoJump: false }))
 d2.go(1500, () => P.x > 92.5, drive(98, { autoJump: false }), drive(93.2, { autoJump: false }))
 check('D: ...so Pink walks through', P.x > 92.5 && P.deaths === 0, `pink x=${P.x.toFixed(1)}`)
-d2.go(1200, () => g.complete, drive(102.4), drive(103.4))
+playAnnex(d2, check, 'annex')
 check('both reach the exit, and their hearts are refilled', g.complete && B.hearts === B.maxHearts && P.hearts === P.maxHearts)
 finish('Chapter 1 room 5')

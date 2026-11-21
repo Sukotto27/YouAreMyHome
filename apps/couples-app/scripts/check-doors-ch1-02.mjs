@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 2 (Pipe Dreams):
 //   node scripts/check-doors-ch1-02.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { duo, holdCross } from './lib/routines.mjs'
 
@@ -37,6 +38,6 @@ check('gate 3: ...which spent the key', g.doors.keys[0].used)
 // gate 4: the pit under the flame
 go(500, () => follow.x > 74 && lead.x > 76, drive(77.5, { autoJump: false }), drive(75, { autoJump: false }))
 holdCross(d, { plateX: 79.5, leverX: 90.5, afterX: 91.2, leaderOpts: { jumpAt: [83.3] }, followerOpts: { jumpAt: [83.3] }, label: 'gate 4 (pit and flame)' }, check)
-go(900, () => g.complete, drive(94.4), drive(95.4))
+playAnnex(d, check, 'annex')
 check('both reach the exit with all their hearts', g.complete && lead.hearts === 3 && follow.hearts === 3, `deaths ${lead.deaths + follow.deaths}`)
 finish('Chapter 1 room 2')

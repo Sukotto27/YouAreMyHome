@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 7 (The Long Fall):
 //   node scripts/check-doors-ch1-07.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { duo, holdCross, slabCarry, tap } from './lib/routines.mjs'
 
@@ -51,6 +52,6 @@ check('D: her lever opened the door for Blue', sw('lv-d').on && door('door-d').o
 // E: a laser curtain. Blue (behind) holds the plate; Pink crosses and pulls the lever.
 const d3 = duo(g, 'pink')
 holdCross(d3, { plateX: 76.5, leverX: 84.5, afterX: 86.5, label: 'E (laser)' }, check)
-d3.go(1200, () => g.complete, drive(92.4), drive(93.4))
+playAnnex(d3, check, 'annex')
 check('both reach the exit, hearts full', g.complete && B.hearts === B.maxHearts && P.hearts === P.maxHearts, `deaths ${B.deaths + P.deaths}`)
 finish('Chapter 1 room 7')

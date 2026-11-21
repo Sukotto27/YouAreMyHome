@@ -14,6 +14,7 @@ import { useThumbkissGesture } from '../../hooks/useThumbkissGesture'
 import CompactCounter from '../counter/CompactCounter'
 import NamePrompt from '../NamePrompt'
 import CheckInReminder from '../CheckInReminder'
+import PendingDeviceBanner from '../PendingDeviceBanner'
 import GameInvitePopup from '../GameInvitePopup'
 import MusicInvitePopup from '../MusicInvitePopup'
 import ThumbkissOverlay from '../ThumbkissOverlay'
@@ -125,6 +126,7 @@ function ShellContent() {
         partnerPressing={thumbkiss.partnerPressing}
         both={thumbkiss.both}
       />
+      <PendingDeviceBanner />
       {!firebaseReady && (
         <div className="bg-gold/15 px-4 py-1.5 text-center font-body text-xs text-ink-soft">
           Previewing without Firebase connected — nothing here is saved or synced yet.

@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 1 (the tutorial), with each of the two characters in each role:
 //   node scripts/check-doors-ch1-01.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker, pilot } from './lib/pilot.mjs'
 
 const { check, finish } = makeChecker()
@@ -58,8 +59,10 @@ function play(lowerIsPink) {
 
   // 8. the last pit together, then the exit
   go(500, () => L.x > 106, drive(112.4, { jumpAt: [101.3] }), drive(99.0, { autoJump: false }))
-  go(1500, () => g.complete, drive(112.4), drive(113.2, { jumpAt: [101.3] }))
-  check(`[${tag}] they jump the last pit and leave together`, g.complete, `deaths ${L.deaths + U.deaths}, hearts ${B.hearts}/${P.hearts}`)
+  go(1500, () => L.x > 118 && U.x > 110, drive(119.0), drive(111.0, { jumpAt: [101.3] }))
+  check(`[${tag}] they jump the last pit and reach the annex`, L.x > 118 && U.x > 110 && L.deaths + U.deaths === 0)
+  playAnnex({ g, lead: L, follow: U }, check, `[${tag}] annex`)
+  check(`[${tag}] they leave together`, g.complete, `deaths ${L.deaths + U.deaths}, hearts ${B.hearts}/${P.hearts}`)
   void wait
   void step
 }

@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 10 (The Furnace, the chapter finale):
 //   node scripts/check-doors-ch1-10.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { drawLine, duo, holdCross, slabCarry, tap } from './lib/routines.mjs'
 import { fireRope } from '../src/doors/rope.js'
@@ -69,6 +70,6 @@ check('F: ...and Pink walks across it', P2.x > 116.5 && P2.deaths === 0, `pink x
 
 // G: the crushers
 holdCross(d2, { plateX: 120.5, leverX: 133.5, afterX: 135, label: 'G (crushers)' }, check)
-d2.go(1800, () => g.complete, drive(141.4), drive(142.4))
+playAnnex(d2, check, 'annex')
 check('both reach the exit, hearts full (6 each)', g.complete && B2.hearts === 6 && P2.hearts === 6, `deaths ${B2.deaths + P2.deaths}`)
 finish('Chapter 1 room 10')

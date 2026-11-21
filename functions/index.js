@@ -5,6 +5,8 @@ const { getMessaging } = require('firebase-admin/messaging')
 const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore')
 const { onRequest } = require('firebase-functions/v2/https')
 const { onSchedule } = require('firebase-functions/v2/scheduler')
+const { isAllowedUid } = require('./lib/allowed')
+const { isBlockedHost } = require('./lib/hostGuard')
 const { buildIcsFeed } = require('./lib/ics')
 const { extractOgTags } = require('./lib/ogTags')
 const { zonedTimeToUtc } = require('./lib/timezone')
@@ -99,6 +101,26 @@ async function notifyPartner(authorUid, payload) {
   if (!authorUid) return
   const recipients = await partnerUids(authorUid)
   await Promise.all(recipients.map((uid) => sendToUid(uid, payload)))
+}
+
+// Device trust (registerDevice / reviewDevice) — see security.js.
+Object.assign(exports, require('./security')({ db, sendToUid }))
+
+// Verifies an ID token AND that it belongs to one of the two of us. Anyone
+// with the public API key can mint a valid Firebase user, so a valid token
+// alone proves nothing. When device enforcement is on, the token must also
+// carry an approved device's `did` claim.
+async function verifyTrustedToken(idToken) {
+  const decoded = await getAuth().verifyIdToken(idToken)
+  if (!isAllowedUid(decoded.uid)) throw new Error('not one of us')
+
+  const cfgSnap = await db.doc('securityState/main').get()
+  if (cfgSnap.exists && cfgSnap.data().enforce === true) {
+    if (!decoded.did) throw new Error('device not registered')
+    const deviceSnap = await db.doc(`devices/${decoded.uid}/list/${decoded.did}`).get()
+    if (!deviceSnap.exists || deviceSnap.data().status !== 'approved') throw new Error('device not approved')
+  }
+  return decoded
 }
 
 // Unlike notifyPartner (which deliberately excludes whoever caused the
@@ -809,9 +831,11 @@ const LINK_PREVIEW_MAX_BYTES = 2 * 1024 * 1024 // plenty for <head>, avoids pull
 // Unlike calendarFeed, this is only ever called by our own logged-in
 // frontend — `invoker: 'public'` just makes the Cloud Run endpoint network-
 // reachable (2nd-gen HTTPS functions reject all traffic without it); the
-// real gate is the Firebase Auth ID token checked below. Not exhaustively
-// SSRF-hardened (no private-IP-range blocking) — an accepted, bounded risk
-// given only the two known accounts can ever reach this, not public input.
+// real gate is verifyTrustedToken below, which checks the ID token belongs to
+// one of the two of us (a bare "valid Firebase user" is NOT enough — anyone
+// can sign up with the public API key). Requests to private/loopback/metadata
+// hosts are refused, including across redirects. Not covered: DNS rebinding
+// (a public name that later resolves to a private IP).
 exports.linkPreview = onRequest({ invoker: 'public' }, async (req, res) => {
   res.set('Access-Control-Allow-Origin', '*')
   res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type')
@@ -829,7 +853,7 @@ exports.linkPreview = onRequest({ invoker: 'public' }, async (req, res) => {
     return
   }
   try {
-    await getAuth().verifyIdToken(idToken)
+    await verifyTrustedToken(idToken)
   } catch {
     res.status(401).json({ error: 'Invalid token' })
     return
@@ -857,10 +881,28 @@ exports.linkPreview = onRequest({ invoker: 'public' }, async (req, res) => {
   const timeout = setTimeout(() => controller.abort(), LINK_PREVIEW_TIMEOUT_MS)
 
   try {
-    const response = await fetch(parsed.href, {
-      signal: controller.signal,
-      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; YouAreMyHomeLinkPreview/1.0)' },
-    })
+    // Follow redirects by hand (a few hops) so every hop's host is checked,
+    // not just the first — otherwise a public URL could redirect us inward.
+    let currentUrl = parsed
+    let response
+    for (let hop = 0; hop <= 3; hop += 1) {
+      if (isBlockedHost(currentUrl.hostname)) {
+        res.status(400).json({ error: 'That address is not allowed' })
+        return
+      }
+      response = await fetch(currentUrl.href, {
+        signal: controller.signal,
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; YouAreMyHomeLinkPreview/1.0)' },
+      })
+      const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null
+      if (!location) break
+      currentUrl = new URL(location, currentUrl)
+      if (currentUrl.protocol !== 'http:' && currentUrl.protocol !== 'https:') {
+        res.status(400).json({ error: 'Only http/https URLs are supported' })
+        return
+      }
+    }
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let html = ''
@@ -873,7 +915,7 @@ exports.linkPreview = onRequest({ invoker: 'public' }, async (req, res) => {
     }
     reader.cancel().catch(() => {})
 
-    const { title, description, image } = extractOgTags(html, parsed.href)
+    const { title, description, image } = extractOgTags(html, currentUrl.href)
     res.json({ title, description, image, domain: parsed.hostname })
   } catch {
     res.status(502).json({ error: 'Could not fetch preview' })

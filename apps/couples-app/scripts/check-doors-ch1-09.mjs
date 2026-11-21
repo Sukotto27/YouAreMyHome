@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 9 (Hangman's Walk):
 //   node scripts/check-doors-ch1-09.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { drawLine, duo, holdCross, slabCarry, tap } from './lib/routines.mjs'
 import { fireRope } from '../src/doors/rope.js'
@@ -49,6 +50,6 @@ check('D: ...and Pink walks across it', P2.x > 75.5 && P2.deaths === 0, `pink x=
 
 // E: crushers
 holdCross(d2, { plateX: 78.5, leverX: 93.5, afterX: 95, label: 'E (crushers)' }, check)
-d2.go(1500, () => g.complete, drive(101.4), drive(102.4))
+playAnnex(d2, check, 'annex')
 check('both reach the exit, hearts full', g.complete && B2.hearts === B2.maxHearts && P2.hearts === P2.maxHearts, `deaths ${B2.deaths + P2.deaths}`)
 finish('Chapter 1 room 9')

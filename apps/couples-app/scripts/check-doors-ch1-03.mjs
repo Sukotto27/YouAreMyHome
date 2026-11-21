@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 3 (First Light):
 //   node scripts/check-doors-ch1-03.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker, none } from './lib/pilot.mjs'
 import { duo, holdCross } from './lib/routines.mjs'
 import { beginStroke, endStroke, extendStroke } from '../src/doors/drawing.js'
@@ -72,7 +73,7 @@ check('D: ...and Pink walks across the drawbridge once her line fades', P.x > 75
 const d2 = duo(g, 'blue')
 holdCross(d2, { plateX: 80.5, leverX: 91.5, afterX: 93.5, label: 'E (roles reversed)' }, check)
 go(900, () => B.x > 100 && P.x > 94, drive(100.4, { jumpAt: [95.0] }), drive(94.6, { autoJump: false }))
-go(1500, () => g.complete, drive(106.6, { jumpAt: [95.0] }), drive(107.4, { jumpAt: [95.0] }))
+playAnnex(d2, check, 'annex')
 check('both reach the exit with their hearts intact', g.complete && B.hearts === 3 && P.hearts === 3, `deaths ${B.deaths + P.deaths}`)
 void step
 void stepGame

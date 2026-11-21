@@ -1,22 +1,20 @@
-import { useCallback, useEffect, useState } from 'react'
-import { importCryptoKey, isValidRawKey } from '../lib/e2ee'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { importCryptoKey } from '../lib/e2ee'
+import { clearKey, getKeyState, setRawKey, subscribeKeyState } from '../lib/keyStore'
 
-const STORAGE_KEY = 'you-are-my-home:e2ee-key'
-
-function readLocalKey() {
-  try {
-    return localStorage.getItem(STORAGE_KEY)
-  } catch {
-    return null
-  }
+// Just the lock/key presence state — for components (the lock gate) that don't
+// need the imported CryptoKey.
+export function useKeyLockState() {
+  return useSyncExternalStore(subscribeKeyState, getKeyState)
 }
 
 // Manages the single shared AES-256 key used for Chat/Gallery encryption.
-// The raw key lives only in localStorage on each device — nothing here ever
-// writes it to Firestore. The imported CryptoKey is cached in state rather
-// than re-imported on every encrypt/decrypt call.
+// The raw key lives only on each device — nothing here ever writes it to
+// Firestore. It's held in lib/keyStore (shared across every component, and
+// optionally wrapped under an app-lock PIN); the imported CryptoKey is cached
+// in state rather than re-imported on every encrypt/decrypt call.
 export function useEncryptionKey() {
-  const [rawKeyBase64, setRawKeyBase64] = useState(readLocalKey)
+  const { rawKeyBase64, locked, lockEnabled } = useKeyLockState()
   const [cryptoKey, setCryptoKey] = useState(null)
 
   useEffect(() => {
@@ -33,34 +31,15 @@ export function useEncryptionKey() {
     }
   }, [rawKeyBase64])
 
-  // Doesn't persist until the caller (EncryptionGate) has shown the key and
-  // gotten an explicit "I've saved this" confirmation — see saveKey.
-  const saveKey = useCallback((base64) => {
-    if (!isValidRawKey(base64)) {
-      throw new Error('That doesn’t look like a valid key.')
-    }
-    try {
-      localStorage.setItem(STORAGE_KEY, base64)
-    } catch {
-      // storage full/unavailable — key still works for this session via state
-    }
-    setRawKeyBase64(base64)
-  }, [])
-
-  const clearKey = useCallback(() => {
-    try {
-      localStorage.removeItem(STORAGE_KEY)
-    } catch {
-      // ignore
-    }
-    setRawKeyBase64(null)
-  }, [])
-
   return {
     hasKey: Boolean(cryptoKey),
     cryptoKey,
     rawKeyBase64,
-    saveKey,
+    locked,
+    lockEnabled,
+    // Doesn't persist until the caller (EncryptionGate) has shown the key and
+    // gotten an explicit "I've saved this" confirmation.
+    saveKey: setRawKey,
     clearKey,
   }
 }

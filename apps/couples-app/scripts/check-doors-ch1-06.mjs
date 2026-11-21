@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 6 (Mirror Mirror):
 //   node scripts/check-doors-ch1-06.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { drawLine, duo, holdCross, slabCarry, tap } from './lib/routines.mjs'
 
@@ -37,6 +38,6 @@ check('D: Blue climbed over the wall', B2.x > 75.5 && B2.deaths === 0, `blue (${
 go2(900, () => P2.draw.mode === 'idle', drive(64.5, { autoJump: false }), drive(77, { tol: 0.2, autoJump: false }))
 tap(d2, P2, 'teleport')
 check('D: Pink teleports to Blue, past the wall', P2.x > 73.5 && P2.deaths === 0, `pink (${P2.x.toFixed(1)}, ${P2.y.toFixed(1)})`)
-go2(1500, () => g.complete, drive(88.4), drive(89.4))
+playAnnex(d2, check, 'annex')
 check('both reach the exit, hearts full', g.complete && B.hearts === B.maxHearts && P2.hearts === P2.maxHearts)
 finish('Chapter 1 room 6')

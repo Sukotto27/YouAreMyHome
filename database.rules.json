@@ -1,6 +1,6 @@
 {
   "rules": {
-    ".read": "auth != null && (auth.uid === 's4paZwepVtbpjFH4703rIyWoYmx2' || auth.uid === 'VdgsIIL7sRbDSNfj6Ln7TEqg4Nw1')",
-    ".write": "auth != null && (auth.uid === 's4paZwepVtbpjFH4703rIyWoYmx2' || auth.uid === 'VdgsIIL7sRbDSNfj6Ln7TEqg4Nw1')"
+    ".read": "auth != null && (auth.uid === 's4paZwepVtbpjFH4703rIyWoYmx2' || auth.uid === 'VdgsIIL7sRbDSNfj6Ln7TEqg4Nw1') && (root.child('security/enforce').val() !== true || root.child('approvedDevices').child(auth.uid).child(auth.token.did).val() === true)",
+    ".write": "auth != null && (auth.uid === 's4paZwepVtbpjFH4703rIyWoYmx2' || auth.uid === 'VdgsIIL7sRbDSNfj6Ln7TEqg4Nw1') && (root.child('security/enforce').val() !== true || root.child('approvedDevices').child(auth.uid).child(auth.token.did).val() === true)"
   }
 }

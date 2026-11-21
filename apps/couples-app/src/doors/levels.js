@@ -59,6 +59,7 @@ export function parseLevel(json) {
     theme: json.theme || 'basement',
     scenery: json.scenery || {}, // { crates: [{x,y,w,h}], shelves: [{x,y,w}] }: see scenery.js
     intro: json.intro || null, // the opening cutscene's door: { doorX, doorY }
+    annex: json.annex || null, // the long final stretch (stories of hazards down to the exit): used by the headless checks
   }
 }
 

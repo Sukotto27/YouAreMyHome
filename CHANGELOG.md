@@ -5,6 +5,41 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.58.0
+
+Device trust and app lock — so a password alone (or someone poking Firebase directly)
+gets an attacker nothing.
+
+- Every browser/phone now registers itself the first time it opens the app. Known devices
+  are checked silently on every open (and every few minutes) — no alert, no prompt.
+- A **new** device sends a push to both of you with the device name and IP. Until
+  enforcement is turned on (see below) it just gets in and you're told; afterwards it sits on a
+  "Waiting for approval" screen and sees no data until one of you approves it.
+- Settings → Devices lists both of your devices (name, IP, first/last seen). Either of you
+  can approve or deny a new one, or remove an old one — removal takes effect immediately.
+  A banner appears at the top of the app while a request is waiting.
+- Enforcement is off by default ("monitor mode"), with a 14-day window where devices you
+  already use are added silently. Flip it with
+  `node functions/scripts/security-admin.js enforce on` once you've checked the list; `enforce off`
+  undoes it. The script refuses to turn it on unless approved devices are provably holding
+  device tokens, so it can't lock you out by accident. It also approves a device from the
+  command line if you ever lose every trusted one.
+- Firestore and Realtime Database rules now also require an approved device once
+  enforcement is on (`firestore.rules`, `database.rules.json`).
+- **App lock** (Settings → Security): a PIN or passphrase (6+ characters) asked for on open
+  and after 1/5/15/30 minutes away or idle. While it's on, the encryption key is stored
+  scrambled under the PIN instead of in the clear, so a borrowed or stolen phone can't read
+  chats or photos. Forgot it? Remove the lock on that device and re-enter the key from
+  your partner's.
+- Link previews (`linkPreview`) were callable by anyone with a Firebase account, and Firebase
+  accounts can be created by anyone holding the public API key. It's now limited to the two of
+  you, and refuses internal addresses (localhost, private ranges, the cloud metadata server)
+  including across redirects.
+- App Check wired in (inert until `VITE_APPCHECK_SITE_KEY` is set), in both the main app and
+  home-game, so direct API calls can be shut out once you switch it to Enforce in the console.
+- Tests: `node --test functions/lib/*.test.js` (device decisions, host blocking) and
+  `node scripts/check-keystore.mjs` (the app lock's key wrapping, unlocking and wiping).
+
 ## v1.48.2
 
 - Doors opening scene: the room stays pitch black and the only light is what comes
@@ -12,6 +47,38 @@ bottom of Home always reflects the latest entry below.
   in from black afterwards.
 - Doors opening scene: the pair now walk at a steady pace with the walk animation
   matched to it, so their feet no longer slide ("walking in place").
+
+## v1.57.1
+
+- Doors: checkpoints are invisible now (no flags); they work exactly as before.
+
+## v1.57.0
+
+- Doors: every chapter 1 room is much longer. After the old last gate each room now
+  continues into an annex: a long corridor of permanent hazards (hurdles, crawlspaces, and
+  as the rooms go on flame lanes, arrow walls, crushers and swinging blades, none of them
+  switched off) that you have to time and duck through. From room 3 on the annex has
+  several stories: a drop shaft leads to a lower corridor that runs back the other way, with
+  more checkpoints on each (up to four stories in the finale), and the exit is at the bottom.
+- Room 9: a steel beam now hangs over the 4-wide pit so Light Rope has something to catch
+  (swing across), plus an arrow explaining it; before, only your partner was in rope range.
+- The exit door now has sound: it swings open when someone reaches it and shuts when
+  everyone leaves.
+- New `check-doors-annex.mjs` (and the annex is part of every room's scripted playthrough):
+  a look-ahead pilot proves each annex can be crossed with legal inputs and no deaths.
+
+## v1.56.0
+
+- Doors sound effects, part 2: pressure plates, placing the teleport marker, Light Echo,
+  Light Rope (hum while out, click when it latches), pickups (crystals, hearts, keys),
+  dying and respawning, landings from a real fall, and pushing crates.
+
+## v1.55.0
+
+- Doors sound effects: arrows, doors opening/closing (and trap doors), levers and key doors
+  unlocking, Solid Light hum (loops while a beam is drawn or standing), boosted and mid-air
+  jumps, teleport/swap, and menu clicks (start, confirm messages, next room). Sounds from
+  the room get quieter with distance from the nearest player.
 
 ## v1.54.1
 

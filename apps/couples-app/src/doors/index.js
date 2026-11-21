@@ -19,6 +19,7 @@ import { createDebugOverlay } from './debug.js'
 import { makeCamera, updateCamera } from './camera.js'
 import { createOverlay } from './overlay.js'
 import { createFootsteps } from './footsteps.js'
+import { createSfx } from './sfx.js'
 
 // the campaign: every levels/chNN-*.json, in order
 const CAMPAIGN = Object.entries(import.meta.glob('./levels/ch*-*.json', { eager: true }))
@@ -53,6 +54,7 @@ export function startDoors(container) {
   let game = createGame(level)
   const input = createInput()
   const footsteps = createFootsteps()
+  const sfx = createSfx()
   const debug = createDebugOverlay(container)
   container.style.touchAction = 'none' // (the touch controls and drawing use pointer events; the page must not scroll or zoom)
   // the on-screen controls (touchui.js): on by default on a phone, and the T key shows them anywhere
@@ -138,6 +140,7 @@ export function startDoors(container) {
   function dismissDialog() {
     if (!game.dialogs.length) return
     game.dialogs.shift()
+    sfx.ui()
     shownDialog = null
     renderDialog()
   }
@@ -225,6 +228,7 @@ export function startDoors(container) {
   function beginIntro() {
     if (!intro || stage !== 'title') return
     titleEl.style.display = 'none'
+    sfx.ui()
     tapToStart(intro, game)
     stage = 'intro'
   }
@@ -381,6 +385,7 @@ export function startDoors(container) {
   banner.addEventListener('pointerdown', (event) => {
     // (touch) tap the "room clear" box for the next room
     event.stopPropagation()
+    if (game.complete) sfx.ui()
     nextRoom()
   })
   container.addEventListener('pointerdown', onPointerDown)
@@ -492,7 +497,10 @@ export function startDoors(container) {
     }
     if (input.consumeHint()) showHint(hintEl.style.display === 'none')
     input.consumeRoom() // (the number keys used to jump between test rooms)
-    if (input.consumeNext()) nextRoom()
+    if (input.consumeNext()) {
+      if (game.complete) sfx.ui()
+      nextRoom()
+    }
     // in the campaign the next room follows by itself a moment after the exit (N / a tap just skips the wait)
     if (game.complete && campaignIndex >= 0 && campaignIndex + 1 < CAMPAIGN.length) {
       autoNext += elapsed
@@ -532,6 +540,7 @@ export function startDoors(container) {
         watchFirstMove(inputs)
         stepGame(game, inputs, SIM.STEP)
         footsteps.update(game, SIM.STEP)
+        sfx.update(game)
         accumulator -= SIM.STEP
         steps++
       }
@@ -567,6 +576,7 @@ export function startDoors(container) {
   return {
     dispose() {
       disposed = true
+      sfx.stop()
       cancelAnimationFrame(rafId)
       observer.disconnect()
       input.dispose()

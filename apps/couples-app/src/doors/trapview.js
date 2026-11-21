@@ -15,7 +15,6 @@ const solid = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, rou
 
 export function createTrapView(group, game) {
   const views = []
-  const flags = []
 
   for (const trap of game.traps.traps) {
     const view = { trap }
@@ -229,19 +228,7 @@ export function createTrapView(group, game) {
     views.push(view)
   }
 
-  for (const cp of game.traps.checkpoints) {
-    const g = new THREE.Group()
-    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6), solid('#d1d5db'))
-    pole.position.y = 0.8
-    g.add(pole)
-    const cloth = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.4), new THREE.MeshBasicMaterial({ color: 0x9ca3af, side: THREE.DoubleSide }))
-    cloth.position.set(0.32, 1.38, 0)
-    g.add(cloth)
-    g.position.set(cp.x + 0.5, -(cp.ceiling ? cp.y : cp.y + 1), 0)
-    if (cp.ceiling) g.scale.y = -1 // hangs from the ceiling
-    group.add(g)
-    flags.push({ cp, cloth })
-  }
+  // (checkpoints are invisible: they still work, but there is no flag to see)
 
   // Poses everything for the pane that belongs to `focus` ('blue' | 'pink').
   function apply(focus) {
@@ -374,7 +361,6 @@ export function createTrapView(group, game) {
         default:
       }
     }
-    for (const f of flags) f.cloth.material.color.setHex(f.cp.reached[focus] ? 0x4ade80 : 0x9ca3af)
   }
 
   return { apply }

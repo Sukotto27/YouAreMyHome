@@ -7,14 +7,44 @@ rules_version = '2';
 // "signed in" user. Pinning to these two exact UIDs closes that gap: gating
 // on "signed in" alone is not equivalent to "one of the two of us," gating
 // on these UIDs is.
+//
+// Device trust (see functions/security.js): when securityState/main has
+// enforce == true, being one of the two UIDs is still not enough — the
+// session must also carry a `did` claim (issued only to an approved device)
+// whose device record says status == 'approved'. A stolen password gives a
+// session with no `did`, so it fails here. While enforce is false (monitor
+// mode) or the securityState doc doesn't exist yet, behaviour is unchanged.
+//
+// Why this is a single catch-all rather than carving out the device
+// collections: the app runs a collectionGroup('comments') query, which needs
+// the root-wide wildcard. Rules from multiple matches OR together, so a
+// stricter per-collection rule couldn't override it anyway. The trade-off: an
+// already-approved device can write device records directly. It could already
+// approve devices through reviewDevice, so that isn't a new power — what
+// matters is that an *unapproved* session can touch nothing.
 service cloud.firestore {
   match /databases/{database}/documents {
     function isUs() {
       return request.auth != null &&
         request.auth.uid in ['s4paZwepVtbpjFH4703rIyWoYmx2', 'VdgsIIL7sRbDSNfj6Ln7TEqg4Nw1'];
     }
+
+    function enforcing() {
+      return exists(/databases/$(database)/documents/securityState/main) &&
+        get(/databases/$(database)/documents/securityState/main).data.get('enforce', false) == true;
+    }
+
+    function deviceApproved() {
+      return ('did' in request.auth.token) &&
+        get(/databases/$(database)/documents/devices/$(request.auth.uid)/list/$(request.auth.token.did)).data.status == 'approved';
+    }
+
+    function trusted() {
+      return isUs() && (!enforcing() || deviceApproved());
+    }
+
     match /{document=**} {
-      allow read, write: if isUs();
+      allow read, write: if trusted();
     }
   }
 }

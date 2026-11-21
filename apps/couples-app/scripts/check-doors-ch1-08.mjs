@@ -1,5 +1,6 @@
 // Scripted playthrough of chapter 1, room 8 (Boiler Room):
 //   node scripts/check-doors-ch1-08.mjs
+import { playAnnex } from './lib/annex.mjs'
 import { loadRoom, makeChecker } from './lib/pilot.mjs'
 import { duo, holdCross } from './lib/routines.mjs'
 
@@ -37,6 +38,6 @@ check('B: Blue floated over too, taking his extra heart above the wall: 5 hearts
 
 // C: two blades, a plate and a lever
 holdCross(d, { plateX: 62.5, leverX: 80.5, afterX: 83, label: 'C (blades)' }, check)
-d.go(1200, () => g.complete, drive(90.4), drive(91.4))
+playAnnex(d, check, 'annex')
 check('both reach the exit, hearts full', g.complete && B.hearts === B.maxHearts && P.hearts === P.maxHearts, `deaths ${B.deaths + P.deaths}`)
 finish('Chapter 1 room 8')
