@@ -32,11 +32,22 @@ export const DEMO_USER = {
 const RECHECK_MS = 5 * 60 * 1000 // silent re-verification while the app is open
 const RETRY_MS = 6000 // while waiting for approval (or after an error), poll this often
 
-// registerDevice failing for reasons that say nothing about *this* device
-// (network down, function cold/unavailable).
-function isTransientError(error) {
+// registerDevice failing for reasons that say nothing about *this* device: the
+// network is down, or the function is missing/cold/unavailable (including "not
+// deployed yet", which is exactly what a failed functions deploy looks like).
+function isBackendUnavailable(error) {
   const code = error?.code
-  return !code || ['functions/unavailable', 'functions/internal', 'functions/deadline-exceeded', 'functions/unknown', 'functions/cancelled'].includes(code)
+  return (
+    !code ||
+    [
+      'functions/not-found',
+      'functions/unavailable',
+      'functions/internal',
+      'functions/deadline-exceeded',
+      'functions/unknown',
+      'functions/cancelled',
+    ].includes(code)
+  )
 }
 
 // Asks the server about this device and, if it's approved but this session
@@ -47,11 +58,15 @@ async function checkDevice({ forceRefresh = false } = {}) {
   if (!fbUser) return 'none'
   const { deviceId, secret } = getDeviceIdentity()
 
-  let hasDeviceClaim = false
-  try {
-    hasDeviceClaim = (await fbUser.getIdTokenResult(forceRefresh)).claims.did === deviceId
-  } catch {
-    // offline — the call below decides
+  // The server decides whether this session already carries the device claim
+  // (it reads it off the token we send). Forcing a refresh first means it sees
+  // the token as it really is now, so a claim lost in a refresh gets re-issued.
+  if (forceRefresh) {
+    try {
+      await fbUser.getIdToken(true)
+    } catch {
+      // offline — the call below decides
+    }
   }
 
   try {
@@ -62,11 +77,14 @@ async function checkDevice({ forceRefresh = false } = {}) {
     return data.status
   } catch (error) {
     if (error?.code === 'functions/permission-denied') return 'denied'
-    // The server can't be reached but this session already IS a registered
-    // device. Firestore/RTDB rules are what actually enforce access, and
-    // they'll say no if it has been revoked — so don't lock a working app
-    // behind a flaky connection.
-    if (hasDeviceClaim && isTransientError(error)) return 'approved'
+    // The device check itself is down (offline, cold, or the function isn't
+    // deployed). Fail OPEN: this screen is only a display — Firestore/RTDB
+    // rules are what actually enforce access, and once enforcement is on they
+    // refuse an unapproved session no matter what this returns. Failing closed
+    // here would let a backend outage lock both of you out of the whole app
+    // while protecting nothing. The periodic re-check keeps retrying, so the
+    // moment the server is back the device registers normally.
+    if (isBackendUnavailable(error)) return 'approved'
     return 'error'
   }
 }

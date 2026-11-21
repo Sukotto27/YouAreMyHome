@@ -5,6 +5,15 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.58.1
+
+- Hotfix: the new device check no longer locks you out when it can't reach its server. If
+  the check fails because you're offline, the function is cold or unavailable, or it hasn't
+  been deployed, the app opens as normal and keeps retrying in the background. (The
+  "Couldn't verify this device" screen is now reserved for a device the server has actually
+  turned down.) This is safe because the Firestore/Realtime Database rules are what enforce
+  access — that screen is only a display.
+
 ## v1.58.0
 
 Device trust and app lock — so a password alone (or someone poking Firebase directly)
