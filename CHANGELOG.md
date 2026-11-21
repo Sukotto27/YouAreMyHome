@@ -5,6 +5,14 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.58.2
+
+- Cloud Functions now run on Node.js 22. Google retired the Node.js 20 runtime on
+  2026-10-30, and every functions deploy since 7 Nov had been failing with "Runtime Node.js 20
+  was decommissioned" — which is why the new device-check function (and any other recent
+  function change) never went live. Updated `firebase.json`, `functions/package.json` and the
+  deploy workflow.
+
 ## v1.58.1
 
 - Hotfix: the new device check no longer locks you out when it can't reach its server. If
