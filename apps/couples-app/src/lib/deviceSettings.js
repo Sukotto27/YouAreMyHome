@@ -99,3 +99,25 @@ export function setMusicPausedFor(sessionId, paused) {
     // storage full/unavailable — setting just won't persist this session
   }
 }
+
+// Portuguese subtext in the games (Cards Against Couples, Bananagrams). Default
+// off; only offered on Cristina's account (see hooks/usePortugueseSubtext.js).
+const PT_SUBTEXT_KEY = 'you-are-my-home:pt-subtext'
+
+export function portugueseSubtextEnabled() {
+  return readBool(PT_SUBTEXT_KEY, false)
+}
+
+export function setPortugueseSubtextEnabled(enabled) {
+  writeBool(PT_SUBTEXT_KEY, enabled)
+}
+
+// Whether the one-time "you can turn on Portuguese subtext" note has been shown
+// (and answered) for a given game on this device.
+export function portugueseNoticeSeen(gameKey) {
+  return readBool(`${PT_SUBTEXT_KEY}-notice:${gameKey}`, false)
+}
+
+export function markPortugueseNoticeSeen(gameKey) {
+  writeBool(`${PT_SUBTEXT_KEY}-notice:${gameKey}`, true)
+}

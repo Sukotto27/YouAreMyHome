@@ -4,6 +4,7 @@ import { useBananagramsMatch } from '../../hooks/useBananagramsMatch'
 import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
+import PortugueseNotice from './PortugueseNotice'
 import { playSound } from '../../lib/sounds'
 import {
   DEFAULT_SIZE,
@@ -14,6 +15,8 @@ import {
   handSize,
 } from '../../lib/bananagrams'
 import { isValidWord, loadWords } from '../../lib/wordList'
+import { translateWord } from '../../lib/translation'
+import { usePortugueseSubtext } from '../../hooks/usePortugueseSubtext'
 
 const CELL = 34
 const STORAGE_PREFIX = 'you-are-my-home:bananagrams-grid:'
@@ -77,6 +80,9 @@ export default function BananagramsGame({ onBack }) {
   const scrollRef = useRef(null)
   const justDraggedRef = useRef(false) // swallows the click that follows a drag
   const latestRef = useRef({})
+  const pt = usePortugueseSubtext('bananagrams')
+  const [ptInfo, setPtInfo] = useState(null) // [{ word, text }] — text undefined while loading, null if not found
+  const ptTimerRef = useRef(null)
 
   const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
@@ -100,6 +106,20 @@ export default function BananagramsGame({ onBack }) {
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gridComplete, status, poolEmpty])
+
+  // Tap & hold a placed tile: show the Portuguese for the word(s) running through it.
+  function showTranslations(cellKey) {
+    const words = [...new Set(board.runs.filter((run) => run.cells.includes(cellKey)).map((run) => run.word))]
+    if (!words.length) return
+    setPtInfo(words.map((word) => ({ word })))
+    clearTimeout(ptTimerRef.current)
+    ptTimerRef.current = setTimeout(() => setPtInfo(null), 7000)
+    words.forEach((word) =>
+      translateWord(word).then((text) =>
+        setPtInfo((current) => current?.map((entry) => (entry.word === word ? { word, text } : entry)) ?? current),
+      ),
+    )
+  }
 
   function flash(text) {
     setBanner(text)
@@ -225,6 +245,7 @@ export default function BananagramsGame({ onBack }) {
           </button>
         </div>
         {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <PortugueseNotice pt={pt} how="The tiles stay in English: tap & hold a word on the board to see it in Portuguese." />
       </div>
     )
   }
@@ -268,6 +289,7 @@ export default function BananagramsGame({ onBack }) {
             Split! 🍌
           </button>
         </div>
+        <PortugueseNotice pt={pt} how="The tiles stay in English: tap & hold a word on the board to see it in Portuguese." />
       </div>
     )
   }
@@ -303,6 +325,18 @@ export default function BananagramsGame({ onBack }) {
     let dragging = false
     let pointer = { x: startX, y: startY }
     let raf = 0
+    let held = false
+    // tap & hold a placed tile (without moving) -> Portuguese for its word(s)
+    const place = placements[id]
+    let holdTimer = null
+    if (pt.on && place) {
+      holdTimer = setTimeout(() => {
+        holdTimer = null
+        if (dragging) return
+        held = true
+        showTranslations(`${place.x},${place.y}`)
+      }, 500)
+    }
 
     // Near the edge of the board view, keep scrolling so far squares are reachable.
     function autoScroll() {
@@ -324,6 +358,7 @@ export default function BananagramsGame({ onBack }) {
       if (!dragging) {
         if (Math.hypot(pointer.x - startX, pointer.y - startY) < 6) return
         dragging = true
+        clearTimeout(holdTimer)
         setSelected(null)
         raf = requestAnimationFrame(autoScroll)
       }
@@ -335,6 +370,13 @@ export default function BananagramsGame({ onBack }) {
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onUp)
       cancelAnimationFrame(raf)
+      clearTimeout(holdTimer)
+      if (held) {
+        justDraggedRef.current = true // swallow the click that follows the hold
+        setTimeout(() => {
+          justDraggedRef.current = false
+        }, 0)
+      }
       if (!dragging) return
       setDrag(null)
       justDraggedRef.current = true
@@ -416,6 +458,7 @@ export default function BananagramsGame({ onBack }) {
           {hand[drag.id]}
         </div>
       )}
+      <PortugueseNotice pt={pt} how="The tiles stay in English: tap & hold a word on the board to see it in Portuguese." />
       <style>{`@keyframes bananaFlip { from { transform: rotateY(90deg) scale(0.6); opacity: 0 } to { transform: rotateY(0) scale(1); opacity: 1 } }`}</style>
       <div className="flex items-center gap-3 px-4 pt-3 sm:px-6">
         <button
@@ -430,9 +473,38 @@ export default function BananagramsGame({ onBack }) {
           <span>
             {partnerLabel}: {partnerCount} tiles
           </span>
+          {pt.available && (
+            <button
+              type="button"
+              onClick={() => {
+                pt.toggle()
+                setPtInfo(null)
+              }}
+              aria-pressed={pt.on}
+              title="Tap & hold a word on the board to see it in Português (Brasil)"
+              className={`rounded-full border px-2 py-0.5 text-xs font-semibold transition-colors ${
+                pt.on ? 'border-rose bg-blush-soft text-rose' : 'border-ink/15 text-ink-soft'
+              }`}
+            >
+              🇧🇷 PT
+            </button>
+          )}
         </div>
         <EndGameButton onEnd={endGame} />
       </div>
+      {pt.on && !ptInfo && !banner && (
+        <p className="px-4 pt-1 text-center font-hand text-xs text-ink-soft">🇧🇷 Tap &amp; hold a word on the board to translate it</p>
+      )}
+      {pt.on && ptInfo && (
+        <div className="mx-4 mt-1 flex flex-wrap justify-center gap-x-4 gap-y-0.5 rounded-xl bg-blush-soft/70 px-3 py-1.5 text-center font-body text-sm text-ink">
+          {ptInfo.map(({ word, text }) => (
+            <span key={word}>
+              <span className="font-semibold uppercase">{word}</span> 🇧🇷{' '}
+              <i>{text === undefined ? '…' : text || 'sem tradução'}</i>
+            </span>
+          ))}
+        </div>
+      )}
       {banner && <p className="bg-blush-soft/60 px-4 py-1.5 text-center font-hand text-sm text-rose">{banner}</p>}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto px-2 py-2">

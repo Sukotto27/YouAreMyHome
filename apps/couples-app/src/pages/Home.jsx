@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import RelationshipCounter from '../components/counter/RelationshipCounter'
 import InstallBanner from '../components/InstallBanner'
 import NotificationBanner from '../components/NotificationBanner'
@@ -9,20 +9,13 @@ import AvatarBadge from '../components/AvatarBadge'
 import LoveNoteCard from '../components/LoveNoteCard'
 import PartnerActionMenu from '../components/PartnerActionMenu'
 import { useAuth } from '../context/AuthContext'
-import { useMusicPlayer } from '../context/MusicPlayerContext'
 import { useMoods } from '../hooks/useMoods'
 import { useChatSettings } from '../hooks/useChatSettings'
-import { useUnreadBadges } from '../hooks/useUnreadBadges'
+import { useNotifications } from '../context/NotificationsContext'
 import { useUpcomingDateNight } from '../hooks/useUpcomingDateNight'
-import { useUpcomingCalendarItems } from '../hooks/useUpcomingCalendarItems'
-import { useAwaitingQa } from '../hooks/useAwaitingQa'
-import { useGameAttention } from '../context/GameAttentionContext'
-import { GAME_EMOJI } from '../lib/gameInfo'
-import { useCheckIn } from '../hooks/useCheckIn'
 import { useLoveNotes } from '../hooks/useLoveNotes'
 import { markSeenNow } from '../hooks/useMarkSeen'
 import { avatarFor, preferredNameFor } from '../lib/avatars'
-import { CALENDAR_TAB_FOR_CATEGORY } from '../lib/milestones'
 import { APP_VERSION_LABEL } from '../lib/appVersion'
 import { formatCountdown } from '../lib/countdown'
 import heartLeft from '../assets/images/heart-left.png'
@@ -32,16 +25,12 @@ const LONG_PRESS_MS = 500
 
 export default function Home() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const { moods, setMyMood } = useMoods()
-  const { currentTrack: liveTrack, isHost: hostingMusic } = useMusicPlayer()
   const [chatSettings] = useChatSettings()
-  const { unread, detail } = useUnreadBadges()
+  const { items: notifications } = useNotifications()
   const upcomingDateNight = useUpcomingDateNight()
-  const upcomingCalendarCategory = useUpcomingCalendarItems()
-  const awaitingQa = useAwaitingQa()
-  const { invite: gameInvite } = useGameAttention()
-  const { myCheckIn, partnerCheckIn } = useCheckIn()
   const { incoming: incomingLoveNote, sendReply } = useLoveNotes()
   const [loveNoteOpen, setLoveNoteOpen] = useState(false)
   const [loveNoteReplied, setLoveNoteReplied] = useState(false)
@@ -51,6 +40,14 @@ export default function Home() {
     markSeenNow(user, 'loveNotes')
     setLoveNoteOpen(true)
   }
+
+  // arriving from the Notifications page's "Open" on a love note
+  useEffect(() => {
+    if (!location.state?.openLoveNote) return
+    openLoveNote()
+    navigate('/', { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   function closeLoveNote() {
     setLoveNoteOpen(false)
@@ -62,68 +59,31 @@ export default function Home() {
     setLoveNoteReplied(true)
   }
 
+  // The avatar icons come from the shared notifications list (context/NotificationsContext.jsx),
+  // so they always match the Notifications page. All game icons (an invite, or it being your
+  // turn) collapse into one 🎮 that opens the Notifications page rather than the game.
   function badgesFor(isMine) {
+    const side = isMine ? 'mine' : 'partner'
     const badges = []
-    if (!isMine) {
-      if (unread.chat) {
-        badges.push({ type: 'chat', emoji: '💬', label: 'Unread messages — open chat', onClick: () => navigate('/chat') })
-      }
-      if (unread.mail) {
-        badges.push({
-          type: 'mail',
-          emoji: detail.mail ? '💐' : '💌',
-          label: 'New mail — open Mail',
-          onClick: () => navigate('/mail'),
-        })
-      }
-      if (gameInvite) {
+    let gameBadgeAdded = false
+    for (const item of notifications) {
+      if (item.side !== side && item.side !== 'both') continue
+      if (item.type === 'game') {
+        if (gameBadgeAdded) continue
+        gameBadgeAdded = true
         badges.push({
           type: 'game',
-          emoji: GAME_EMOJI[gameInvite.game] || '🎮',
-          label: `They invited you to play ${gameInvite.gameLabel || 'a game'} — tap to join`,
-          onClick: () => navigate('/games', { state: { view: gameInvite.game } }),
+          emoji: '🎮',
+          label: 'A game is waiting for you — see notifications',
+          onClick: () => navigate('/notifications'),
         })
+        continue
       }
-      if (unread.loveNotes) {
-        badges.push({
-          type: 'sendLove',
-          emoji: detail.loveNotes || '💕',
-          label: 'They sent you love — tap to view',
-          onClick: openLoveNote,
-        })
-      }
-    } else {
-      if (awaitingQa) {
-        badges.push({
-          type: 'qa',
-          emoji: '❓',
-          label: 'A question is awaiting your answer',
-          onClick: () => navigate('/qa', { state: { category: 'awaiting' } }),
-        })
-      }
-      if (partnerCheckIn && !myCheckIn) {
-        badges.push({
-          type: 'journal',
-          emoji: '📝',
-          label: 'Your partner checked in — check in too',
-          onClick: () => navigate('/journal', { state: { tab: 'status' } }),
-        })
-      }
-    }
-    if (liveTrack && (isMine ? hostingMusic : !hostingMusic)) {
       badges.push({
-        type: 'music',
-        emoji: '🎵',
-        label: 'Hosting a live music session — tap to open',
-        onClick: () => navigate('/music'),
-      })
-    }
-    if (upcomingCalendarCategory) {
-      badges.push({
-        type: 'calendar',
-        emoji: '📅',
-        label: 'Something is coming up soon — open Calendar',
-        onClick: () => navigate('/calendar', { state: { tab: CALENDAR_TAB_FOR_CATEGORY[upcomingCalendarCategory] } }),
+        type: item.type,
+        emoji: item.emoji,
+        label: `${item.text} — tap to open`,
+        onClick: item.action === 'loveNote' ? openLoveNote : () => navigate(item.to, item.state ? { state: item.state } : undefined),
       })
     }
     return badges

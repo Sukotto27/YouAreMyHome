@@ -4,14 +4,17 @@ import { useCardsMatch } from '../../hooks/useCardsMatch'
 import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
+import PortugueseNotice from './PortugueseNotice'
 import { playSound } from '../../lib/sounds'
-import { answerText, promptForRound, splitPrompt } from '../../lib/cardsAgainstCouples'
+import { usePortugueseSubtext } from '../../hooks/usePortugueseSubtext'
+import { answerText, promptForRound, promptIndexForRound, splitPrompt } from '../../lib/cardsAgainstCouples'
+import { ANSWERS_PT, PROMPTS_PT } from '../../lib/cardsAgainstCouplesPt'
 
 const REACTIONS = ['😂', '😍', '💀', '🙈', '🔥']
 
 // The dark "prompt" card. With a blank, `answer` (if given) is dropped into
 // it in bold; question prompts show the answer beneath.
-function PromptCard({ prompt, answer }) {
+function PromptCard({ prompt, answer, ptPrompt, ptAnswer }) {
   const { before, after } = splitPrompt(prompt)
   return (
     <div className="w-full rounded-2xl bg-ink px-5 py-5 text-left font-display text-xl italic leading-snug text-paper shadow-lg">
@@ -25,11 +28,31 @@ function PromptCard({ prompt, answer }) {
       {after === null && answer && (
         <p className="mt-3 border-t border-paper/20 pt-3 font-body text-lg font-bold not-italic text-gold">{answer}</p>
       )}
+      {ptPrompt && <PortugueseLine prompt={ptPrompt} answer={ptAnswer} />}
     </div>
   )
 }
 
-function AnswerCard({ text, selected, disabled, onClick }) {
+// The Brazilian-Portuguese subtext under a prompt card (with the answer, if one
+// is being shown, dropped into the blank).
+function PortugueseLine({ prompt, answer }) {
+  const { before, after } = splitPrompt(prompt)
+  return (
+    <p className="mt-3 border-t border-paper/20 pt-2 font-body text-sm not-italic leading-snug text-paper/70">
+      <span aria-hidden="true">🇧🇷 </span>
+      {before}
+      {after !== null && (
+        <>
+          {answer ? <b className="text-gold/90">{answer}</b> : '____'}
+          {after}
+        </>
+      )}
+      {after === null && answer && <b className="mt-1 block text-gold/90">{answer}</b>}
+    </p>
+  )
+}
+
+function AnswerCard({ text, pt, selected, disabled, onClick }) {
   return (
     <button
       type="button"
@@ -40,6 +63,23 @@ function AnswerCard({ text, selected, disabled, onClick }) {
       } ${disabled ? 'cursor-not-allowed opacity-60' : 'hover:border-rose'}`}
     >
       {text}
+      {pt && <span className="mt-1 block text-xs font-normal italic text-ink-soft">🇧🇷 {pt}</span>}
+    </button>
+  )
+}
+
+function PortugueseToggle({ on, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={on}
+      title="Português (Brasil) subtext"
+      className={`rounded-full border px-2 py-0.5 font-body text-xs font-semibold transition-colors ${
+        on ? 'border-rose bg-blush-soft text-rose' : 'border-ink/15 text-ink-soft'
+      }`}
+    >
+      🇧🇷 PT
     </button>
   )
 }
@@ -51,6 +91,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
   const { user } = useAuth()
   const { match, effectivePartnerUid, startMatch, act, endGame } = useCardsMatch()
   const { sendInvite } = useGameInvite('cac', 'Cards Against Couples')
+  const pt = usePortugueseSubtext('cac')
   const [selected, setSelected] = useState(null)
   const [inviting, setInviting] = useState(false)
   const [inviteMessage, setInviteMessage] = useState('')
@@ -114,11 +155,14 @@ export default function CardsAgainstCouplesGame({ onBack }) {
           </button>
         </div>
         {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <PortugueseNotice pt={pt} how="Every card then shows its translation underneath." />
       </div>
     )
   }
 
   const prompt = promptForRound(match)
+  const ptPrompt = pt.on ? PROMPTS_PT[promptIndexForRound(match)] : null
+  const ptOf = (card) => (pt.on ? ANSWERS_PT[card] : null)
   const picks = match.picks || {}
   const hand = match.hands?.[user.uid] || []
   const myPick = picks[user.uid]
@@ -134,6 +178,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
 
   return (
     <div className="mx-auto flex w-full max-w-xl flex-1 flex-col gap-4 overflow-y-auto px-4 py-4 sm:px-6">
+      <PortugueseNotice pt={pt} how="Every card then shows its translation underneath." />
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -143,6 +188,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
           ← Games
         </button>
         <span className="flex-1 text-center font-body text-xs text-ink-soft">Round {round}</span>
+        {pt.available && <PortugueseToggle on={pt.on} onClick={pt.toggle} />}
         <button
           type="button"
           onClick={startMatch}
@@ -155,7 +201,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
 
       {phase === 'pick' && (
         <>
-          <PromptCard prompt={prompt} />
+          <PromptCard prompt={prompt} ptPrompt={ptPrompt} />
           <p className="text-center font-hand text-base text-ink-soft">
             {myPick !== undefined
               ? partnerPlayed
@@ -168,7 +214,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
           {myPick !== undefined ? (
             <div className="flex justify-center">
               <div className="w-48">
-                <AnswerCard text={answerText(myPick)} selected disabled />
+                <AnswerCard text={answerText(myPick)} pt={ptOf(myPick)} selected disabled />
               </div>
             </div>
           ) : (
@@ -178,6 +224,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
                   <AnswerCard
                     key={`${card}-${i}`}
                     text={answerText(card)}
+                    pt={ptOf(card)}
                     selected={selected === card}
                     onClick={() => setSelected(selected === card ? null : card)}
                   />
@@ -208,7 +255,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
                 {/* each card shows the reaction the OTHER player gave it */}
                 <span className="text-2xl">{reactions[uid === user.uid ? effectivePartnerUid : user.uid]}</span>
               </div>
-              <PromptCard prompt={prompt} answer={answerText(picks[uid])} />
+              <PromptCard prompt={prompt} answer={answerText(picks[uid])} ptPrompt={ptPrompt} ptAnswer={ptOf(picks[uid])} />
             </div>
           ))}
           <div className="flex flex-col items-center gap-1">

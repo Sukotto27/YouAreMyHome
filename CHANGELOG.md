@@ -5,6 +5,60 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.62.0
+
+- New Notifications page, with a bell button in the header next to Settings (it shows a count). It
+  lists everything that currently shows as an icon on the Home avatars, as plain text worded like the
+  push notifications (new messages, mail, love notes, game invites and turns, an awaiting Q&A, a
+  check-in to answer, a live music session, something coming up soon), each with an "Open" button.
+  It is not a history: an item disappears when its avatar icon does. The Journal remains the record.
+- Game turns now show on the avatars: a 🎮 icon appears on your partner's avatar when a game is
+  waiting on you (your turn in Cards Against Couples, Mad Libs, Never-Ending Story/Song, Farkle,
+  Uno, or an invite). Tapping it opens the Notifications page rather than the game.
+- The avatar icons and the Notifications page now share one list (`NotificationsContext`), so
+  they can't disagree.
+- Never-Ending Song now sends a push notification when your partner adds a line (like the Story
+  already did). Needs a functions deploy to take effect.
+
+## v1.61.1
+
+- The first time Cristina opens Cards Against Couples or Bananagrams on a device she gets a one-time
+  note (in Portuguese, with an English line) that Portuguese subtext is available, with
+  "Ativar" / "Agora não" buttons. It's shown once per game per device; nobody else sees it.
+
+## v1.61.0
+
+- Brazilian Portuguese subtext in Cards Against Couples and Bananagrams. Cristina's account gets a
+  small 🇧🇷 PT toggle inside each game (remembered per device; Scott never sees it). The English
+  stays as is.
+  - Cards: every prompt and answer card shows its Portuguese underneath (all 156 prompts and 265
+    answers are translated, loosely rather than word for word).
+  - Bananagrams: the tiles stay English so the game works; tap and hold a word on the board to see
+    its Portuguese. Words are looked up from the free MyMemory service (only the bare word is sent)
+    and remembered on the device, so only words already placed on the board can be translated.
+  - New `scripts/check-cards-pt.mjs` keeps the Portuguese list in step with the English cards.
+
+## v1.60.1
+
+- Cards Against Couples: a few Life is Strange prompts and answers added to the nerd expansion.
+
+## v1.60.0
+
+- Cards Against Couples: nerd expansion. Prompts and answers from Lord of the Rings, Harry Potter,
+  Marvel and The Legend of Zelda (the big franchises hidden as collectibles in Our Little Paradise),
+  plus some general fandom ones. Appended to the end of the lists so matches in progress are unaffected.
+
+## v1.59.0
+
+- Cards Against Couples: 50 new prompts and 64 new answer cards (now 100 prompts, 183 answers).
+  The new ones are general, CAH-style funny rather than couple-specific. They were appended to
+  the end of the lists so matches already in progress keep their cards.
+
+## v1.58.3
+
+- Doors: removed the on-screen character-swap button from the touch controls. The game is live,
+  so each person plays their own character; the reset button moved into its spot.
+
 ## v1.58.2
 
 - Cloud Functions now run on Node.js 22. Google retired the Node.js 20 runtime on

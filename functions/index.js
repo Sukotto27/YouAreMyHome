@@ -531,6 +531,17 @@ exports.notifyOnStoryTurn = onDocumentCreated('storyTurns/{id}', async (event) =
   })
 })
 
+// Never-Ending Song: every new line hands the next line to the other partner,
+// same shape as notifyOnStoryTurn above.
+exports.notifyOnSongTurn = onDocumentCreated('songTurns/{id}', async (event) => {
+  const data = event.data.data()
+  await notifyPartner(data.authorUid, {
+    title: 'Never-Ending Song',
+    body: `${data.authorName || 'They'} added a line — your turn to add the next one`,
+    url: '/YouAreMyHome/#/games',
+  })
+})
+
 // A turn is two writes (create the blank, then update it once the *other*
 // partner fills it in) — the tree branch represents the completed pair, not
 // either half alone, so this only fires on the fill-in update.

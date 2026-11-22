@@ -178,7 +178,7 @@ const level = (abilities) => {
 
 // ---------------- the pixel icons ----------------
 {
-  const names = [...ABILITY_IDS, 'jump', 'use', 'interact', 'cycle', 'switchPlayer', 'reset']
+  const names = [...ABILITY_IDS, 'jump', 'use', 'interact', 'cycle', 'reset']
   check('there is an icon for every ability and control', names.every((n) => ICONS[n]), names.filter((n) => !ICONS[n]).join())
   const bad = Object.entries(ICONS).filter(([, rows]) => rows.length !== 12 || rows.some((r) => r.length !== 12 || /[^.cwkg]/.test(r)))
   check('every icon is a 12x12 bitmap of known pixels', bad.length === 0, bad.map(([n]) => n).join())

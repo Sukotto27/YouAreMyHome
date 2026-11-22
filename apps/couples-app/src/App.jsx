@@ -15,6 +15,7 @@ import Journal from './pages/Journal'
 import Tree from './pages/Tree'
 import ShareTarget from './pages/ShareTarget'
 import Settings from './pages/Settings'
+import Notifications from './pages/Notifications'
 
 function App() {
   return (
@@ -40,6 +41,7 @@ function App() {
             <Route path="/journal" element={<Journal />} />
             <Route path="/tree" element={<Tree />} />
             <Route path="/share-target" element={<ShareTarget />} />
+            <Route path="/notifications" element={<Notifications />} />
             <Route path="/settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />

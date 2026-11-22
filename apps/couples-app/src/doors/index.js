@@ -59,10 +59,6 @@ export function startDoors(container) {
   container.style.touchAction = 'none' // (the touch controls and drawing use pointer events; the page must not scroll or zoom)
   // the on-screen controls (touchui.js): on by default on a phone, and the T key shows them anywhere
   const touchUI = createTouchUI(container, input, {
-    onSwitch: () => {
-      input.setMode(input.mode === 'pink' ? 'blue' : 'pink')
-      snapCameras = true
-    },
     onReset: () => {
       resetGame(game)
       snapCameras = true

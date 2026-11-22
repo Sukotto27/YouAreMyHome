@@ -69,7 +69,7 @@ function wire(node, onDown, onUp) {
   node.addEventListener('pointercancel', release)
 }
 
-export function createTouchUI(container, input, { onSwitch, onReset } = {}) {
+export function createTouchUI(container, input, { onReset } = {}) {
   injectPixelCss()
   const touch = input.touch
   const root = el('div', 'position:absolute;inset:0;z-index:7;pointer-events:none;touch-action:none;user-select:none;-webkit-user-select:none;display:none', container)
@@ -202,10 +202,8 @@ export function createTouchUI(container, input, { onSwitch, onReset } = {}) {
     }
   }
 
-  // ------------------------------------------------------------ top-left system buttons
-  const swap = pixelButton(root, { size: 11, shape: 'square', color: PAL.panel, icon: 'switchPlayer', caption: '', css: `left:${u(2)};top:${u(9)}` })
-  wire(swap.outer, null, () => onSwitch?.())
-  const again = pixelButton(root, { size: 11, shape: 'square', color: PAL.panel, icon: 'reset', caption: '', css: `left:${u(14.5)};top:${u(9)}` })
+  // ------------------------------------------------------------ top-left system button
+  const again = pixelButton(root, { size: 11, shape: 'square', color: PAL.panel, icon: 'reset', caption: '', css: `left:${u(2)};top:${u(9)}` })
   wire(again.outer, null, () => onReset?.())
 
   // ------------------------------------------------------------ per-frame refresh

@@ -15,3 +15,18 @@ export const GAME_EMOJI = {
   cac: '🃏',
   doors: '🚪',
 }
+
+export const GAME_LABEL = {
+  draw: 'Draw',
+  madlibs: 'Mad Libs',
+  story: 'Never-Ending Story',
+  song: 'Never-Ending Song',
+  farkle: 'Farkle',
+  uno: 'Uno',
+  obstacleDrop: 'Obstacle Drop',
+  rps: 'Rock Paper Scissors',
+  pong: 'Pong',
+  bananagrams: 'Bananagrams',
+  cac: 'Cards Against Couples',
+  doors: 'Doors',
+}
