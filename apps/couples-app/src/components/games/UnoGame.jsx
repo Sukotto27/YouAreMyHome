@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import PastGames from './PastGames'
 import { usePartnerUid } from '../../hooks/usePartnerUid'
 import { useUno, DEMO_PARTNER_UID } from '../../hooks/useUno'
 import { useGameInvite } from '../../hooks/useGameInvite'
@@ -97,6 +98,7 @@ export default function UnoGame({ onBack }) {
           </button>
         </div>
         {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <PastGames game="uno" myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} />
       </div>
     )
   }

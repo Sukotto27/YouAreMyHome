@@ -6,6 +6,7 @@ import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import PortugueseNotice from './PortugueseNotice'
 import { playSound } from '../../lib/sounds'
+import PastGames from './PastGames'
 import { usePortugueseSubtext } from '../../hooks/usePortugueseSubtext'
 import { answerText, promptForRound, promptIndexForRound, splitPrompt } from '../../lib/cardsAgainstCouples'
 import { ANSWERS_PT, PROMPTS_PT } from '../../lib/cardsAgainstCouplesPt'
@@ -188,6 +189,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
         </div>
         {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
         <PortugueseNotice pt={pt} how="Every card then shows its translation underneath." />
+        <PastGames game="cac" myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} />
       </div>
     )
   }

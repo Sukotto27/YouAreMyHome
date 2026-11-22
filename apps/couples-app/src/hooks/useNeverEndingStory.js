@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { collection, doc, onSnapshot, orderBy, query, runTransaction, serverTimestamp } from 'firebase/firestore'
+import { collection, doc, onSnapshot, orderBy, query, runTransaction, serverTimestamp, updateDoc, deleteField } from 'firebase/firestore'
 import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
@@ -180,5 +180,23 @@ export function useNeverEndingStory() {
     })
   }
 
-  return { turns, pendingTurn, loading, startStory, fillAndContinue }
+  // Sets (or, with a null emoji, clears) your emoji reaction on one turn.
+  async function reactToTurn(turnId, emoji) {
+    if (!user) return
+    if (!firebaseReady) {
+      const next = turns.map((t) => {
+        if (t.id !== turnId) return t
+        const reactions = { ...(t.reactions || {}) }
+        if (emoji) reactions[user.uid] = emoji
+        else delete reactions[user.uid]
+        return { ...t, reactions }
+      })
+      setTurns(next)
+      writeDemoList('storyTurns', next)
+      return
+    }
+    await updateDoc(doc(db, 'storyTurns', turnId), { [`reactions.${user.uid}`]: emoji || deleteField() })
+  }
+
+  return { turns, pendingTurn, loading, startStory, fillAndContinue, reactToTurn }
 }

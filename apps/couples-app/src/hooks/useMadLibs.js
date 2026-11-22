@@ -132,17 +132,42 @@ export function useMadLibs() {
     ])
   }
 
-  // Only ever shown once both of you have already completed a story, so
-  // there's no risk of this clobbering an in-progress partner submission.
+  // Wipes the current round so both of you can fill the story in again.
+  // Only reachable from the explicit, confirmed "Start over" button. The
+  // round being wiped is first pushed onto `archive` (answers + comments),
+  // so nothing is ever truly lost and old rounds stay viewable.
   async function playAgain(storyId) {
+    const current = stories[storyId] || {}
+    const hadAnswers = Object.keys(current.answers || {}).length > 0
+    const archive = hadAnswers
+      ? [
+          ...(current.archive || []),
+          { answers: current.answers, comments: current.comments || {}, endedAt: Date.now() },
+        ]
+      : current.archive || []
+
     if (!firebaseReady) {
-      const next = { ...stories, [storyId]: { answers: {} } }
+      const next = { ...stories, [storyId]: { answers: {}, comments: {}, archive } }
       setStories(next)
       writeDemoList('madLibs', next)
       return
     }
-    await setDoc(doc(db, 'madLibs', storyId), { answers: {}, updatedAt: serverTimestamp() })
+    await setDoc(doc(db, 'madLibs', storyId), { answers: {}, comments: {}, archive, updatedAt: serverTimestamp() })
   }
 
-  return { stories, customStories, createCustomMadLib, submitAnswers, playAgain }
+  // Free-text comment on the revealed stories; an empty string clears yours.
+  async function setComment(storyId, text) {
+    if (!user) return
+    const clean = String(text || '').trim().slice(0, 300)
+    if (!firebaseReady) {
+      const cur = stories[storyId] || {}
+      const next = { ...stories, [storyId]: { ...cur, comments: { ...(cur.comments || {}), [user.uid]: clean } } }
+      setStories(next)
+      writeDemoList('madLibs', next)
+      return
+    }
+    await setDoc(doc(db, 'madLibs', storyId), { comments: { [user.uid]: clean } }, { merge: true })
+  }
+
+  return { stories, customStories, createCustomMadLib, submitAnswers, playAgain, setComment }
 }

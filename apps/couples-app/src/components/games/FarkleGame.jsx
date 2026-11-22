@@ -8,6 +8,7 @@ import GameIntro from './GameIntro'
 import { firebaseReady } from '../../firebase'
 import { scoreSelection } from '../../lib/farkle'
 import { playSound } from '../../lib/sounds'
+import PastGames from './PastGames'
 
 // Standard 6-dice Farkle (see lib/farkle.js for the exact scoring table) —
 // a single ever-live shared match, not a library of separate rounds: both
@@ -122,6 +123,7 @@ First to ${targetScore.toLocaleString()} wins.`} />
           </button>
         </div>
         {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <PastGames game="farkle" myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} />
       </div>
     )
   }

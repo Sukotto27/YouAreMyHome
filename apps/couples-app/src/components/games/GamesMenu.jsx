@@ -1,4 +1,8 @@
 import { useGameAttention } from '../../context/GameAttentionContext'
+import { useAuth } from '../../context/AuthContext'
+import { useChatSettings } from '../../hooks/useChatSettings'
+import { usePartnerGame } from '../../hooks/useGamePresence'
+import { avatarFor } from '../../lib/avatars'
 
 // Landing screen for Games — a small, growable menu of shared activities.
 // Draw also holds the Scrapbook now (saved drawings live inside it as a
@@ -26,6 +30,11 @@ export default function GamesMenu({
   onSelectDoors,
 }) {
   const { byGame } = useGameAttention()
+  const { user } = useAuth()
+  const [chatSettings] = useChatSettings()
+  const partnerGame = usePartnerGame()
+  const partnerName = user?.displayName === 'Cristina' ? 'Scott' : 'Cristina'
+  const partnerAvatar = avatarFor(partnerName, chatSettings.avatars)
 
   const games = [
     { key: 'draw', title: 'Draw', text: 'Sketch together on a shared canvas, save your favorites', onSelect: onSelectDraw },
@@ -88,8 +97,22 @@ export default function GamesMenu({
         </div>
         <p className="mt-1 font-body text-xs text-ink-soft">{game.text}</p>
         {byGame[game.key] && (
-          <span className="absolute -right-1.5 -top-2 rounded-full bg-rose px-2 py-0.5 font-body text-[10px] font-semibold text-paper shadow-md ring-2 ring-paper">
+          <span className="absolute -right-1.5 -top-2 rounded-full bg-red-600 px-2 py-0.5 font-body text-[10px] font-semibold text-white shadow-md ring-2 ring-paper">
             {byGame[game.key] === 'invite' ? 'Invited!' : 'Your turn'}
+          </span>
+        )}
+        {partnerGame === game.key && (
+          <span
+            className="absolute -bottom-2 -right-1.5 flex items-center gap-1 rounded-full bg-paper py-0.5 pl-0.5 pr-2 shadow-md ring-1 ring-teal/40"
+            title={`${partnerName} is playing now`}
+          >
+            {partnerAvatar ? (
+              <img src={partnerAvatar} alt={partnerName} className="h-6 w-6 rounded-full object-cover" />
+            ) : (
+              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blush-soft text-xs">{partnerName[0]}</span>
+            )}
+            <span className="h-2 w-2 animate-pulse rounded-full bg-teal" />
+            <span className="font-body text-[10px] font-medium text-ink-soft">playing</span>
           </span>
         )}
       </>

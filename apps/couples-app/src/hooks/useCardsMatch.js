@@ -4,7 +4,8 @@ import { rtdb, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
-import { newMatch, reduce } from '../lib/cardsAgainstCouples'
+import { newMatch, reduce, roundRecord } from '../lib/cardsAgainstCouples'
+import { archiveGame } from '../lib/gameHistory'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
 const DEMO_KEY = 'cardsAgainstCouplesMatch'
@@ -31,8 +32,20 @@ export function useCardsMatch() {
     setMatch(next)
   }
 
+  // Files every round played so far (including the one on screen, if both
+  // answers are revealed) in game history. Marks the match so ending it and
+  // then dealing a new one doesn't file it twice.
+  function archiveCurrent() {
+    const m = matchRef.current
+    if (!m || m.archived) return
+    const rounds = [...(m.log || [])]
+    if (m.phase === 'reveal') rounds.push(roundRecord(m))
+    if (rounds.length) archiveGame('cac', { rounds })
+  }
+
   async function startMatch() {
     if (!user) return
+    archiveCurrent()
     const next = newMatch(user.uid, effectivePartnerUid)
     if (!firebaseReady) {
       applyLocal(next)
@@ -83,7 +96,8 @@ export function useCardsMatch() {
   // Either player can end the game; both land back on the lobby.
   async function endGame() {
     if (!user || !matchRef.current) return
-    const patch = { status: 'ended', endedBy: user.uid }
+    archiveCurrent()
+    const patch = { status: 'ended', endedBy: user.uid, archived: true }
     if (!firebaseReady) {
       applyLocal({ ...matchRef.current, ...patch })
       return

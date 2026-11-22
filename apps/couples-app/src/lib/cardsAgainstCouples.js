@@ -498,6 +498,14 @@ export function newMatch(hostUid, otherUid, rand = Math.random) {
   }
 }
 
+// A finished round as plain text, kept in `match.log` and filed in game
+// history when the match ends or is restarted.
+export function roundRecord(match) {
+  const answers = {}
+  for (const [uid, card] of Object.entries(match.picks || {})) answers[uid] = answerText(card)
+  return { prompt: promptForRound(match), answers, comments: match.comments || {} }
+}
+
 // Returns the updated match, or null if the action isn't allowed right now.
 export function reduce(match, action) {
   if (!match) return null
@@ -540,7 +548,18 @@ export function reduce(match, action) {
         cursor += 1
         hands[uid] = hand
       }
-      return { ...match, hands, cursor, round: match.round + 1, phase: 'pick', picks: null, ready: null, reactions: null, comments: null }
+      return {
+        ...match,
+        hands,
+        cursor,
+        round: match.round + 1,
+        phase: 'pick',
+        picks: null,
+        ready: null,
+        reactions: null,
+        comments: null,
+        log: [...(match.log || []), roundRecord(match)],
+      }
     }
     default:
       return null

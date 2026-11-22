@@ -7,12 +7,13 @@ import { useGameInvite } from '../../hooks/useGameInvite'
 import { firebaseReady } from '../../firebase'
 import { MAD_LIBS_LIBRARY, madLibById, renderMadLibText } from '../../lib/madLibs'
 import AnswerAvatar from '../AnswerAvatar'
+import { playSound } from '../../lib/sounds'
 
 export default function MadLibsGame({ onBack }) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
   const [chatSettings] = useChatSettings()
-  const { stories, customStories, createCustomMadLib, submitAnswers, playAgain } = useMadLibs()
+  const { stories, customStories, createCustomMadLib, submitAnswers, playAgain, setComment } = useMadLibs()
   const [activeStoryId, setActiveStoryId] = useState(null)
   const [creating, setCreating] = useState(false)
   const { sendInvite } = useGameInvite('madlibs', 'Mad Libs')
@@ -59,6 +60,7 @@ export default function MadLibsGame({ onBack }) {
         userUid={user.uid}
         partnerUid={effectivePartnerUid}
         partnerLabel={partnerLabel}
+        onComment={(text) => setComment(story.id, text)}
         onSubmit={(answers) => submitAnswers(story.id, story.title, answers)}
         onPlayAgain={() => playAgain(story.id)}
         onBack={() => setActiveStoryId(null)}
@@ -204,8 +206,11 @@ function CreateMadLibForm({ onSubmit, onBack }) {
   )
 }
 
-function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmit, onPlayAgain, onBack }) {
+function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmit, onComment, onPlayAgain, onBack }) {
   const [answers, setAnswers] = useState({})
+  const [showArchive, setShowArchive] = useState(false)
+  const comments = round?.comments || {}
+  const archive = round?.archive || []
   const [submitting, setSubmitting] = useState(false)
 
   const myAnswers = round?.answers?.[userUid]
@@ -246,13 +251,67 @@ function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmi
           )}
         </div>
         {bothDone && (
-          <button
-            type="button"
-            onClick={onPlayAgain}
-            className="mx-auto rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            Play again
-          </button>
+          <>
+            {(comments[userUid] || comments[partnerUid]) && (
+              <div className="flex flex-col gap-1.5">
+                {[
+                  { uid: userUid, label: 'You' },
+                  { uid: partnerUid, label: partnerLabel },
+                ]
+                  .filter(({ uid }) => comments[uid])
+                  .map(({ uid, label }) => (
+                    <p
+                      key={uid}
+                      className={`max-w-[85%] rounded-2xl px-3 py-1.5 font-body text-sm text-ink ${
+                        uid === userUid ? 'self-end bg-blush-soft' : 'self-start bg-white/80 shadow-sm'
+                      }`}
+                    >
+                      <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-ink-soft">{label}</span>
+                      {comments[uid]}
+                    </p>
+                  ))}
+              </div>
+            )}
+            <CommentBox saved={comments[userUid]} onSend={onComment} />
+            <button
+              type="button"
+              onClick={onPlayAgain}
+              className="mx-auto rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper transition-transform duration-200 ease-out hover:-translate-y-0.5"
+            >
+              Start over
+            </button>
+          </>
+        )}
+        {archive.length > 0 && (
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => setShowArchive((v) => !v)}
+              className="font-body text-xs text-ink-soft underline decoration-dotted underline-offset-4 hover:text-rose"
+            >
+              {showArchive ? 'Hide' : 'Show'} earlier rounds ({archive.length})
+            </button>
+            {showArchive &&
+              [...archive].reverse().map((r, i) => (
+                <div key={r.endedAt || i} className="space-y-2 rounded-2xl border border-dashed border-ink/15 p-3">
+                  <p className="font-body text-xs text-ink-soft">
+                    {r.endedAt ? new Date(r.endedAt).toLocaleString() : 'Earlier round'}
+                  </p>
+                  {r.answers?.[userUid] && <StoryCard label="Yours" text={renderMadLibText(story, r.answers[userUid])} />}
+                  {r.answers?.[partnerUid] && (
+                    <StoryCard label={`${partnerLabel}'s`} text={renderMadLibText(story, r.answers[partnerUid])} />
+                  )}
+                  {[userUid, partnerUid].map(
+                    (uid) =>
+                      r.comments?.[uid] && (
+                        <p key={uid} className="font-body text-xs text-ink-soft">
+                          {uid === userUid ? 'You' : partnerLabel}: {r.comments[uid]}
+                        </p>
+                      ),
+                  )}
+                </div>
+              ))}
+          </div>
         )}
       </div>
     )
@@ -292,6 +351,37 @@ function MadLibDetail({ story, round, userUid, partnerUid, partnerLabel, onSubmi
         </button>
       </form>
     </div>
+  )
+}
+
+// Free-text comment on the revealed stories; can be sent/edited any time.
+function CommentBox({ saved, onSend }) {
+  const [draft, setDraft] = useState(saved || '')
+  const dirty = draft.trim() !== (saved || '')
+  function submit(e) {
+    e.preventDefault()
+    if (!dirty) return
+    playSound('chat_send')
+    onSend(draft.trim())
+  }
+  return (
+    <form onSubmit={submit} className="flex gap-2">
+      <input
+        type="text"
+        value={draft}
+        maxLength={300}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Leave a comment…"
+        className="min-w-0 flex-1 rounded-full border border-ink/15 bg-white/70 px-4 py-2 font-body text-sm text-ink focus:border-rose focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={!dirty}
+        className="rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper transition-opacity disabled:opacity-40"
+      >
+        {saved && !draft.trim() ? 'Clear' : saved ? 'Update' : 'Send'}
+      </button>
+    </form>
   )
 }
 

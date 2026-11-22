@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useNeverEndingSong } from '../../hooks/useNeverEndingSong'
 import { useGameInvite } from '../../hooks/useGameInvite'
+import { ReactionBar, ReactionBadges } from './ReactionBar'
 
 // Like the Never-Ending Story, but every line you add has to be built out of
 // real song titles — you may only sprinkle in small "filler" words to make
@@ -9,7 +10,8 @@ import { useGameInvite } from '../../hooks/useGameInvite'
 // themselves. e.g. "Do you want to take a Slow Ride" → "On the Crazy Train?"
 export default function NeverEndingSongGame({ onBack }) {
   const { user } = useAuth()
-  const { turns, loading, myTurn, waitingOnPartner, addLine } = useNeverEndingSong()
+  const { turns, loading, myTurn, waitingOnPartner, addLine, reactToLine } = useNeverEndingSong()
+  const [reactingTo, setReactingTo] = useState(null)
   const partnerLabel = user.displayName === 'Cristina' ? 'Scott' : 'Cristina'
   const { sendInvite } = useGameInvite('song', 'The Never-Ending Song')
   const [inviting, setInviting] = useState(false)
@@ -69,9 +71,25 @@ export default function NeverEndingSongGame({ onBack }) {
 
       {turns.length > 0 && (
         <div className="rounded-2xl border border-ink/10 bg-white/50 p-4">
-          <SongText turns={turns} myUid={user.uid} />
+          <SongText
+            turns={turns}
+            myUid={user.uid}
+            reactingTo={reactingTo}
+            onPick={(id) => setReactingTo((cur) => (cur === id ? null : id))}
+          />
           <SongCredits turns={turns} />
         </div>
+      )}
+
+      {reactingTo && turns.some((t) => t.id === reactingTo) && (
+        <ReactionBar
+          label={turns.find((t) => t.id === reactingTo).text}
+          mine={turns.find((t) => t.id === reactingTo).reactions?.[user.uid]}
+          onReact={(emoji) => reactToLine(reactingTo, emoji)}
+        />
+      )}
+      {!reactingTo && turns.some((t) => t.authorUid !== user.uid) && (
+        <p className="text-center font-hand text-sm text-ink-soft">tap {partnerLabel}'s lines to react to them</p>
       )}
 
       {waitingOnPartner && (
@@ -85,15 +103,27 @@ export default function NeverEndingSongGame({ onBack }) {
   )
 }
 
-function SongText({ turns, myUid }) {
+function SongText({ turns, myUid, reactingTo, onPick }) {
   return (
     <p className="font-body text-lg leading-relaxed text-ink">
-      {turns.map((turn, index) => (
-        <span key={turn.id}>
-          {index > 0 && ' '}
-          <span className={turn.authorUid === myUid ? 'text-rose' : 'text-teal'}>{turn.text}</span>
-        </span>
-      ))}
+      {turns.map((turn, index) => {
+        const mine = turn.authorUid === myUid
+        return (
+          <span key={turn.id}>
+            {index > 0 && ' '}
+            <span
+              role={mine ? undefined : 'button'}
+              onClick={mine ? undefined : () => onPick(turn.id)}
+              className={`${mine ? 'text-rose' : 'cursor-pointer rounded text-teal hover:bg-blush-soft/60'} ${
+                reactingTo === turn.id ? 'bg-blush-soft' : ''
+              }`}
+            >
+              {turn.text}
+            </span>
+            <ReactionBadges reactions={turn.reactions} />
+          </span>
+        )
+      })}
       {turns.length > 0 && <span className="text-ink-soft"> …</span>}
     </p>
   )

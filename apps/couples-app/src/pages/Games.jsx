@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import GamesMenu from '../components/games/GamesMenu'
 import { useGameAttention } from '../context/GameAttentionContext'
+import { usePublishGamePresence } from '../hooks/useGamePresence'
 import DrawGame from '../components/games/DrawGame'
 import MadLibsGame from '../components/games/MadLibsGame'
 import NeverEndingStoryGame from '../components/games/NeverEndingStoryGame'
@@ -19,6 +20,7 @@ export default function Games() {
   const location = useLocation()
   const [view, setView] = useState(location.state?.view || 'menu') // 'menu' | 'draw' | 'madlibs' | 'story' | 'song' | 'farkle' | 'uno' | 'obstacleDrop' | 'rps' | 'pong' | 'bananagrams' | 'cac' | 'doors'
 
+  usePublishGamePresence(view === 'menu' ? null : view)
   const { markGameOpened, invite } = useGameAttention()
   // Opening a game answers its invite (including one that arrives while you're
   // already in that game), so its badge goes away.

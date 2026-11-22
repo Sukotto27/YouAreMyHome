@@ -4,6 +4,7 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
+import { archiveGame } from '../lib/gameHistory'
 import {
   ON_BOARD_MIN,
   TARGET_SCORE,
@@ -75,8 +76,15 @@ export function useFarkle() {
 
   const myTurn = !!game && game.status === 'playing' && game.currentTurnUid === user?.uid
 
+  // Files the current match in game history before it is replaced/deleted.
+  function archiveCurrent() {
+    if (!game || !Object.values(game.scores || {}).some((s) => s > 0)) return
+    archiveGame('farkle', { scores: game.scores, winnerUid: game.winnerUid || null, status: game.status })
+  }
+
   async function startGame() {
     if (!user) return
+    archiveCurrent()
     await write(freshGame(user.uid))
   }
 
@@ -87,6 +95,7 @@ export function useFarkle() {
   // normally, which left no exit if you were mid-game and just wanted out
   // (e.g. genuinely stuck waiting on a turn that isn't coming).
   async function cancelGame() {
+    archiveCurrent()
     if (!firebaseReady) {
       setGame(null)
       writeDemoList(DEMO_KEY, [])

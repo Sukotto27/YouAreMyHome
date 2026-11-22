@@ -4,6 +4,7 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
+import { archiveGame } from '../lib/gameHistory'
 import { COLORS, canPlayCard, chooseColor as chooseColorPure, dealGame, drawCard, passTurn, playCard } from '../lib/uno'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
@@ -47,12 +48,24 @@ export function useUno() {
 
   const myTurn = !!game && game.status === 'playing' && game.currentTurnUid === user?.uid
 
+  // Files the current match in game history before it is replaced/deleted.
+  function archiveCurrent() {
+    if (!game?.hands) return
+    archiveGame('uno', {
+      cards: Object.fromEntries(Object.entries(game.hands).map(([uid, hand]) => [uid, hand.length])),
+      winnerUid: game.winnerUid || null,
+      status: game.status,
+    })
+  }
+
   async function startGame() {
     if (!user || !effectivePartnerUid) return
+    archiveCurrent()
     await write(dealGame(user.uid, effectivePartnerUid, user.uid))
   }
 
   async function cancelGame() {
+    archiveCurrent()
     if (!firebaseReady) {
       setGame(null)
       writeDemoList(DEMO_KEY, null)

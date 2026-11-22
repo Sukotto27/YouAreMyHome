@@ -5,6 +5,28 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.65.0
+
+- Mad Libs: "Start over" is back to a single tap (no confirmation). Nothing is lost: the finished round,
+  with both players' answers and comments, is always saved first and stays under "Show earlier rounds".
+- Past games: Farkle, Uno and Cards Against Couples now file the match in history whenever it is
+  restarted, cancelled or ended (Farkle/Uno: scores or cards left and the winner; Cards Against Couples:
+  every round's prompt, both answers and comments). See "Show past games" on each game's start screen.
+- Games page: the "Your turn" / "Invited!" badge on a game is now a clear red, and a game shows your
+  partner's avatar with a pulsing dot and "playing" while they have it open (live, clears when they
+  leave or lose connection).
+
+## v1.64.0
+
+- Mad Libs: you can now leave a comment on the answer reveal screen (up to 300 characters), edit or
+  clear it any time, and your partner sees it live.
+- Mad Libs fix: the answers could vanish while you were reading them, because the one-tap
+  "Play again" button on that screen wiped both players' answers. It is now "Start over" and needs a
+  second tap to confirm. Whatever it clears is first saved, and shows under "Show earlier rounds", so a
+  reset can no longer lose answers.
+- Never-Ending Story and Never-Ending Song: tap a part your partner wrote to react to it with an emoji
+  (tap the same emoji again to remove it). Reactions show next to the text for both of you.
+
 ## v1.63.0
 
 - Cards Against Couples: on the answer reveal screen you can now leave a comment (up to 300

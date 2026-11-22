@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useNeverEndingStory } from '../../hooks/useNeverEndingStory'
 import { useGameInvite } from '../../hooks/useGameInvite'
+import { ReactionBar, ReactionBadges } from './ReactionBar'
 
 // A single ever-growing story the two of you build one blank at a time —
 // whoever's turn it is fills in the blank left by the other, then
@@ -9,7 +10,8 @@ import { useGameInvite } from '../../hooks/useGameInvite'
 // of you can pick it back up whenever (see useNeverEndingStory).
 export default function NeverEndingStoryGame({ onBack }) {
   const { user } = useAuth()
-  const { turns, pendingTurn, loading, startStory, fillAndContinue } = useNeverEndingStory()
+  const { turns, pendingTurn, loading, startStory, fillAndContinue, reactToTurn } = useNeverEndingStory()
+  const [reactingTo, setReactingTo] = useState(null)
   const partnerLabel = user.displayName === 'Cristina' ? 'Scott' : 'Cristina'
   const { sendInvite } = useGameInvite('story', 'Never-Ending Story')
   const [inviting, setInviting] = useState(false)
@@ -64,8 +66,25 @@ export default function NeverEndingStoryGame({ onBack }) {
 
       {turns.length > 0 && (
         <div className="rounded-2xl border border-ink/10 bg-white/50 p-4">
-          <StoryText turns={turns} pendingTurnId={pendingTurn?.id} myUid={user.uid} />
+          <StoryText
+            turns={turns}
+            pendingTurnId={pendingTurn?.id}
+            myUid={user.uid}
+            reactingTo={reactingTo}
+            onPick={(id) => setReactingTo((cur) => (cur === id ? null : id))}
+          />
         </div>
+      )}
+
+      {reactingTo && turns.some((t) => t.id === reactingTo) && (
+        <ReactionBar
+          label={snippet(turns.find((t) => t.id === reactingTo))}
+          mine={turns.find((t) => t.id === reactingTo).reactions?.[user.uid]}
+          onReact={(emoji) => reactToTurn(reactingTo, emoji)}
+        />
+      )}
+      {!reactingTo && turns.some((t) => reactable(t, user.uid)) && (
+        <p className="text-center font-hand text-sm text-ink-soft">tap a part {partnerLabel} wrote to react to it</p>
       )}
 
       {turns.length === 0 && <StartForm onSubmit={(before, after) => startStory(before, after)} />}
@@ -86,26 +105,46 @@ export default function NeverEndingStoryGame({ onBack }) {
   )
 }
 
-function StoryText({ turns, pendingTurnId, myUid }) {
+function snippet(turn) {
+  return [turn.textBefore, turn.filledWord || '___', turn.textAfter].filter(Boolean).join(' ')
+}
+
+// A turn is worth reacting to if your partner wrote its setup or filled its
+// blank.
+function reactable(turn, myUid) {
+  return turn.authorUid !== myUid || (!!turn.filledByUid && turn.filledByUid !== myUid)
+}
+
+function StoryText({ turns, pendingTurnId, myUid, reactingTo, onPick }) {
   return (
     <p className="whitespace-pre-wrap font-body leading-relaxed text-ink">
       {turns.map((turn, index) => {
         const isPending = turn.id === pendingTurnId
         const filled = !isPending
+        const canReact = reactable(turn, myUid)
         return (
           <span key={turn.id}>
             {index > 0 && ' '}
-            {turn.textBefore}{' '}
             <span
-              className={
-                !filled
-                  ? 'font-semibold text-ink-soft underline decoration-dotted underline-offset-2'
-                  : `font-semibold ${turn.filledByUid === myUid ? 'text-rose' : 'text-teal'}`
-              }
+              role={canReact ? 'button' : undefined}
+              onClick={canReact ? () => onPick(turn.id) : undefined}
+              className={`${canReact ? 'cursor-pointer rounded hover:bg-blush-soft/60' : ''} ${
+                reactingTo === turn.id ? 'bg-blush-soft' : ''
+              }`}
             >
-              {turn.filledWord || '_____'}
-            </span>{' '}
-            {turn.textAfter}
+              {turn.textBefore}{' '}
+              <span
+                className={
+                  !filled
+                    ? 'font-semibold text-ink-soft underline decoration-dotted underline-offset-2'
+                    : `font-semibold ${turn.filledByUid === myUid ? 'text-rose' : 'text-teal'}`
+                }
+              >
+                {turn.filledWord || '_____'}
+              </span>{' '}
+              {turn.textAfter}
+            </span>
+            <ReactionBadges reactions={turn.reactions} />
           </span>
         )
       })}
