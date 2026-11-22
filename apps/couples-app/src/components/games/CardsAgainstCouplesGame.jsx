@@ -68,6 +68,38 @@ function AnswerCard({ text, pt, selected, disabled, onClick }) {
   )
 }
 
+// Free-text comment on the revealed answers; can be sent/edited any time
+// before moving on to the next card.
+function CommentBox({ saved, onSend }) {
+  const [draft, setDraft] = useState(saved || '')
+  const dirty = draft.trim() !== (saved || '')
+  function submit(e) {
+    e.preventDefault()
+    if (!dirty) return
+    playSound('chat_send')
+    onSend(draft.trim())
+  }
+  return (
+    <form onSubmit={submit} className="flex gap-2">
+      <input
+        type="text"
+        value={draft}
+        maxLength={300}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Leave a comment…"
+        className="min-w-0 flex-1 rounded-full border border-ink/15 bg-white/70 px-4 py-2 font-body text-sm text-ink focus:border-rose focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={!dirty}
+        className="rounded-full bg-rose px-4 py-2 font-body text-sm font-medium text-paper transition-opacity disabled:opacity-40"
+      >
+        {saved && !draft.trim() ? 'Clear' : saved ? 'Update' : 'Send'}
+      </button>
+    </form>
+  )
+}
+
 function PortugueseToggle({ on, onClick }) {
   return (
     <button
@@ -168,6 +200,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
   const myPick = picks[user.uid]
   const partnerPlayed = effectivePartnerUid in picks
   const reactions = match.reactions || {}
+  const comments = match.comments || {}
   const iAmReady = !!match.ready?.[user.uid]
 
   async function handlePlay() {
@@ -258,6 +291,31 @@ export default function CardsAgainstCouplesGame({ onBack }) {
               <PromptCard prompt={prompt} answer={answerText(picks[uid])} ptPrompt={ptPrompt} ptAnswer={ptOf(picks[uid])} />
             </div>
           ))}
+          {(comments[user.uid] || comments[effectivePartnerUid]) && (
+            <div className="flex flex-col gap-1.5">
+              {[
+                { uid: user.uid, label: mineLabel },
+                { uid: effectivePartnerUid, label: partnerLabel },
+              ]
+                .filter(({ uid }) => comments[uid])
+                .map(({ uid, label }) => (
+                  <p
+                    key={uid}
+                    className={`max-w-[85%] rounded-2xl px-3 py-1.5 font-body text-sm text-ink ${
+                      uid === user.uid ? 'self-end bg-blush-soft' : 'self-start bg-white/80 shadow-sm'
+                    }`}
+                  >
+                    <span className="mr-1 text-xs font-semibold uppercase tracking-wide text-ink-soft">{label}</span>
+                    {comments[uid]}
+                  </p>
+                ))}
+            </div>
+          )}
+          <CommentBox
+            key={round}
+            saved={comments[user.uid]}
+            onSend={(text) => act({ type: 'comment', text })}
+          />
           <div className="flex flex-col items-center gap-1">
             <p className="font-hand text-sm text-ink-soft">React to their card:</p>
             <div className="flex gap-2">

@@ -494,6 +494,7 @@ export function newMatch(hostUid, otherUid, rand = Math.random) {
     picks: null,
     ready: null,
     reactions: null,
+    comments: null,
   }
 }
 
@@ -515,6 +516,14 @@ export function reduce(match, action) {
       if (match.phase !== 'reveal') return null
       return { ...match, reactions: { ...(match.reactions || {}), [action.uid]: action.emoji } }
     }
+    case 'comment': {
+      if (match.phase !== 'reveal') return null
+      const text = String(action.text || '').trim().slice(0, 300)
+      const comments = { ...(match.comments || {}) }
+      if (text) comments[action.uid] = text
+      else delete comments[action.uid]
+      return { ...match, comments: Object.keys(comments).length ? comments : null }
+    }
     case 'ready': {
       if (match.phase !== 'reveal') return null
       const nextReady = { ...ready, [action.uid]: true }
@@ -531,7 +540,7 @@ export function reduce(match, action) {
         cursor += 1
         hands[uid] = hand
       }
-      return { ...match, hands, cursor, round: match.round + 1, phase: 'pick', picks: null, ready: null, reactions: null }
+      return { ...match, hands, cursor, round: match.round + 1, phase: 'pick', picks: null, ready: null, reactions: null, comments: null }
     }
     default:
       return null

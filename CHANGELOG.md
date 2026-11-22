@@ -5,6 +5,12 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.63.0
+
+- Cards Against Couples: on the answer reveal screen you can now leave a comment (up to 300
+  characters) at any time before moving to the next card. Your partner sees it live under the
+  cards, and you can edit or clear yours until you both tap "Next card".
+
 ## v1.62.0
 
 - New Notifications page, with a bell button in the header next to Settings (it shows a count). It
