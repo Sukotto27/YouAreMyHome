@@ -5,7 +5,6 @@ import { rtdb, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { useObstacleDropMatch } from '../../hooks/useObstacleDropMatch'
 import { useObstacleDropObstacles } from '../../hooks/useObstacleDropObstacles'
-import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { playSound } from '../../lib/sounds'
@@ -23,6 +22,8 @@ import {
   isInsideProtectedZone,
   isObstacleExpired,
 } from '../../lib/obstacleDrop'
+import { myNameFor } from '../../lib/names'
+import StartPanel from './GameLobby'
 
 const BALL_SEND_INTERVAL_MS = 50 // ~20Hz, well within "several times a second"
 const LERP_FACTOR = 0.3
@@ -43,20 +44,6 @@ export default function ObstacleDropGame({ onBack }) {
   const { obstacles, activeObstacles, canDraw, addObstacle, removeObstacle } = useObstacleDropObstacles()
   const [targetChoice, setTargetChoice] = useState(DEFAULT_TARGET_SCORE)
   const [message, setMessage] = useState('')
-  const { sendInvite } = useGameInvite('obstacleDrop', 'Obstacle Drop')
-  const [inviting, setInviting] = useState(false)
-  const [inviteMessage, setInviteMessage] = useState('')
-
-  async function handleInvite() {
-    setInviting(true)
-    try {
-      await sendInvite()
-      setInviteMessage("Invite sent — they'll get a notification!")
-      setTimeout(() => setInviteMessage(''), 2500)
-    } finally {
-      setInviting(false)
-    }
-  }
 
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -88,7 +75,7 @@ export default function ObstacleDropGame({ onBack }) {
 
   const isHost = !!match && match.hostUid === user.uid
   const mySide = match?.leftUid === user.uid ? 'left' : 'right'
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const myScore = match?.scores?.[user.uid] || 0
   const partnerScore = match?.scores?.[effectivePartnerUid] || 0
@@ -562,24 +549,13 @@ export default function ObstacleDropGame({ onBack }) {
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={() => startMatch(targetChoice)}
-            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            {match ? 'New match' : 'Start match'}
-          </button>
-          <button
-            type="button"
-            onClick={handleInvite}
-            disabled={inviting}
-            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {inviting ? 'Inviting…' : '⚽ Invite partner'}
-          </button>
-        </div>
-        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <StartPanel
+          gameKey="obstacleDrop"
+          label="Obstacle Drop"
+          emoji="⚽"
+          options={targetChoice}
+          onStart={(target) => startMatch(target ?? targetChoice)}
+        />
       </div>
     )
   }

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useCheckIn } from '../../hooks/useCheckIn'
 import { useMoods } from '../../hooks/useMoods'
 import { MOOD_PRESETS } from '../../lib/moodPresets'
+import { partnerNameFor } from '../../lib/names'
 
 const FIELDS = [
   { key: 'mind', label: "What's on your mind right now?", placeholder: "Whatever's floating around up there..." },
@@ -25,7 +26,7 @@ export default function PersonalStatusPanel() {
   const [customMood, setCustomMood] = useState('')
   const [fields, setFields] = useState(EMPTY_FIELDS)
   const [saved, setSaved] = useState(false)
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   useEffect(() => {
     if (!myCheckIn) return

@@ -58,11 +58,21 @@ function readDemoRaw() {
   }
 }
 
+// A turn-based match is only "waiting on me" once my PARTNER handed it over.
+// Starting a match yourself also leaves currentTurnUid pointing at you, which
+// used to raise "<partner> played — your turn" before they had even joined.
+// lastActorUid is stamped on every write (see useFarkle / useUno); a match from
+// before that field existed falls back to the old behaviour.
+function isWaitingOnMe(game, me) {
+  if (game?.status !== 'playing' || game.currentTurnUid !== me) return false
+  return !game.lastActorUid || game.lastActorUid !== me
+}
+
 function deriveTurns(raw, me, partner) {
   const turns = {}
   if (!me) return turns
-  if (raw.farkle?.status === 'playing' && raw.farkle.currentTurnUid === me) turns.farkle = true
-  if (raw.uno?.status === 'playing' && raw.uno.currentTurnUid === me) turns.uno = true
+  if (isWaitingOnMe(raw.farkle, me)) turns.farkle = true
+  if (isWaitingOnMe(raw.uno, me)) turns.uno = true
   // Story: the latest turn still has an unfilled blank that isn't mine to leave.
   if (raw.storyLast && !raw.storyLast.filledWord && raw.storyLast.authorUid !== me) turns.story = true
   // Song: the last line was my partner's, so it's my line next.

@@ -15,6 +15,7 @@ import PongGame from '../components/games/PongGame'
 import BananagramsGame from '../components/games/BananagramsGame'
 import CardsAgainstCouplesGame from '../components/games/CardsAgainstCouplesGame'
 import DoorsGame from '../components/games/DoorsGame'
+import { PartnerHereBadge } from '../components/games/GameLobby'
 
 export default function Games() {
   const location = useLocation()
@@ -29,17 +30,26 @@ export default function Games() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, invite?.id])
 
-  if (view === 'draw') return <DrawGame onBack={() => setView('menu')} />
-  if (view === 'madlibs') return <MadLibsGame onBack={() => setView('menu')} />
-  if (view === 'story') return <NeverEndingStoryGame onBack={() => setView('menu')} />
-  if (view === 'song') return <NeverEndingSongGame onBack={() => setView('menu')} />
-  if (view === 'farkle') return <FarkleGame onBack={() => setView('menu')} />
-  if (view === 'uno') return <UnoGame onBack={() => setView('menu')} />
-  if (view === 'obstacleDrop') return <ObstacleDropGame onBack={() => setView('menu')} />
-  if (view === 'rps') return <RockPaperScissorsGame onBack={() => setView('menu')} />
-  if (view === 'pong') return <PongGame onBack={() => setView('menu')} />
-  if (view === 'bananagrams') return <BananagramsGame onBack={() => setView('menu')} />
-  if (view === 'cac') return <CardsAgainstCouplesGame onBack={() => setView('menu')} />
+  // Every game (bar Doors, which is one shared keyboard) gets a slim strip showing whether your
+  // partner has the same game open right now.
+  const inGame = (node) => (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <PartnerHereBadge gameKey={view} />
+      {node}
+    </div>
+  )
+
+  if (view === 'draw') return inGame(<DrawGame onBack={() => setView('menu')} />)
+  if (view === 'madlibs') return inGame(<MadLibsGame onBack={() => setView('menu')} />)
+  if (view === 'story') return inGame(<NeverEndingStoryGame onBack={() => setView('menu')} />)
+  if (view === 'song') return inGame(<NeverEndingSongGame onBack={() => setView('menu')} />)
+  if (view === 'farkle') return inGame(<FarkleGame onBack={() => setView('menu')} />)
+  if (view === 'uno') return inGame(<UnoGame onBack={() => setView('menu')} />)
+  if (view === 'obstacleDrop') return inGame(<ObstacleDropGame onBack={() => setView('menu')} />)
+  if (view === 'rps') return inGame(<RockPaperScissorsGame onBack={() => setView('menu')} />)
+  if (view === 'pong') return inGame(<PongGame onBack={() => setView('menu')} />)
+  if (view === 'bananagrams') return inGame(<BananagramsGame onBack={() => setView('menu')} />)
+  if (view === 'cac') return inGame(<CardsAgainstCouplesGame onBack={() => setView('menu')} />)
   if (view === 'doors') return <DoorsGame onBack={() => setView('menu')} />
 
   return (

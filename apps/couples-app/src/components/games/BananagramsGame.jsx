@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useBananagramsMatch } from '../../hooks/useBananagramsMatch'
-import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import PortugueseNotice from './PortugueseNotice'
@@ -17,6 +16,8 @@ import {
 import { isValidWord, loadWords } from '../../lib/wordList'
 import { translateWord } from '../../lib/translation'
 import { usePortugueseSubtext } from '../../hooks/usePortugueseSubtext'
+import { myNameFor } from '../../lib/names'
+import StartPanel from './GameLobby'
 
 const CELL = 34
 const STORAGE_PREFIX = 'you-are-my-home:bananagrams-grid:'
@@ -66,10 +67,7 @@ export default function BananagramsGame({ onBack }) {
   const { user } = useAuth()
   const { match, effectivePartnerUid, startMatch, act, endGame } = useBananagramsMatch()
   const status = match?.status
-  const { sendInvite } = useGameInvite('bananagrams', 'Bananagrams')
   const [sizeChoice, setSizeChoice] = useState(DEFAULT_SIZE)
-  const [inviting, setInviting] = useState(false)
-  const [inviteMessage, setInviteMessage] = useState('')
   const [placements, setPlacements] = useState({}) // tileId -> {x, y}, local to this device
   const [selected, setSelected] = useState(null) // tileId
   const [banner, setBanner] = useState('')
@@ -84,7 +82,7 @@ export default function BananagramsGame({ onBack }) {
   const [ptInfo, setPtInfo] = useState(null) // [{ word, text }] — text undefined while loading, null if not found
   const ptTimerRef = useRef(null)
 
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const storageKey = match ? `${STORAGE_PREFIX}${match.hostUid}:${match.startedAt}` : null
 
@@ -178,17 +176,6 @@ export default function BananagramsGame({ onBack }) {
     if (status === 'finished') playSound('notification')
   }, [status])
 
-  async function handleInvite() {
-    setInviting(true)
-    try {
-      await sendInvite()
-      setInviteMessage("Invite sent — they'll get a notification!")
-      setTimeout(() => setInviteMessage(''), 2500)
-    } finally {
-      setInviting(false)
-    }
-  }
-
   if (!match || status === 'finished' || status === 'ended') {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-8 text-center sm:px-6">
@@ -227,24 +214,13 @@ export default function BananagramsGame({ onBack }) {
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={() => startMatch(sizeChoice)}
-            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            {match ? 'New game' : 'Start game'}
-          </button>
-          <button
-            type="button"
-            onClick={handleInvite}
-            disabled={inviting}
-            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {inviting ? 'Inviting…' : '🍌 Invite partner'}
-          </button>
-        </div>
-        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <StartPanel
+          gameKey="bananagrams"
+          label="Bananagrams"
+          emoji="🍌"
+          options={sizeChoice}
+          onStart={(size) => startMatch(size ?? sizeChoice)}
+        />
         <PortugueseNotice pt={pt} how="The tiles stay in English: tap & hold a word on the board to see it in Portuguese." />
       </div>
     )

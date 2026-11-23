@@ -8,6 +8,7 @@ import { firebaseReady } from '../../firebase'
 import { MAD_LIBS_LIBRARY, madLibById, renderMadLibText } from '../../lib/madLibs'
 import AnswerAvatar from '../AnswerAvatar'
 import { playSound } from '../../lib/sounds'
+import { myNameFor } from '../../lib/names'
 
 export default function MadLibsGame({ onBack }) {
   const { user } = useAuth()
@@ -35,7 +36,7 @@ export default function MadLibsGame({ onBack }) {
   // 'Cristina' strings used everywhere else, so both labels must always
   // resolve distinctly rather than falling through to a raw email/demo name.
   const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
 
   async function handleCreate(title, text) {

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useAssessment } from '../../hooks/useAssessment'
 import { CORE_VALUES, MAX_CORE_VALUES } from '../../lib/assessments/coreValues'
 import AssessmentResult from './AssessmentResult'
+import { partnerNameFor } from '../../lib/names'
 
 export default function CoreValuesQuizView({ onClose }) {
   const { user } = useAuth()
@@ -10,7 +11,7 @@ export default function CoreValuesQuizView({ onClose }) {
   const [selected, setSelected] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [retaking, setRetaking] = useState(false)
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   const showForm = !myResult || retaking
 

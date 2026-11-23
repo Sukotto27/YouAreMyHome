@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useCardsMatch } from '../../hooks/useCardsMatch'
-import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import PortugueseNotice from './PortugueseNotice'
@@ -10,6 +9,8 @@ import PastGames from './PastGames'
 import { usePortugueseSubtext } from '../../hooks/usePortugueseSubtext'
 import { answerText, promptForRound, promptIndexForRound, splitPrompt } from '../../lib/cardsAgainstCouples'
 import { ANSWERS_PT, PROMPTS_PT } from '../../lib/cardsAgainstCouplesPt'
+import { myNameFor } from '../../lib/names'
+import StartPanel from './GameLobby'
 
 const REACTIONS = ['😂', '😍', '💀', '🙈', '🔥']
 
@@ -123,13 +124,10 @@ function PortugueseToggle({ on, onClick }) {
 export default function CardsAgainstCouplesGame({ onBack }) {
   const { user } = useAuth()
   const { match, effectivePartnerUid, startMatch, act, endGame } = useCardsMatch()
-  const { sendInvite } = useGameInvite('cac', 'Cards Against Couples')
   const pt = usePortugueseSubtext('cac')
   const [selected, setSelected] = useState(null)
-  const [inviting, setInviting] = useState(false)
-  const [inviteMessage, setInviteMessage] = useState('')
 
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const phase = match?.phase
   const round = match?.round
@@ -141,17 +139,6 @@ export default function CardsAgainstCouplesGame({ onBack }) {
   useEffect(() => {
     if (phase === 'reveal') playSound('notification')
   }, [phase, round])
-
-  async function handleInvite() {
-    setInviting(true)
-    try {
-      await sendInvite()
-      setInviteMessage("Invite sent — they'll get a notification!")
-      setTimeout(() => setInviteMessage(''), 2500)
-    } finally {
-      setInviting(false)
-    }
-  }
 
   if (!match || match.status === 'ended') {
     return (
@@ -170,24 +157,12 @@ export default function CardsAgainstCouplesGame({ onBack }) {
         )}
         <h1 className="font-display text-3xl italic text-ink">Cards Against Couples</h1>
         <GameIntro gameKey="cac" title="Cards Against Couples" defaultText={"Every round you both get the same prompt and secretly play your funniest card from a hand of 7. Both answers are revealed together. No judge, no score — it's just for laughs."} />
-        <div className="flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={startMatch}
-            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            Deal the cards
-          </button>
-          <button
-            type="button"
-            onClick={handleInvite}
-            disabled={inviting}
-            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {inviting ? 'Inviting…' : '🃏 Invite partner'}
-          </button>
-        </div>
-        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <StartPanel
+          gameKey="cac"
+          label="Cards Against Couples"
+          emoji="🃏"
+          onStart={() => startMatch()}
+        />
         <PortugueseNotice pt={pt} how="Every card then shows its translation underneath." />
         <PastGames game="cac" myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} />
       </div>

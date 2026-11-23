@@ -42,7 +42,11 @@ export function serveBall(towardBottom) {
 // Advances the ball by dt seconds. Returns { ball, event } where event is
 // 'paddle' | 'wall' | 'bottomMiss' (the bottom player let it past, so the top
 // player scores) | 'topMiss' | null.
-export function stepBall(ball, bottomX, topX, dt) {
+// `topSlack` widens the top paddle's hit window: the host sees the guest's paddle
+// a network-hop late, so a ball the guest clearly blocked on their own screen
+// must not slip through because the host's copy of the paddle was a few frames
+// behind. Only the remote paddle gets it — the host's own paddle is exact.
+export function stepBall(ball, bottomX, topX, dt, topSlack = 0) {
   let { x, y, vx, vy } = ball
   const prevY = y
   x += vx * dt
@@ -74,7 +78,7 @@ export function stepBall(ball, bottomX, topX, dt) {
   // Top paddle: mirror image.
   const topFace = TOP_PADDLE_Y + PADDLE_H / 2
   if (vy < 0 && prevY - BALL_RADIUS >= topFace && y - BALL_RADIUS <= topFace) {
-    if (Math.abs(x - topX) <= PADDLE_W / 2 + BALL_RADIUS) {
+    if (Math.abs(x - topX) <= PADDLE_W / 2 + BALL_RADIUS + topSlack) {
       const offset = Math.max(-1, Math.min(1, (x - topX) / (PADDLE_W / 2)))
       const next = Math.min(BALL_SPEED_MAX, speed * PADDLE_SPEEDUP)
       const angle = offset * MAX_BOUNCE_ANGLE
@@ -85,4 +89,31 @@ export function stepBall(ball, bottomX, topX, dt) {
   if (y - BALL_RADIUS > FIELD_H) return { ball: { x, y, vx, vy }, event: 'bottomMiss' }
   if (y + BALL_RADIUS < 0) return { ball: { x, y, vx, vy }, event: 'topMiss' }
   return { ball: { x, y, vx, vy }, event }
+}
+
+// How far past the streamed position the guest's screen shows the ball. The
+// guest only ever receives the ball's position after it has crossed the
+// network, so drawing it where it was reported would always be a few frames
+// behind the host's truth; carrying it forward along its reported velocity (and
+// bouncing it off the side walls) puts it where it most likely is now.
+export const GUEST_LEAD_S = 0.04
+export const MAX_EXTRAPOLATE_S = 0.15
+
+export function extrapolateBall(sample, ageSeconds) {
+  const t = Math.min(MAX_EXTRAPOLATE_S, Math.max(0, ageSeconds + GUEST_LEAD_S))
+  let x = sample.x + sample.vx * t
+  let y = sample.y + sample.vy * t
+  // fold off the side walls the same way stepBall bounces
+  const min = BALL_RADIUS
+  const max = FIELD_W - BALL_RADIUS
+  const span = max - min
+  let rel = (x - min) % (2 * span)
+  if (rel < 0) rel += 2 * span
+  x = min + (rel > span ? 2 * span - rel : rel)
+  // never draw it past a paddle face it hasn't been judged against yet
+  const bottomFace = BOTTOM_PADDLE_Y - PADDLE_H / 2 - BALL_RADIUS
+  const topFace = TOP_PADDLE_Y + PADDLE_H / 2 + BALL_RADIUS
+  if (sample.vy > 0 && sample.y <= bottomFace) y = Math.min(y, bottomFace)
+  else if (sample.vy < 0 && sample.y >= topFace) y = Math.max(y, topFace)
+  return { x, y }
 }

@@ -12,6 +12,8 @@ import {
   applyFarkle,
   autoKeep,
   hasAnyScore,
+  keepHistoryEntry,
+  layoutDice,
   rollDice,
   scoreSelection,
 } from '../lib/farkle'
@@ -35,6 +37,18 @@ function freshGame(startingUid) {
     dicePool: 6,
     lastRoll: null,
     lastRollByUid: null,
+    // Bumped on every roll: both screens toss the dice when it changes, and
+    // the live (drag/select) channel is tied to it so a stale selection from
+    // the previous roll is never shown on the new one.
+    rollId: 0,
+    layout: [],
+    // Dice already set aside this turn (their values), shown in the kept column.
+    keptDice: [],
+    // Who made the last write. A turn only "waits on you" once your PARTNER
+    // handed it over — starting a match yourself leaves the turn pointed at
+    // you too, which used to read as "Cristina played — your turn".
+    lastActorUid: startingUid,
+    history: [],
     awaitingKeep: false,
     finalRoundUid: null,
     winnerUid: null,
@@ -104,48 +118,70 @@ export function useFarkle() {
     await deleteDoc(gameDocRef())
   }
 
-  async function roll() {
-    if (!myTurn || game.awaitingKeep) return
-    const values = rollDice(game.dicePool)
-    if (!hasAnyScore(values)) {
-      await write({
-        ...applyFarkle(game, user.uid, effectivePartnerUid),
-        lastRoll: values,
-        lastRollByUid: user.uid,
-      })
-      return
-    }
-    await write({ ...game, lastRoll: values, lastRollByUid: user.uid, awaitingKeep: true })
-  }
-
-  // `selectedValues` is the multiset of dice (from game.lastRoll) the player
-  // is setting aside as scored this round — validated fresh here rather
+  // Sets the chosen dice aside as scored this roll, returning the next game
+  // state (or null if the choice doesn't score). Validated fresh here rather
   // than trusted from an earlier client read.
-  async function keepSelected(selectedValues) {
-    if (!myTurn || !game.awaitingKeep) return
+  function commitKeep(from, selectedValues) {
     const { valid, score } = scoreSelection(selectedValues)
-    if (!valid) return
-
-    const remaining = game.dicePool - selectedValues.length
+    if (!valid || selectedValues.length === 0) return null
+    const remaining = from.dicePool - selectedValues.length
     // Hot dice: every die on the table scored, so the next roll starts back
     // at a fresh six without ending the turn.
     const nextPool = remaining === 0 ? 6 : remaining
-
-    await write({
-      ...game,
-      turnScore: game.turnScore + score,
+    const turnScore = from.turnScore + score
+    return {
+      ...from,
+      turnScore,
       dicePool: nextPool,
+      keptDice: [...(from.keptDice || []), ...selectedValues],
+      history: [...(from.history || []), keepHistoryEntry(user.uid, selectedValues, turnScore)],
       lastRoll: null,
       lastRollByUid: null,
+      lastActorUid: user.uid,
       awaitingKeep: false,
-    })
+    }
   }
 
-  async function bank() {
-    if (!myTurn || game.awaitingKeep || game.turnScore <= 0) return
+  // Rolling is also how you confirm what you set aside: with dice waiting to
+  // be kept, `selectedValues` (the dice you pulled to the keep area) are kept
+  // and the rest are rolled in the same move.
+  async function roll(selectedValues) {
+    if (!myTurn) return
+    let base = game
+    if (game.awaitingKeep) {
+      base = commitKeep(game, selectedValues || [])
+      if (!base) return
+    }
+    const values = rollDice(base.dicePool)
+    const rolled = {
+      lastRoll: values,
+      lastRollByUid: user.uid,
+      rollId: (game.rollId || 0) + 1,
+      layout: layoutDice(values.length),
+    }
+    // Hot dice (all six scored last time) start a fresh set, so the kept
+    // dice are emptied the moment the next roll is thrown.
+    const keptDice = base.dicePool === 6 ? [] : base.keptDice || []
+    if (!hasAnyScore(values)) {
+      await write({ ...applyFarkle({ ...base, keptDice }, user.uid, effectivePartnerUid, values), ...rolled })
+      return
+    }
+    await write({ ...base, ...rolled, keptDice, lastActorUid: user.uid, awaitingKeep: true })
+  }
+
+  // Bank the turn. With dice waiting to be kept, the dice you pulled to the
+  // keep area count too.
+  async function bank(selectedValues) {
+    if (!myTurn) return
+    let base = game
+    if (game.awaitingKeep) {
+      base = commitKeep(game, selectedValues || [])
+      if (!base) return
+    }
+    if (base.turnScore <= 0) return
     const alreadyOnBoard = (game.scores[user.uid] || 0) > 0
-    if (!alreadyOnBoard && game.turnScore < ON_BOARD_MIN) return
-    await write(applyBank(game, user.uid, effectivePartnerUid))
+    if (!alreadyOnBoard && base.turnScore < ON_BOARD_MIN) return
+    await write(applyBank(base, user.uid, effectivePartnerUid))
   }
 
   // Preview mode has no second device to play the opponent's turn, so once
@@ -170,13 +206,27 @@ export function useFarkle() {
       if (cancelled) return
 
       const values = rollDice(current.dicePool)
+      const keptSoFar = current.dicePool === 6 ? [] : current.keptDice || []
+      const rolled = {
+        lastRoll: values,
+        lastRollByUid: DEMO_PARTNER_UID,
+        rollId: (current.rollId || 0) + 1,
+        layout: layoutDice(values.length),
+      }
       if (!hasAnyScore(values)) {
-        const next = { ...applyFarkle(current, DEMO_PARTNER_UID, user.uid), lastRoll: values, lastRollByUid: DEMO_PARTNER_UID }
+        const next = { ...applyFarkle({ ...current, keptDice: keptSoFar }, DEMO_PARTNER_UID, user.uid, values), ...rolled }
         setGame(next)
         writeDemoList(DEMO_KEY, next)
         demoPlayingRef.current = false
         return
       }
+
+      // Show the toss first, then set the scoring dice aside a moment later.
+      const tossed = { ...current, ...rolled, keptDice: keptSoFar, lastActorUid: DEMO_PARTNER_UID, awaitingKeep: true }
+      setGame(tossed)
+      writeDemoList(DEMO_KEY, tossed)
+      await new Promise((resolve) => setTimeout(resolve, 1600))
+      if (cancelled) return
 
       const kept = autoKeep(values)
       const { score } = scoreSelection(kept)
@@ -189,8 +239,14 @@ export function useFarkle() {
         ...current,
         turnScore: current.turnScore + score,
         dicePool: remaining === 0 ? 6 : remaining,
+        keptDice: [...keptSoFar, ...kept],
+        history: [
+          ...(current.history || []),
+          keepHistoryEntry(DEMO_PARTNER_UID, kept, current.turnScore + score),
+        ],
         lastRoll: null,
         lastRollByUid: null,
+        lastActorUid: DEMO_PARTNER_UID,
         awaitingKeep: false,
       }
       setGame(afterKeep)
@@ -237,7 +293,6 @@ export function useFarkle() {
     startGame,
     cancelGame,
     roll,
-    keepSelected,
     bank,
   }
 }

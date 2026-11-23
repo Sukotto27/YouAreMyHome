@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useNeverEndingSong } from '../../hooks/useNeverEndingSong'
 import { useGameInvite } from '../../hooks/useGameInvite'
 import { ReactionBar, ReactionBadges } from './ReactionBar'
+import { partnerNameFor } from '../../lib/names'
 
 // Like the Never-Ending Story, but every line you add has to be built out of
 // real song titles — you may only sprinkle in small "filler" words to make
@@ -12,7 +13,7 @@ export default function NeverEndingSongGame({ onBack }) {
   const { user } = useAuth()
   const { turns, loading, myTurn, waitingOnPartner, addLine, reactToLine } = useNeverEndingSong()
   const [reactingTo, setReactingTo] = useState(null)
-  const partnerLabel = user.displayName === 'Cristina' ? 'Scott' : 'Cristina'
+  const partnerLabel = partnerNameFor(user)
   const { sendInvite } = useGameInvite('song', 'The Never-Ending Song')
   const [inviting, setInviting] = useState(false)
   const [inviteMessage, setInviteMessage] = useState('')

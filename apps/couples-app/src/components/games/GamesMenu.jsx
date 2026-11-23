@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useChatSettings } from '../../hooks/useChatSettings'
 import { usePartnerGame } from '../../hooks/useGamePresence'
 import { avatarFor } from '../../lib/avatars'
+import { partnerNameFor } from '../../lib/names'
 
 // Landing screen for Games — a small, growable menu of shared activities.
 // Draw also holds the Scrapbook now (saved drawings live inside it as a
@@ -33,7 +34,7 @@ export default function GamesMenu({
   const { user } = useAuth()
   const [chatSettings] = useChatSettings()
   const partnerGame = usePartnerGame()
-  const partnerName = user?.displayName === 'Cristina' ? 'Scott' : 'Cristina'
+  const partnerName = partnerNameFor(user)
   const partnerAvatar = avatarFor(partnerName, chatSettings.avatars)
 
   const games = [

@@ -38,12 +38,15 @@ export function useUno() {
   }, [])
 
   async function write(next) {
+    // lastActorUid: who just acted — a turn only waits on you once your partner
+    // handed it over (see GameAttentionContext).
     if (!firebaseReady) {
-      setGame(next)
-      writeDemoList(DEMO_KEY, next)
+      const stamped = { ...next, lastActorUid: user.uid }
+      setGame(stamped)
+      writeDemoList(DEMO_KEY, stamped)
       return
     }
-    await setDoc(gameDocRef(), { ...next, updatedAt: serverTimestamp() })
+    await setDoc(gameDocRef(), { ...next, lastActorUid: user.uid, updatedAt: serverTimestamp() })
   }
 
   const myTurn = !!game && game.status === 'playing' && game.currentTurnUid === user?.uid
@@ -114,8 +117,9 @@ export function useUno() {
     let cancelled = false
 
     function commit(next) {
-      setGame(next)
-      writeDemoList(DEMO_KEY, next)
+      const stamped = { ...next, lastActorUid: DEMO_PARTNER_UID }
+      setGame(stamped)
+      writeDemoList(DEMO_KEY, stamped)
     }
 
     async function playTurn(current) {

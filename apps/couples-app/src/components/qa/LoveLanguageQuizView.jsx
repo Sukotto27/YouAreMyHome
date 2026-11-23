@@ -8,6 +8,7 @@ import {
   scoreLoveLanguage,
 } from '../../lib/assessments/loveLanguage'
 import AssessmentResult from './AssessmentResult'
+import { partnerNameFor } from '../../lib/names'
 
 export default function LoveLanguageQuizView({ onClose }) {
   const { user } = useAuth()
@@ -15,7 +16,7 @@ export default function LoveLanguageQuizView({ onClose }) {
   const [answers, setAnswers] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [retaking, setRetaking] = useState(false)
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   const allAnswered = LOVE_LANGUAGE_PAIRS.every((p) => answers[p.id])
   const showForm = !myResult || retaking

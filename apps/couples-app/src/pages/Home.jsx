@@ -20,6 +20,7 @@ import { APP_VERSION_LABEL } from '../lib/appVersion'
 import { formatCountdown } from '../lib/countdown'
 import heartLeft from '../assets/images/heart-left.png'
 import heartRight from '../assets/images/heart-right.png'
+import { myNameFor, partnerNameFor } from '../lib/names'
 
 const LONG_PRESS_MS = 500
 
@@ -144,11 +145,11 @@ export default function Home() {
             name={preferredNameFor('Cristina', chatSettings.preferredNames)}
             ring="ring-blush"
             mood={moodFor('Cristina', user, moods)}
-            isMine={user.displayName === 'Cristina'}
+            isMine={myNameFor(user) === 'Cristina'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
             onLongPress={() => setPartnerMenuOpen(true)}
-            badges={badgesFor(user.displayName === 'Cristina')}
+            badges={badgesFor(myNameFor(user) === 'Cristina')}
           />
           <span className="mt-6 font-display text-2xl text-gold sm:mt-8">&amp;</span>
           <Avatar
@@ -156,11 +157,11 @@ export default function Home() {
             name={preferredNameFor('Scott', chatSettings.preferredNames)}
             ring="ring-teal"
             mood={moodFor('Scott', user, moods)}
-            isMine={user.displayName === 'Scott'}
+            isMine={myNameFor(user) === 'Scott'}
             onSetMood={setMyMood}
             onOpenSettings={() => navigate('/settings')}
             onLongPress={() => setPartnerMenuOpen(true)}
-            badges={badgesFor(user.displayName === 'Scott')}
+            badges={badgesFor(myNameFor(user) === 'Scott')}
           />
         </div>
 
@@ -169,7 +170,7 @@ export default function Home() {
 
       {partnerMenuOpen && (
         <PartnerActionMenu
-          name={preferredNameFor(user.displayName === 'Scott' ? 'Cristina' : 'Scott', chatSettings.preferredNames)}
+          name={preferredNameFor(partnerNameFor(user), chatSettings.preferredNames)}
           onClose={() => setPartnerMenuOpen(false)}
           onNavigate={(path, state) => navigate(path, { state })}
         />

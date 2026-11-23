@@ -5,6 +5,42 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.67.0
+
+- Games: every live co-op game (Farkle, Uno, Pong, Bananagrams, Rock Paper Scissors, Cards Against Couples, Obstacle
+  Drop) now opens with **Play Solo** (greyed out for now — computer opponents are coming) or **Play with Partner**.
+  Play with Partner opens a waiting room and invites your partner. The room stays put if either of you leaves and
+  comes back, until you press Cancel game. Each of you presses Ready; both avatars light up as you do, and the game
+  starts once both are ready (so it never starts under someone who has not joined). Board size / target score
+  choices are carried into the game.
+- Games: a slim strip at the top of every game screen shows your partner's avatar, lit when they have the same
+  game open right now and dimmed when they are away.
+
+## v1.66.0
+
+- Farkle: the flat dice are now small real 3D dice, tossed onto a wood board (plank texture from the home
+  game assets) and landing showing the real rolled value. Tap a die, or drag it, below the separator line to
+  keep it; pressing Roll confirms the dice you kept and rolls the rest (or Bank to keep them and bank).
+  Every move shows live on your partner's screen. Dice models are in `src/assets/farkle/dice-pack`.
+- Farkle: under each name, a row of mini dice shows what the active player has kept this turn (plus what's
+  in the keep area now) and what the turn is worth so far.
+- Farkle: pick your dice colour (white, red, orange, yellow, green, blue, navy, purple, black — the colours the
+  dice pack came with) with the swatches under the board. It is a per-device setting.
+- Farkle: expandable "Scoring history" under the scoreboard, a score sheet with one column per player. Each turn
+  lists what was kept and adds it up; banked turns show the running total as a column sum (old total + turn
+  = new total), farkles are crossed out.
+- Farkle: a pop-up for a few seconds on both screens whenever someone scores, banks or farkles, and a
+  small in-game chat under the table (cleared when a new match starts).
+- Fix: after you passed 10,000, Farkle said your partner had. The "final round" banner had it backwards.
+- Fix: a turn now only counts as "waiting on you" once your partner handed it over. Starting a Farkle or
+  Uno match yourself no longer shows "<partner> played — your turn" (in-app) or pings your phone.
+  Push notices for Farkle/Uno turns now name who played.
+- Names: one shared helper decides which of you is which (the old copies disagreed for unusual
+  display names); used by all game labels, Home badges and notifications.
+- Pong: less lag for the guest. The ball is drawn ahead along its velocity instead of where it was a
+  network hop ago, the host predicts the guest's paddle and gives it a little extra reach, and both
+  sides send updates about 50 times a second. Network delay can't be removed entirely.
+
 ## v1.65.0
 
 - Mad Libs: "Start over" is back to a single tap (no confirmation). Nothing is lost: the finished round,

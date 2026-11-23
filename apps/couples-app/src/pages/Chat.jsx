@@ -40,6 +40,7 @@ import { useLongPress } from '../hooks/useLongPress'
 import { useMarkSeen } from '../hooks/useMarkSeen'
 import { usePartnerSeenAt } from '../hooks/usePartnerSeenAt'
 import { useTypingIndicator } from '../hooks/useTypingIndicator'
+import { partnerNameFor } from '../lib/names'
 
 const RECENT_LIMIT = 200
 // Window widened to when a bookmark points at a message older than RECENT_LIMIT.
@@ -160,7 +161,7 @@ export default function Chat() {
   const inputRef = useRef(null)
   const imageInputRef = useRef(null)
   const atBottomRef = useRef(true)
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   function setAtBottom(value) {
     atBottomRef.current = value

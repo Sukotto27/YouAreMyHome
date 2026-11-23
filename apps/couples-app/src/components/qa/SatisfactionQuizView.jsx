@@ -10,6 +10,7 @@ import {
   scoreSatisfaction,
 } from '../../lib/assessments/satisfactionIndex'
 import AssessmentResult from './AssessmentResult'
+import { partnerNameFor } from '../../lib/names'
 
 export default function SatisfactionQuizView({ onClose }) {
   const { user } = useAuth()
@@ -17,7 +18,7 @@ export default function SatisfactionQuizView({ onClose }) {
   const [answers, setAnswers] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [retaking, setRetaking] = useState(false)
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   const allAnswered = SATISFACTION_ITEMS.every((item) => answers[item.id] != null)
   const showForm = !myResult || retaking

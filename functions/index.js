@@ -131,6 +131,29 @@ async function notifyEveryone(payload) {
   await Promise.all(docs.map((docRef) => sendToUid(docRef.id, payload)))
 }
 
+// Display name for a uid, as one of the two of us ('Scott' / 'Cristina') —
+// resolved from the account itself, never guessed from "everyone who isn't the
+// recipient", so a message can't end up naming the person it is sent to.
+async function nameForUid(uid) {
+  try {
+    const record = await getAuth().getUser(uid)
+    const source = `${record.displayName || ''} ${record.email || ''}`
+    if (/cristina/i.test(source)) return 'Cristina'
+    if (/scott/i.test(source)) return 'Scott'
+    return record.displayName || 'They'
+  } catch {
+    return 'They'
+  }
+}
+
+// A turn-based game's turn only "arrives" for someone when the OTHER player
+// handed it over. Starting a match yourself also leaves currentTurnUid on you
+// (lastActorUid === currentTurnUid), which must not notify you about your own
+// move. Matches written before lastActorUid existed keep the old behaviour.
+function turnHandedOver(after) {
+  return !after.lastActorUid || after.lastActorUid !== after.currentTurnUid
+}
+
 function truncate(text, max = 80) {
   if (!text) return ''
   return text.length > max ? `${text.slice(0, max - 1)}…` : text
@@ -588,9 +611,11 @@ exports.notifyOnFarkleTurn = onDocumentUpdated('farkleGame/{id}', async (event) 
     })
   }
   if (after.status !== 'playing' || before.currentTurnUid === after.currentTurnUid) return
+  if (!turnHandedOver(after)) return
+  const fromName = after.lastActorUid ? await nameForUid(after.lastActorUid) : null
   await sendToUid(after.currentTurnUid, {
     title: 'Farkle',
-    body: 'Your turn to roll!',
+    body: fromName ? `${fromName} played — your turn to roll!` : 'Your turn to roll!',
     url: '/YouAreMyHome/#/games',
   })
 })
@@ -612,9 +637,11 @@ exports.notifyOnUnoTurn = onDocumentUpdated('unoGame/{id}', async (event) => {
     })
   }
   if (after.status !== 'playing' || before.currentTurnUid === after.currentTurnUid) return
+  if (!turnHandedOver(after)) return
+  const fromName = after.lastActorUid ? await nameForUid(after.lastActorUid) : null
   await sendToUid(after.currentTurnUid, {
     title: 'Uno',
-    body: 'Your turn to play!',
+    body: fromName ? `${fromName} played — your turn to play!` : 'Your turn to play!',
     url: '/YouAreMyHome/#/games',
   })
 })

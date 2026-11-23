@@ -4,6 +4,7 @@ import { useDevices } from '../hooks/useDevices'
 import { usePartnerUid } from '../hooks/usePartnerUid'
 import { callReviewDevice } from '../lib/deviceApi'
 import { getDeviceIdentity } from '../lib/deviceIdentity'
+import { partnerNameFor } from '../lib/names'
 
 function when(ts) {
   const ms = ts?.toMillis?.()
@@ -105,7 +106,7 @@ export default function DevicesPanel() {
   const partnerDevices = useDevices(partnerUid)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
   const thisDevice = { uid: user.uid, deviceId: getDeviceIdentity().deviceId }
 
   async function review(targetUid, deviceId, action) {

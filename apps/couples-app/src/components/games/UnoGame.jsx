@@ -3,11 +3,12 @@ import { useAuth } from '../../context/AuthContext'
 import PastGames from './PastGames'
 import { usePartnerUid } from '../../hooks/usePartnerUid'
 import { useUno, DEMO_PARTNER_UID } from '../../hooks/useUno'
-import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { firebaseReady } from '../../firebase'
 import { COLORS, canPlayCard } from '../../lib/uno'
+import { myNameFor } from '../../lib/names'
+import StartPanel from './GameLobby'
 
 const COLOR_HEX = {
   red: '#e6291f',
@@ -27,12 +28,9 @@ export default function UnoGame({ onBack }) {
   const partnerUid = usePartnerUid()
   const { game, myTurn, startGame, cancelGame, play, chooseColor, draw, pass } = useUno()
   const [confirmAction, setConfirmAction] = useState(null) // null | 'restart' | 'cancel'
-  const { sendInvite } = useGameInvite('uno', 'Uno')
-  const [inviting, setInviting] = useState(false)
-  const [inviteMessage, setInviteMessage] = useState('')
 
   const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
 
   // Arming "Start over"/"Cancel game" requires a second tap within a few
@@ -54,17 +52,6 @@ export default function UnoGame({ onBack }) {
     setConfirmAction(action)
   }
 
-  async function handleInvite() {
-    setInviting(true)
-    try {
-      await sendInvite()
-      setInviteMessage("Invite sent — they'll get a notification!")
-      setTimeout(() => setInviteMessage(''), 2500)
-    } finally {
-      setInviting(false)
-    }
-  }
-
   if (!game || game.status === 'finished') {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-8 text-center sm:px-6">
@@ -80,24 +67,12 @@ export default function UnoGame({ onBack }) {
         )}
         <h1 className="font-display text-3xl italic text-ink">Uno</h1>
         <GameIntro gameKey="uno" title="Uno" defaultText={"Match the color or number on top of the pile, or play a Wild. Skips and Reverses just hand the turn right back to you with two players. First to empty their hand wins."} />
-        <div className="flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={startGame}
-            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            {game ? 'New game' : 'Start Uno'}
-          </button>
-          <button
-            type="button"
-            onClick={handleInvite}
-            disabled={inviting}
-            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {inviting ? 'Inviting…' : '🎲 Invite partner'}
-          </button>
-        </div>
-        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <StartPanel
+          gameKey="uno"
+          label="Uno"
+          emoji="🎲"
+          onStart={() => startGame()}
+        />
         <PastGames game="uno" myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} />
       </div>
     )

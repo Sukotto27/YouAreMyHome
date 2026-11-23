@@ -10,6 +10,7 @@ import { useUpcomingCalendarItems } from '../hooks/useUpcomingCalendarItems'
 import { GAME_LABEL } from '../lib/gameInfo'
 import { preferredNameFor } from '../lib/avatars'
 import { CALENDAR_TAB_FOR_CATEGORY } from '../lib/milestones'
+import { partnerNameFor } from '../lib/names'
 
 // Everything that shows up as an icon on the Home avatars, as one list of
 // plain-text notifications — the source for both the avatar badges (Home) and
@@ -42,7 +43,7 @@ export function NotificationsProvider({ children }) {
   const { myCheckIn, partnerCheckIn } = useCheckIn()
   const calendarCategory = useUpcomingCalendarItems()
 
-  const partnerName = preferredNameFor(user?.displayName === 'Scott' ? 'Cristina' : 'Scott', chatSettings.preferredNames)
+  const partnerName = preferredNameFor(partnerNameFor(user), chatSettings.preferredNames)
   const items = []
 
   if (unread.chat) {

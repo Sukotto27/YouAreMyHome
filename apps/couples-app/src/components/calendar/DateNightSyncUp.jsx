@@ -3,6 +3,7 @@ import { useDateNightSyncUp } from '../../hooks/useDateNightSyncUp'
 import { LOCATIONS } from '../../lib/locations'
 import { zonedTimeToUtc } from '../../lib/timezone'
 import { formatCountdown } from '../../lib/countdown'
+import { partnerNameFor } from '../../lib/names'
 
 function bothTimesFor(item) {
   if (!item.time || !item.timezone) return null
@@ -24,7 +25,7 @@ export default function DateNightSyncUp({ item }) {
   const sync = useDateNightSyncUp(item)
   if (!sync.isAboutToStart) return null
 
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
   const bothTimes = bothTimesFor(item)
 
   return (

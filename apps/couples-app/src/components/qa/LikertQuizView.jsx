@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useAssessment } from '../../hooks/useAssessment'
 import { LIKERT_SCALE, scoreLikert } from '../../lib/assessments/likertAssessments'
 import AssessmentResult from './AssessmentResult'
+import { partnerNameFor } from '../../lib/names'
 
 // Reused for all 3 Likert-style assessments (Attachment/Communication/
 // Conflict Resolution) — they share one mechanic, so one component.
@@ -12,7 +13,7 @@ export default function LikertQuizView({ assessment, onClose }) {
   const [answers, setAnswers] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [retaking, setRetaking] = useState(false)
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   const allAnswered = assessment.questions.every((q) => answers[q.id] != null)
   const showForm = !myResult || retaking

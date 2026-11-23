@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { GOAL_CATEGORIES } from '../../lib/dailyGoals'
 import { useDailyGoals } from '../../hooks/useDailyGoals'
+import { partnerNameFor } from '../../lib/names'
 
 export default function DailyGoalsPanel() {
   const { user } = useAuth()
@@ -15,7 +16,7 @@ export default function DailyGoalsPanel() {
     addGratitudeEntry,
     itemsForCategory,
   } = useDailyGoals()
-  const partnerName = user.displayName === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerName = partnerNameFor(user)
 
   return (
     <div className="space-y-8">

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { useRpsMatch } from '../../hooks/useRpsMatch'
-import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { playSound } from '../../lib/sounds'
 import { CHOICES, CHOICE_EMOJI, COUNTDOWN_FROM, WINS_NEEDED } from '../../lib/rps'
+import { myNameFor } from '../../lib/names'
+import StartPanel from './GameLobby'
 
 const CHOICE_LABEL = { rock: 'Rock', paper: 'Paper', scissors: 'Scissors' }
 
@@ -15,29 +16,15 @@ const CHOICE_LABEL = { rock: 'Rock', paper: 'Paper', scissors: 'Scissors' }
 export default function RockPaperScissorsGame({ onBack }) {
   const { user } = useAuth()
   const { match, effectivePartnerUid, startMatch, pick, endGame } = useRpsMatch()
-  const { sendInvite } = useGameInvite('rps', 'Rock Paper Scissors')
-  const [inviting, setInviting] = useState(false)
-  const [inviteMessage, setInviteMessage] = useState('')
   const [count, setCount] = useState(COUNTDOWN_FROM)
 
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const myScore = match?.scores?.[user.uid] || 0
   const partnerScore = match?.scores?.[effectivePartnerUid] || 0
   const myPick = match?.picks?.[user.uid]
   const phase = match?.phase
   const status = match?.status
-
-  async function handleInvite() {
-    setInviting(true)
-    try {
-      await sendInvite()
-      setInviteMessage("Invite sent — they'll get a notification!")
-      setTimeout(() => setInviteMessage(''), 2500)
-    } finally {
-      setInviting(false)
-    }
-  }
 
   // Each round's on-screen countdown is local to each device, started when
   // the round's 'countdown' phase arrives.
@@ -89,24 +76,12 @@ export default function RockPaperScissorsGame({ onBack }) {
         )}
         <h1 className="font-display text-3xl italic text-ink">Rock Paper Scissors</h1>
         <GameIntro gameKey="rps" title="Rock Paper Scissors" defaultText={"Pick your move during the 3-2-1 countdown — on 0, both picks are revealed. Best of 3 wins."} />
-        <div className="flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={startMatch}
-            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            {match ? 'New match' : 'Start match'}
-          </button>
-          <button
-            type="button"
-            onClick={handleInvite}
-            disabled={inviting}
-            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {inviting ? 'Inviting…' : '✊ Invite partner'}
-          </button>
-        </div>
-        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <StartPanel
+          gameKey="rps"
+          label="Rock Paper Scissors"
+          emoji="✊"
+          onStart={() => startMatch()}
+        />
       </div>
     )
   }

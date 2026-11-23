@@ -3,7 +3,6 @@ import { onValue, ref, set } from 'firebase/database'
 import { rtdb, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
 import { usePongMatch } from '../../hooks/usePongMatch'
-import { useGameInvite } from '../../hooks/useGameInvite'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { playSound } from '../../lib/sounds'
@@ -19,16 +18,27 @@ import {
   TARGET_SCORE_OPTIONS,
   TOP_PADDLE_Y,
   clampPaddleX,
+  extrapolateBall,
   serveBall,
   stepBall,
 } from '../../lib/pong'
+import { myNameFor } from '../../lib/names'
+import StartPanel from './GameLobby'
 
 const COUNTDOWN_FROM = 3
 const POINT_PAUSE_MS = 1000
-const SEND_INTERVAL_MS = 33
-const PADDLE_SEND_INTERVAL_MS = 40
-const BALL_LERP = 0.35
+// Network traffic is cheap for two people, and every millisecond between
+// samples is lag you can see, so both ends send ~50 times a second.
+const SEND_INTERVAL_MS = 20
+const PADDLE_SEND_INTERVAL_MS = 20
+const BALL_LERP = 0.6
 const PADDLE_LERP = 0.5
+// The host judges hits against where it last SAW the guest's paddle, which is
+// always a network hop old. It extrapolates that paddle along its recent
+// velocity (briefly) and gives it a little extra reach, so a ball the guest
+// clearly blocked on their screen isn't scored as a miss.
+const REMOTE_PADDLE_LEAD_MAX_S = 0.09
+const REMOTE_PADDLE_SLACK = 0.04
 const AI_MAX_SPEED = 0.55 // field units/sec — fast enough to be a game, slow enough to beat
 const BURST_COLORS = ['#ff5e7e', '#ffb347', '#ffe156', '#6ee7b7', '#5ec8ff', '#b794f6']
 const LEFT_COLOR = '#2f9e94'
@@ -43,11 +53,8 @@ const RIGHT_COLOR = '#e27d7a'
 export default function PongGame({ onBack }) {
   const { user } = useAuth()
   const { match, effectivePartnerUid, startMatch, recordGoal, endGame } = usePongMatch()
-  const { sendInvite } = useGameInvite('pong', 'Pong')
   const [targetChoice, setTargetChoice] = useState(DEFAULT_TARGET_SCORE)
   const [countdown, setCountdown] = useState(0)
-  const [inviting, setInviting] = useState(false)
-  const [inviteMessage, setInviteMessage] = useState('')
 
   const containerRef = useRef(null)
   const canvasRef = useRef(null)
@@ -62,6 +69,8 @@ export default function PongGame({ onBack }) {
 
   const myScreenXRef = useRef(FIELD_W / 2) // my paddle, in my own screen frame
   const partnerHostXRef = useRef(FIELD_W / 2) // partner's paddle target, host frame
+  const partnerSampleRef = useRef({ x: FIELD_W / 2, vx: 0, at: 0 }) // last streamed paddle + its velocity
+  const ballSampleRef = useRef(null) // guest: last streamed ball { x, y, vx, vy, at }
   const renderedPartnerXRef = useRef(FIELD_W / 2)
   const renderedBallRef = useRef({ ...BALL_CENTER })
   const targetBallRef = useRef({ ...BALL_CENTER })
@@ -73,23 +82,12 @@ export default function PongGame({ onBack }) {
 
   const isHost = !!match && match.hostUid === user.uid
   const flip = !!match && !isHost
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const myScore = match?.scores?.[user.uid] || 0
   const partnerScore = match?.scores?.[effectivePartnerUid] || 0
   const myColor = isHost || !match ? LEFT_COLOR : RIGHT_COLOR
   const partnerColor = myColor === LEFT_COLOR ? RIGHT_COLOR : LEFT_COLOR
-
-  async function handleInvite() {
-    setInviting(true)
-    try {
-      await sendInvite()
-      setInviteMessage("Invite sent — they'll get a notification!")
-      setTimeout(() => setInviteMessage(''), 2500)
-    } finally {
-      setInviting(false)
-    }
-  }
 
   // Canvas fit-to-container with DPR, keyed on match status because the canvas
   // only exists once a match is playing (same note as ObstacleDropGame).
@@ -294,6 +292,8 @@ export default function PongGame({ onBack }) {
     renderedBallRef.current = { ...BALL_CENTER }
     targetBallRef.current = { ...BALL_CENTER }
     lastHitsRef.current = 0
+    partnerSampleRef.current = { x: FIELD_W / 2, vx: 0, at: 0 }
+    ballSampleRef.current = null
 
     let rafId
     let last = performance.now()
@@ -309,7 +309,14 @@ export default function PongGame({ onBack }) {
       unsubscribers.push(
         onValue(ref(rtdb, `pong/paddles/${effectivePartnerUid}`), (snap) => {
           const value = snap.val()
-          if (typeof value === 'number') partnerHostXRef.current = value
+          if (typeof value !== 'number') return
+          const now = performance.now()
+          const prev = partnerSampleRef.current
+          const elapsed = (now - prev.at) / 1000
+          // velocity from consecutive samples; ignore stale gaps
+          const vx = prev.at && elapsed > 0.005 && elapsed < 0.25 ? (value - prev.x) / elapsed : 0
+          partnerSampleRef.current = { x: value, vx: Math.max(-4, Math.min(4, vx)), at: now }
+          partnerHostXRef.current = value
         }),
       )
       if (!isHost) {
@@ -318,6 +325,7 @@ export default function PongGame({ onBack }) {
             const value = snap.val()
             if (!value) return
             targetBallRef.current = { x: value.x, y: value.y }
+            ballSampleRef.current = { x: value.x, y: value.y, vx: value.vx || 0, vy: value.vy || 0, at: performance.now() }
             if (value.hits > lastHitsRef.current) hitEffect({ x: value.x, y: value.y })
             lastHitsRef.current = value.hits || 0
           }),
@@ -346,12 +354,19 @@ export default function PongGame({ onBack }) {
           const step = AI_MAX_SPEED * dt
           partnerHostXRef.current = clampPaddleX(partnerHostXRef.current + Math.max(-step, Math.min(step, diff)))
         }
-        renderedPartnerXRef.current += (partnerHostXRef.current - renderedPartnerXRef.current) * (firebaseReady ? PADDLE_LERP : 1)
+        if (firebaseReady) {
+          const sample = partnerSampleRef.current
+          const lead = Math.min(REMOTE_PADDLE_LEAD_MAX_S, (performance.now() - sample.at) / 1000)
+          const predicted = clampPaddleX(sample.x + sample.vx * lead)
+          renderedPartnerXRef.current += (predicted - renderedPartnerXRef.current) * 0.8
+        } else {
+          renderedPartnerXRef.current = partnerHostXRef.current
+        }
 
         if (ball.vx === 0 && ball.vy === 0) {
           if (now >= serveAt) ball = serveBall(serveToward)
         } else {
-          const { ball: next, event } = stepBall(ball, clampPaddleX(myHostX), renderedPartnerXRef.current, dt)
+          const { ball: next, event } = stepBall(ball, clampPaddleX(myHostX), renderedPartnerXRef.current, dt, firebaseReady ? REMOTE_PADDLE_SLACK : 0)
           ball = next
           if (event === 'paddle') {
             hits += 1
@@ -375,7 +390,12 @@ export default function PongGame({ onBack }) {
         }
       } else {
         renderedPartnerXRef.current += (partnerHostXRef.current - renderedPartnerXRef.current) * PADDLE_LERP
-        const target = targetBallRef.current
+        // carry the last streamed ball forward along its velocity instead of
+        // drawing it where it WAS a network hop ago
+        const sample = ballSampleRef.current
+        const target = sample
+          ? extrapolateBall(sample, (performance.now() - sample.at) / 1000)
+          : targetBallRef.current
         const current = renderedBallRef.current
         renderedBallRef.current = {
           x: current.x + (target.x - current.x) * BALL_LERP,
@@ -444,24 +464,13 @@ export default function PongGame({ onBack }) {
             </button>
           ))}
         </div>
-        <div className="flex flex-wrap justify-center gap-3">
-          <button
-            type="button"
-            onClick={() => startMatch(targetChoice)}
-            className="rounded-full bg-rose px-6 py-2.5 font-body font-medium text-paper shadow-[0_8px_20px_-8px_rgba(226,125,122,0.7)] transition-transform duration-200 ease-out hover:-translate-y-0.5"
-          >
-            {match ? 'New match' : 'Start match'}
-          </button>
-          <button
-            type="button"
-            onClick={handleInvite}
-            disabled={inviting}
-            className="rounded-full border border-rose/40 px-6 py-2.5 font-body font-medium text-rose transition-colors hover:bg-blush-soft disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {inviting ? 'Inviting…' : '🏓 Invite partner'}
-          </button>
-        </div>
-        {inviteMessage && <p className="font-hand text-sm text-rose">{inviteMessage}</p>}
+        <StartPanel
+          gameKey="pong"
+          label="Pong"
+          emoji="🏓"
+          options={targetChoice}
+          onStart={(target) => startMatch(target ?? targetChoice)}
+        />
       </div>
     )
   }

@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext'
 import { useNeverEndingStory } from '../../hooks/useNeverEndingStory'
 import { useGameInvite } from '../../hooks/useGameInvite'
 import { ReactionBar, ReactionBadges } from './ReactionBar'
+import { partnerNameFor } from '../../lib/names'
 
 // A single ever-growing story the two of you build one blank at a time —
 // whoever's turn it is fills in the blank left by the other, then
@@ -12,7 +13,7 @@ export default function NeverEndingStoryGame({ onBack }) {
   const { user } = useAuth()
   const { turns, pendingTurn, loading, startStory, fillAndContinue, reactToTurn } = useNeverEndingStory()
   const [reactingTo, setReactingTo] = useState(null)
-  const partnerLabel = user.displayName === 'Cristina' ? 'Scott' : 'Cristina'
+  const partnerLabel = partnerNameFor(user)
   const { sendInvite } = useGameInvite('story', 'Never-Ending Story')
   const [inviting, setInviting] = useState(false)
   const [inviteMessage, setInviteMessage] = useState('')

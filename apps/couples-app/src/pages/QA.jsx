@@ -14,6 +14,7 @@ import RewindList from '../components/qa/RewindList'
 import RevealView from '../components/qa/RevealView'
 import AssessmentsPanel from '../components/qa/AssessmentsPanel'
 import { useMarkSeen } from '../hooks/useMarkSeen'
+import { myNameFor } from '../lib/names'
 
 const DEMO_PARTNER_UID = 'demo-partner'
 const ROUNDS_LIMIT = 500
@@ -39,7 +40,7 @@ export default function QA() {
   // way `partnerName` already was keeps the two always distinct, instead of
   // falling through to a raw email (or the demo placeholder name) that
   // matches nothing in the chat avatar map and no longer resolves to "you".
-  const mineLabel = user.displayName === 'Cristina' ? 'Cristina' : 'Scott'
+  const mineLabel = myNameFor(user)
   const partnerName = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
 
   const [rounds, setRounds] = useState(firebaseReady ? [] : readDemoList('qaRounds'))

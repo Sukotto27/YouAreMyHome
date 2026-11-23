@@ -82,13 +82,16 @@ export function hasAnyScore(diceValues) {
 // Pure state transitions shared by the real player's actions and the
 // preview-mode stand-in partner (see useFarkle) — keeping the final-round/
 // winner logic in one place rather than duplicated for both.
-export function applyFarkle(game, actingUid, rivalUid) {
+export function applyFarkle(game, actingUid, rivalUid, roll = null) {
   const isFinalRoundBust = game.finalRoundUid === actingUid
   return {
     ...game,
+    history: [...(game.history || []), { kind: 'farkle', uid: actingUid, roll, lost: game.turnScore || 0, at: Date.now() }],
     turnScore: 0,
     dicePool: 6,
+    keptDice: [],
     awaitingKeep: false,
+    lastActorUid: actingUid,
     currentTurnUid: isFinalRoundBust ? game.currentTurnUid : rivalUid,
     status: isFinalRoundBust ? 'finished' : game.status,
     winnerUid: isFinalRoundBust ? rivalUid : null,
@@ -117,12 +120,18 @@ export function applyBank(game, actingUid, rivalUid) {
 
   return {
     ...game,
+    history: [
+      ...(game.history || []),
+      { kind: 'bank', uid: actingUid, points: game.turnScore, total: newTotal, at: Date.now() },
+    ],
     scores,
     turnScore: 0,
     dicePool: 6,
     lastRoll: null,
     lastRollByUid: null,
+    keptDice: [],
     awaitingKeep: false,
+    lastActorUid: actingUid,
     currentTurnUid: rivalUid,
     finalRoundUid,
     status,
@@ -144,4 +153,77 @@ export function autoKeep(diceValues) {
     }
   }
   return kept
+}
+
+// ---- "Show the math" breakdown -------------------------------------------
+// Splits a valid selection into the scoring pieces that add up to its total,
+// the way someone tallying on paper would write it. Mirrors scoreSelection
+// exactly (same table) — the parts always sum to its `score`.
+const COUNT_WORD = { 3: 'Three', 4: 'Four', 5: 'Five', 6: 'Six' }
+
+export function scoreBreakdown(diceValues) {
+  if (diceValues.length === 0) return []
+  if (isStraight(diceValues)) return [{ label: 'Straight 1-2-3-4-5-6', math: '1,500', points: 1500 }]
+  if (isThreePairs(diceValues)) {
+    const pairs = countByFace(diceValues)
+      .map((c, face) => (c === 2 ? face : null))
+      .filter(Boolean)
+    return [{ label: `Three pairs (${pairs.join(', ')})`, math: '1,500', points: 1500 }]
+  }
+
+  const counts = countByFace(diceValues)
+  const parts = []
+  for (let face = 1; face <= 6; face++) {
+    const c = counts[face]
+    if (c === 0) continue
+    if (c >= 3) {
+      const base = face === 1 ? 1000 : face * 100
+      const mult = 2 ** (c - 3)
+      parts.push({
+        label: `${COUNT_WORD[c]} ${face}s`,
+        math: mult === 1 ? base.toLocaleString() : `${base.toLocaleString()} × ${mult}`,
+        points: base * mult,
+      })
+    } else if (face === 1 || face === 5) {
+      const each = face === 1 ? 100 : 50
+      parts.push({
+        label: c === 1 ? `Single ${face}` : `Two ${face}s`,
+        math: c === 1 ? each.toString() : `${each} × ${c}`,
+        points: each * c,
+      })
+    }
+  }
+  return parts
+}
+
+// Entry recorded in game.history each time dice are set aside.
+export function keepHistoryEntry(uid, diceValues, turnScoreAfter) {
+  const { score } = scoreSelection(diceValues)
+  return { kind: 'keep', uid, dice: diceValues, points: score, turnScore: turnScoreAfter, at: Date.now() }
+}
+
+// ---- Table layout ---------------------------------------------------------
+// World units shared with the 3D dice tray (components/games/farkle). The play
+// area is the upper part of the tray; pulled-aside and kept dice sit in the
+// strip below it.
+export const PLAY_AREA = { minX: -4.6, maxX: 4.6, minZ: -1.25, maxZ: 0.1 }
+
+// Scatter positions + a random yaw for a fresh roll, kept apart so dice never
+// land on top of each other. Decided once by the roller and stored on the
+// game doc, so both screens toss the dice to the very same spots.
+export function layoutDice(count) {
+  const result = []
+  let minGap = 1.0
+  for (let i = 0; i < count; i++) {
+    let spot = null
+    for (let attempt = 0; attempt < 60 && !spot; attempt++) {
+      if (attempt > 0 && attempt % 20 === 0) minGap *= 0.85
+      const x = PLAY_AREA.minX + Math.random() * (PLAY_AREA.maxX - PLAY_AREA.minX)
+      const z = PLAY_AREA.minZ + Math.random() * (PLAY_AREA.maxZ - PLAY_AREA.minZ)
+      if (result.every((p) => Math.hypot(p.x - x, p.z - z) >= minGap)) spot = { x, z }
+    }
+    if (!spot) spot = { x: PLAY_AREA.minX + i * 1.6, z: PLAY_AREA.minZ + (i % 2) * 1.2 }
+    result.push({ x: +spot.x.toFixed(3), z: +spot.z.toFixed(3), yaw: +(Math.random() * Math.PI * 2).toFixed(3) })
+  }
+  return result
 }
