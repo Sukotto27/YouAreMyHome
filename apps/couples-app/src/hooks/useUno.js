@@ -4,11 +4,13 @@ import { db, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
+import { COMPUTER_UID, readSolo, writeSolo } from '../lib/solo'
 import { archiveGame } from '../lib/gameHistory'
 import { COLORS, canPlayCard, chooseColor as chooseColorPure, dealGame, drawCard, passTurn, playCard } from '../lib/uno'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
 const DEMO_KEY = 'unoGame'
+export const SOLO_KEY = 'unoSolo'
 
 // `db` is null in preview mode — this ref must only ever be constructed
 // once firebaseReady has already been checked, never at module scope.
@@ -23,27 +25,43 @@ function readDemoGame() {
 
 // A single ever-live shared match, same pattern as useFarkle: one Firestore
 // doc both partners watch update in real time, turn-gated.
-export function useUno() {
+export function useUno(solo = false) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
-  const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
-  const [game, setGame] = useState(firebaseReady ? null : readDemoGame())
+  // Solo and preview mode both play on this device, against a bot.
+  const local = solo || !firebaseReady
+  const botUid = solo ? COMPUTER_UID : DEMO_PARTNER_UID
+  const effectivePartnerUid = solo ? COMPUTER_UID : firebaseReady ? partnerUid : DEMO_PARTNER_UID
+  const [game, setGame] = useState(solo ? readSolo(SOLO_KEY) : firebaseReady ? null : readDemoGame())
   const demoPlayingRef = useRef(false)
 
   useEffect(() => {
-    if (!firebaseReady) return
+    if (solo) {
+      setGame(readSolo(SOLO_KEY))
+      return
+    }
+    if (!firebaseReady) {
+      setGame(readDemoGame())
+      return
+    }
+    setGame(null)
     return onSnapshot(gameDocRef(), (snap) => {
       setGame(snap.exists() ? snap.data() : null)
     })
-  }, [])
+  }, [solo])
 
-  async function write(next) {
+  function saveLocal(next, toSolo = solo) {
+    setGame(next)
+    if (toSolo) writeSolo(SOLO_KEY, next)
+    else writeDemoList(DEMO_KEY, next)
+  }
+
+  // `toSolo` lets a start target the solo store before `solo` has flipped.
+  async function write(next, toSolo = solo, actorUid = user.uid) {
     // lastActorUid: who just acted — a turn only waits on you once your partner
     // handed it over (see GameAttentionContext).
-    if (!firebaseReady) {
-      const stamped = { ...next, lastActorUid: user.uid }
-      setGame(stamped)
-      writeDemoList(DEMO_KEY, stamped)
+    if (toSolo || !firebaseReady) {
+      saveLocal({ ...next, lastActorUid: actorUid }, toSolo)
       return
     }
     await setDoc(gameDocRef(), { ...next, lastActorUid: user.uid, updatedAt: serverTimestamp() })
@@ -53,7 +71,7 @@ export function useUno() {
 
   // Files the current match in game history before it is replaced/deleted.
   function archiveCurrent() {
-    if (!game?.hands) return
+    if (solo || !game?.hands) return
     archiveGame('uno', {
       cards: Object.fromEntries(Object.entries(game.hands).map(([uid, hand]) => [uid, hand.length])),
       winnerUid: game.winnerUid || null,
@@ -61,14 +79,20 @@ export function useUno() {
     })
   }
 
-  async function startGame() {
-    if (!user || !effectivePartnerUid) return
+  async function startGame(asSolo = solo) {
+    const rivalUid = asSolo ? COMPUTER_UID : effectivePartnerUid
+    if (!user || !rivalUid) return
     archiveCurrent()
-    await write(dealGame(user.uid, effectivePartnerUid, user.uid))
+    await write(dealGame(user.uid, rivalUid, user.uid), asSolo)
   }
 
   async function cancelGame() {
     archiveCurrent()
+    if (solo) {
+      setGame(null)
+      writeSolo(SOLO_KEY, null)
+      return
+    }
     if (!firebaseReady) {
       setGame(null)
       writeDemoList(DEMO_KEY, null)
@@ -107,8 +131,8 @@ export function useUno() {
   // directly (bypassing the myTurn-gated actions above, which are gated on
   // the real signed-in user, never the demo stand-in).
   useEffect(() => {
-    if (firebaseReady || !user) return
-    if (!game || game.status !== 'playing' || game.currentTurnUid !== DEMO_PARTNER_UID) {
+    if (!local || !user) return
+    if (!game || game.status !== 'playing' || game.currentTurnUid !== botUid) {
       demoPlayingRef.current = false
       return
     }
@@ -117,9 +141,7 @@ export function useUno() {
     let cancelled = false
 
     function commit(next) {
-      const stamped = { ...next, lastActorUid: DEMO_PARTNER_UID }
-      setGame(stamped)
-      writeDemoList(DEMO_KEY, stamped)
+      saveLocal({ ...next, lastActorUid: botUid })
     }
 
     async function playTurn(current) {
@@ -127,30 +149,35 @@ export function useUno() {
       if (cancelled) return
 
       const topCard = current.discard[current.discard.length - 1]
-      const hand = current.hands[DEMO_PARTNER_UID]
+      const hand = current.hands[botUid]
       const playable = hand.find((c) => canPlayCard(c, topCard, current.currentColor))
 
       let afterPlay
       if (playable) {
-        afterPlay = playCard(current, DEMO_PARTNER_UID, user.uid, playable.id)
+        afterPlay = playCard(current, botUid, user.uid, playable.id)
       } else {
         await new Promise((resolve) => setTimeout(resolve, 500))
         if (cancelled) return
-        const drawn = drawCard(current, DEMO_PARTNER_UID)
-        const drawnHand = drawn.hands[DEMO_PARTNER_UID]
+        const drawn = drawCard(current, botUid)
+        const drawnHand = drawn.hands[botUid]
         const newCard = drawnHand[drawnHand.length - 1]
         if (canPlayCard(newCard, topCard, current.currentColor)) {
-          afterPlay = playCard(drawn, DEMO_PARTNER_UID, user.uid, newCard.id)
+          afterPlay = playCard(drawn, botUid, user.uid, newCard.id)
         } else {
-          commit(passTurn(drawn, DEMO_PARTNER_UID, user.uid))
+          commit(passTurn(drawn, botUid, user.uid))
           demoPlayingRef.current = false
           return
         }
       }
 
-      if (afterPlay.awaitingColor && afterPlay.awaitingColorUid === DEMO_PARTNER_UID) {
-        const color = COLORS[Math.floor(Math.random() * COLORS.length)]
-        afterPlay = chooseColorPure(afterPlay, DEMO_PARTNER_UID, user.uid, color)
+      if (afterPlay.awaitingColor && afterPlay.awaitingColorUid === botUid) {
+        // Pick the colour the bot holds the most of.
+        const held = afterPlay.hands[botUid]
+        const color = COLORS.reduce((best, c) => {
+          const count = held.filter((card) => card.color === c).length
+          return count > best.count ? { c, count } : best
+        }, { c: COLORS[Math.floor(Math.random() * COLORS.length)], count: 0 }).c
+        afterPlay = chooseColorPure(afterPlay, botUid, user.uid, color)
       }
       commit(afterPlay)
 
@@ -158,7 +185,7 @@ export function useUno() {
         demoPlayingRef.current = false
         return
       }
-      if (afterPlay.currentTurnUid === DEMO_PARTNER_UID) {
+      if (afterPlay.currentTurnUid === botUid) {
         await playTurn(afterPlay)
         return
       }
@@ -173,11 +200,12 @@ export function useUno() {
     // identical guard for why (the bot's own commits would otherwise tear
     // down its in-flight recursive loop mid-turn).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game?.currentTurnUid, game?.status, user])
+  }, [game?.currentTurnUid, game?.status, user, solo])
 
   return {
     game,
     myTurn,
+    opponentUid: effectivePartnerUid,
     startGame,
     cancelGame,
     play,

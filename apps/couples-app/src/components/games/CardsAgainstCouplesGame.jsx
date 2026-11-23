@@ -161,6 +161,7 @@ export default function CardsAgainstCouplesGame({ onBack }) {
           gameKey="cac"
           label="Cards Against Couples"
           emoji="🃏"
+          noSolo
           onStart={() => startMatch()}
         />
         <PortugueseNotice pt={pt} how="Every card then shows its translation underneath." />

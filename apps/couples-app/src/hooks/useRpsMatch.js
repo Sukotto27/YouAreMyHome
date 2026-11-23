@@ -4,10 +4,12 @@ import { rtdb, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
+import { COMPUTER_UID, readSolo, writeSolo } from '../lib/solo'
 import { CHOICES, REVEAL_MS, RESOLVE_GRACE_MS, COUNTDOWN_FROM, WINS_NEEDED, roundWinner } from '../lib/rps'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
 const DEMO_KEY = 'rpsMatch'
+export const SOLO_KEY = 'rpsSolo'
 
 // One ever-live match in Realtime Database (same shape as Obstacle Drop's).
 // Rounds move through phases: 'countdown' (both players preselect; picks are
@@ -16,48 +18,63 @@ const DEMO_KEY = 'rpsMatch'
 // status 'finished' once someone has WINS_NEEDED. Only the host (whoever
 // started the match) advances phases, so there's a single referee and the
 // two screens can't disagree about who won a round.
-export function useRpsMatch() {
+export function useRpsMatch(solo = false) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
-  const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
-  const [match, setMatch] = useState(firebaseReady ? null : readDemoList(DEMO_KEY)[0] || null)
+  // Solo and preview mode both play on this device, against a bot.
+  const local = solo || !firebaseReady
+  const storeKey = solo ? SOLO_KEY : DEMO_KEY
+  const botUid = solo ? COMPUTER_UID : DEMO_PARTNER_UID
+  const effectivePartnerUid = solo ? COMPUTER_UID : firebaseReady ? partnerUid : DEMO_PARTNER_UID
+  const [match, setMatch] = useState(solo ? readSolo(SOLO_KEY) : firebaseReady ? null : readDemoList(DEMO_KEY)[0] || null)
   const matchRef = useRef(match)
   matchRef.current = match
 
   useEffect(() => {
-    if (!firebaseReady) return
+    if (solo) {
+      setMatch(readSolo(SOLO_KEY))
+      return
+    }
+    if (!firebaseReady) {
+      setMatch(readDemoList(DEMO_KEY)[0] || null)
+      return
+    }
+    setMatch(null)
     return onValue(ref(rtdb, 'rps/match'), (snap) => setMatch(snap.val()))
-  }, [])
+  }, [solo])
+
+  function saveLocal(next, key = storeKey) {
+    matchRef.current = next
+    if (key === SOLO_KEY) writeSolo(SOLO_KEY, next)
+    else writeDemoList(DEMO_KEY, [next])
+    setMatch(next)
+  }
 
   // Shallow-merge into the match: a real RTDB update, or the local demo copy.
   async function patch(partial) {
-    if (!firebaseReady) {
+    if (local) {
       const next = { ...matchRef.current, ...partial }
       for (const key of Object.keys(next)) if (next[key] === null) delete next[key]
-      matchRef.current = next
-      writeDemoList(DEMO_KEY, [next])
-      setMatch(next)
+      saveLocal(next)
       return
     }
     await update(ref(rtdb, 'rps/match'), partial)
   }
 
-  async function startMatch() {
+  async function startMatch(asSolo = solo) {
     if (!user) return
     const next = {
       hostUid: user.uid,
       leftUid: user.uid,
-      rightUid: effectivePartnerUid,
+      rightUid: asSolo ? COMPUTER_UID : effectivePartnerUid,
       status: 'playing',
       phase: 'countdown',
       round: 1,
       scores: {},
       winnerUid: null,
     }
-    if (!firebaseReady) {
-      matchRef.current = next
-      writeDemoList(DEMO_KEY, [next])
-      setMatch(next)
+    if (asSolo || !firebaseReady) {
+      saveLocal(next, asSolo ? SOLO_KEY : DEMO_KEY)
       return
     }
     await set(ref(rtdb, 'rps/match'), next)
@@ -65,7 +82,7 @@ export function useRpsMatch() {
 
   async function pick(choice) {
     if (!user || !matchRef.current) return
-    if (!firebaseReady) {
+    if (local) {
       await patch({ picks: { ...(matchRef.current.picks || {}), [user.uid]: choice } })
       return
     }
@@ -112,16 +129,16 @@ export function useRpsMatch() {
 
   // Demo mode has no real partner: pick for them shortly into each countdown.
   useEffect(() => {
-    if (firebaseReady || !match || match.status !== 'playing' || match.phase !== 'countdown') return
+    if (!local || !match || match.status !== 'playing' || match.phase !== 'countdown') return
     const timer = setTimeout(() => {
       const m = matchRef.current
       if (!m || m.phase !== 'countdown') return
       const choice = CHOICES[Math.floor(Math.random() * CHOICES.length)]
-      patch({ picks: { ...(m.picks || {}), [DEMO_PARTNER_UID]: choice } })
+      patch({ picks: { ...(m.picks || {}), [botUid]: choice } })
     }, 1200)
     return () => clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [match?.status, match?.phase, match?.round])
+  }, [local, match?.status, match?.phase, match?.round])
 
   // Either player can end the match; both land back on the lobby.
   async function endGame() {

@@ -73,7 +73,13 @@ export function createWorld() {
     { isStatic: true },
   )
 
-  Matter.Composite.add(engine.world, [ball, leftHole, rightHole, leftWall, rightWall])
+  // A ceiling too, so the ball can never fly out through the top.
+  const ceiling = Matter.Bodies.rectangle(PHYSICS_SCALE / 2, -WALL_THICKNESS / 2, PHYSICS_SCALE * 4, WALL_THICKNESS, {
+    isStatic: true,
+    restitution: 0.6,
+  })
+
+  Matter.Composite.add(engine.world, [ball, leftHole, rightHole, leftWall, rightWall, ceiling])
 
   return { engine, ball, leftHole, rightHole }
 }
@@ -83,6 +89,19 @@ export function resetBall(ball) {
   Matter.Body.setPosition(ball, start)
   Matter.Body.setVelocity(ball, { x: 0, y: 0 })
   Matter.Body.setAngularVelocity(ball, 0)
+}
+
+// Static round bumpers; they bounce the ball like a lively post.
+export function buildBumperBodies(bumpers) {
+  return bumpers.map((b) => {
+    const p = toPhysics(b)
+    return Matter.Bodies.circle(p.x, p.y, b.r * PHYSICS_SCALE, {
+      isStatic: true,
+      restitution: 1,
+      friction: 0.02,
+      label: 'bumper',
+    })
+  })
 }
 
 // One static rectangle segment per consecutive point pair in each run — the

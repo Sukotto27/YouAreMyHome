@@ -197,9 +197,9 @@ export function scoreBreakdown(diceValues) {
 }
 
 // Entry recorded in game.history each time dice are set aside.
-export function keepHistoryEntry(uid, diceValues, turnScoreAfter) {
+export function keepHistoryEntry(uid, diceValues, turnScoreAfter, hot = false) {
   const { score } = scoreSelection(diceValues)
-  return { kind: 'keep', uid, dice: diceValues, points: score, turnScore: turnScoreAfter, at: Date.now() }
+  return { kind: 'keep', uid, dice: diceValues, points: score, turnScore: turnScoreAfter, hot, at: Date.now() }
 }
 
 // ---- Table layout ---------------------------------------------------------

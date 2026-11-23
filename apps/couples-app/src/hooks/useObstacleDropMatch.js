@@ -4,10 +4,12 @@ import { rtdb, firebaseReady } from '../firebase'
 import { useAuth } from '../context/AuthContext'
 import { usePartnerUid } from './usePartnerUid'
 import { readDemoList, writeDemoList } from '../lib/demoStore'
-import { BALL_START, DEFAULT_TARGET_SCORE } from '../lib/obstacleDrop'
+import { COMPUTER_UID, readSolo, writeSolo } from '../lib/solo'
+import { BALL_START, DEFAULT_TARGET_SCORE, generateBumpers } from '../lib/obstacleDrop'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
 const DEMO_KEY = 'obstacleDropMatch'
+export const SOLO_KEY = 'obstacleDropSolo'
 
 // A single ever-live match, same "one shared doc, not per-round docs" shape
 // as Farkle — but in Realtime Database rather than Firestore, since the
@@ -17,34 +19,51 @@ const DEMO_KEY = 'obstacleDropMatch'
 // canvas, Thumbkiss). The host — whoever calls startMatch — becomes the
 // left-hole player and the physics authority; see ObstacleDropGame for how
 // that authority is actually used.
-export function useObstacleDropMatch() {
+export function useObstacleDropMatch(solo = false) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
-  const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
-  const [match, setMatch] = useState(firebaseReady ? null : readDemoList(DEMO_KEY)[0] || null)
+  // Solo and preview mode both play on this device.
+  const local = solo || !firebaseReady
+  const effectivePartnerUid = solo ? COMPUTER_UID : firebaseReady ? partnerUid : DEMO_PARTNER_UID
+  const [match, setMatch] = useState(solo ? readSolo(SOLO_KEY) : firebaseReady ? null : readDemoList(DEMO_KEY)[0] || null)
 
   useEffect(() => {
-    if (!firebaseReady) return
+    if (solo) {
+      setMatch(readSolo(SOLO_KEY))
+      return
+    }
+    if (!firebaseReady) {
+      setMatch(readDemoList(DEMO_KEY)[0] || null)
+      return
+    }
+    setMatch(null)
     return onValue(ref(rtdb, 'obstacleDrop/match'), (snap) => {
       setMatch(snap.val())
     })
-  }, [])
+  }, [solo])
 
-  async function startMatch(targetScore = DEFAULT_TARGET_SCORE) {
+  function saveLocal(next) {
+    if (next.solo) writeSolo(SOLO_KEY, next)
+    else writeDemoList(DEMO_KEY, [next])
+    setMatch(next)
+  }
+
+  async function startMatch(targetScore = DEFAULT_TARGET_SCORE, asSolo = solo) {
     if (!user) return
     const next = {
       hostUid: user.uid,
       leftUid: user.uid,
-      rightUid: effectivePartnerUid,
+      rightUid: asSolo ? COMPUTER_UID : effectivePartnerUid,
+      ...(asSolo ? { solo: true } : {}),
       targetScore,
       scores: {},
+      bumpers: generateBumpers(),
       status: 'playing',
       winnerUid: null,
     }
 
-    if (!firebaseReady) {
-      writeDemoList(DEMO_KEY, [next])
-      setMatch(next)
+    if (asSolo || !firebaseReady) {
+      saveLocal(next)
       return
     }
 
@@ -70,23 +89,21 @@ export function useObstacleDropMatch() {
       }
     }
 
-    if (!firebaseReady) {
-      const next = { ...match, scores, status, winnerUid }
-      writeDemoList(DEMO_KEY, [next])
-      setMatch(next)
+    // every drop gets a new random set of bumpers
+    const bumpers = generateBumpers()
+    if (local) {
+      saveLocal({ ...match, scores, status, winnerUid, bumpers })
       return
     }
-    await update(ref(rtdb, 'obstacleDrop/match'), { scores, status, winnerUid })
+    await update(ref(rtdb, 'obstacleDrop/match'), { scores, status, winnerUid, bumpers })
   }
 
   // Either player can end the match; both land back on the lobby.
   async function endGame() {
     if (!user || !match) return
     const patch = { status: 'ended', endedBy: user.uid }
-    if (!firebaseReady) {
-      const next = { ...match, ...patch }
-      writeDemoList(DEMO_KEY, [next])
-      setMatch(next)
+    if (local) {
+      saveLocal({ ...match, ...patch })
       return
     }
     await update(ref(rtdb, 'obstacleDrop/match'), patch)

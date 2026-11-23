@@ -16,6 +16,10 @@ import { partnerNameFor } from '../../lib/names'
 const CARD_CLASS =
   'relative rounded-2xl border border-teal/30 bg-white/60 px-4 py-4 text-left transition-colors hover:border-rose'
 
+// A game shows a "New" badge for a week after it was added.
+const NEW_FOR_MS = 7 * 24 * 60 * 60 * 1000
+const isNew = (addedOn) => Date.now() - Date.parse(`${addedOn}T00:00:00`) < NEW_FOR_MS
+
 export default function GamesMenu({
   onSelectDraw,
   onSelectMadLibs,
@@ -28,6 +32,7 @@ export default function GamesMenu({
   onSelectPong,
   onSelectBananagrams,
   onSelectCac,
+  onSelectTableRoll,
   onSelectDoors,
 }) {
   const { byGame } = useGameAttention()
@@ -74,6 +79,13 @@ export default function GamesMenu({
       title: 'Cards Against Couples',
       text: 'Fill-in-the-blank cards for two — no judge, no score, just laughs',
       onSelect: onSelectCac,
+    },
+    {
+      key: 'tableRoll',
+      title: 'Table Roll',
+      badge: isNew('2026-11-23') ? 'New' : undefined,
+      text: "Position your stationary balls within your boundary, then try to knock the opponent's balls out.",
+      onSelect: onSelectTableRoll,
     },
     {
       key: 'doors',

@@ -20,6 +20,7 @@ import { makeCamera, updateCamera } from './camera.js'
 import { createOverlay } from './overlay.js'
 import { createFootsteps } from './footsteps.js'
 import { createSfx } from './sfx.js'
+import { IDLE_INPUT, inputOf, maskOf } from './coopInput.js'
 
 // the campaign: every levels/chNN-*.json, in order
 const CAMPAIGN = Object.entries(import.meta.glob('./levels/ch*-*.json', { eager: true }))
@@ -46,23 +47,30 @@ function layoutPanes(w, h) {
   ]
 }
 
-export function startDoors(container) {
+// `coop` (online co-op, see coopNet.js) is { net, role: 'blue'|'pink', isHost, partnerName, restore } — or null for
+// the original same-device game. In co-op this device plays one character; the host runs the real simulation and the
+// guest mirrors it (while also simulating locally so its own character responds instantly).
+export function startDoors(container, coop = null) {
   // dev server only: ?room=N starts at room N of the campaign (no opening scene), for looking at a room quickly
   const devRoom = import.meta.env.DEV ? Number(new URLSearchParams(location.search).get('room')) || 0 : 0
   const startIndex = devRoom > 0 && devRoom <= CAMPAIGN.length ? devRoom - 1 : 0
   let level = parseLevel(CAMPAIGN[startIndex])
   let game = createGame(level)
   const input = createInput()
+  const myIndex = coop ? (coop.role === 'pink' ? 1 : 0) : -1
+  const theirIndex = coop ? 1 - myIndex : -1
+  const isGuest = !!coop && !coop.isHost
+  if (coop) {
+    input.setMode(coop.role)
+    input.lock()
+  }
   const footsteps = createFootsteps()
   const sfx = createSfx()
   const debug = createDebugOverlay(container)
   container.style.touchAction = 'none' // (the touch controls and drawing use pointer events; the page must not scroll or zoom)
   // the on-screen controls (touchui.js): on by default on a phone, and the T key shows them anywhere
   const touchUI = createTouchUI(container, input, {
-    onReset: () => {
-      resetGame(game)
-      snapCameras = true
-    },
+    onReset: () => requestReset(),
   })
 
   // the 3D view (a WebGL canvas) is inserted underneath by view3d.js; this
@@ -136,6 +144,7 @@ export function startDoors(container) {
   function dismissDialog() {
     if (!game.dialogs.length) return
     game.dialogs.shift()
+    if (isGuest) coop.net.sendCommand({ t: 'dialog' })
     sfx.ui()
     shownDialog = null
     renderDialog()
@@ -289,6 +298,11 @@ export function startDoors(container) {
 
   function loadCampaign(index, carry = null, { withIntro = false } = {}) {
     campaignIndex = index
+    if (coop?.isHost) {
+      roomSeq += 1
+      roomMeta = { seq: roomSeq, index, carry }
+      forceFull = true
+    }
     afterTalk = null
     level = parseLevel(CAMPAIGN[index])
     game = createGame(level, carry)
@@ -314,6 +328,10 @@ export function startDoors(container) {
   // on to the next room, keeping the abilities and hearts found so far (after a room is complete)
   function nextRoom() {
     if (!game.complete) return
+    if (isGuest) {
+      coop.net.sendCommand({ t: 'next' }) // the host moves both of you on
+      return
+    }
     if (campaignIndex >= 0) loadCampaign(campaignIndex + 1 < CAMPAIGN.length ? campaignIndex + 1 : 0, campaignIndex + 1 < CAMPAIGN.length ? exportAbilities(game) : null)
   }
 
@@ -331,8 +349,9 @@ export function startDoors(container) {
 
   // --- the mouse: whoever is in draw mode draws with it, in EITHER view ---
   const paneAt = (x, y) => panes.findIndex((pane) => x >= pane.x && x < pane.x + pane.w && y >= pane.y && y < pane.y + pane.h)
-  const drawer = () => game.players.find((p) => p.draw.mode === 'aiming' || p.draw.mode === 'drawing')
-  const ropeAimer = () => game.players.find((p) => p.rope.mode === 'aiming')
+  const mouseCandidates = () => (coop ? [game.players[myIndex]] : game.players)
+  const drawer = () => mouseCandidates().find((p) => p && (p.draw.mode === 'aiming' || p.draw.mode === 'drawing'))
+  const ropeAimer = () => mouseCandidates().find((p) => p && p.rope.mode === 'aiming')
   function pointerWorld(event) {
     if (!view) return null
     const rect = container.getBoundingClientRect()
@@ -349,6 +368,7 @@ export function startDoors(container) {
       const target = roper && pointerWorld(event)
       if (roper && target) {
         fireRope(game, roper, target)
+        if (isGuest) coop.net.sendCommand({ t: 'rope', x: target.x, y: target.y })
         event.preventDefault()
       }
       return
@@ -357,6 +377,7 @@ export function startDoors(container) {
     const point = pointerWorld(event)
     if (!point) return
     beginStroke(game, who, point.x, point.y)
+    if (isGuest) coop.net.sendCommand({ t: 'sb', x: point.x, y: point.y })
     try {
       container.setPointerCapture?.(event.pointerId) // keep the stroke going if the mouse leaves the game area
     } catch {
@@ -368,15 +389,30 @@ export function startDoors(container) {
     const who = drawer()
     if (who && who.draw.mode === 'aiming') {
       const point = pointerWorld(event)
-      if (point) setAim(who, point.x, point.y) // the caster turns and points at the mouse while aiming a line
+      if (point) {
+        setAim(who, point.x, point.y) // the caster turns and points at the mouse while aiming a line
+        if (isGuest && performance.now() - lastAimSent > 60) {
+          lastAimSent = performance.now()
+          coop.net.sendCommand({ t: 'aim', x: point.x, y: point.y })
+        }
+      }
     }
     if (!who || who.draw.mode !== 'drawing') return
     const point = pointerWorld(event)
-    if (point) extendStroke(game, who, point.x, point.y)
+    if (point) {
+      extendStroke(game, who, point.x, point.y)
+      if (isGuest) strokeBuf.push([point.x, point.y])
+    }
   }
   function onPointerUp() {
-    const who = game.players.find((p) => p.draw.mode === 'drawing')
-    if (who) endStroke(game, who)
+    const who = mouseCandidates().find((p) => p && p.draw.mode === 'drawing')
+    if (who) {
+      endStroke(game, who)
+      if (isGuest) {
+        flushStroke()
+        coop.net.sendCommand({ t: 'se' })
+      }
+    }
   }
   banner.addEventListener('pointerdown', (event) => {
     // (touch) tap the "room clear" box for the next room
@@ -410,14 +446,20 @@ export function startDoors(container) {
     })
     .catch((error) => {
       console.warn('[doors] 3D view unavailable', error)
-      status.textContent = view ? '3D characters unavailable — using placeholders' : '3D view unavailable (WebGL?)'
-      setTimeout(() => status.remove(), 5000)
+      if (view) {
+        status.textContent = '3D characters unavailable — using placeholders'
+        setTimeout(() => status.remove(), 5000)
+        return
+      }
+      // Without the 3D view there is nothing to draw but black, so say so and keep saying so.
+      status.style.cssText += ';max-width:80%;white-space:normal;text-align:center;line-height:1.6;border-color:#ff5c5c'
+      status.textContent = `THE 3D VIEW COULDN'T START ON THIS DEVICE (${String(error?.message || error).slice(0, 80)}). CLOSE OTHER APPS AND REOPEN DOORS.`
     })
 
   // Two panes (one per player) — but with the touch controls up this device plays ONE character, so their
   // pane fills the screen and the other is not shown.
   function currentPanes() {
-    if (!touchUI.enabled) return layoutPanes(size.w, size.h)
+    if (!touchUI.enabled && !coop) return layoutPanes(size.w, size.h)
     const full = { x: 0, y: 0, w: size.w, h: size.h }
     return input.mode === 'pink' ? [DEAD_PANE, full] : [full, DEAD_PANE]
   }
@@ -432,7 +474,7 @@ export function startDoors(container) {
     snapCameras = true
   }
   // start-up: the first campaign room, in the dark, waiting for a tap (rooms without an opening scene just begin)
-  if (level.campaign && level.intro && startIndex === 0 && !devRoom) {
+  if (level.campaign && level.intro && startIndex === 0 && !devRoom && !coop) {
     campaignIndex = 0
     intro = createIntro(game)
     stage = 'title'
@@ -446,6 +488,234 @@ export function startDoors(container) {
   resize()
   updateHud()
   showHint(true)
+
+  // ---- online co-op ----
+  let roomSeq = 0
+  let roomMeta = null // host: { seq, index, carry } — the guest loads whatever room this names
+  let localRoomSeq = -1 // guest: the room version it has loaded
+  let forceFull = false
+  let hostDialogs = [] // guest: the "you obtained..." boxes, exactly as the host has them
+  let hostMask = 0 // guest: the host's current input, so their character keeps moving between snapshots
+  let hostInputMask = 0 // host: my own current input, published for the guest
+  let pendingState = null // guest: state that arrived since the last frame
+  const lastStr = {} // JSON last published (host) / last received (guest), per key
+  let lastHeard = performance.now() // guest: when the host's heartbeat last arrived
+  let accMask = 0
+  let lastMask = 0
+  let lastMoveAt = 0 // when I last held left/right
+  let lastSentMask = -1
+  let lastInputSent = 0
+  let lastPublish = 0
+  let lastHeartbeat = 0
+  let lastAimSent = 0
+  let lastStrokeFlush = 0
+  const strokeBuf = []
+  const deferredStrokes = [] // host: strokes that arrived before the draw key did
+  const roundNumbers = (key, value) => (typeof value === 'number' && !Number.isInteger(value) ? Math.round(value * 10000) / 10000 : value)
+  const awayEl = layer(
+    'position:absolute;left:50%;top:70px;transform:translateX(-50%);z-index:7;display:none;padding:7px 12px;text-align:center;' +
+      `${PX(8)}color:#fff;background:${PAL.ink};border:3px solid ${PAL.danger};pointer-events:none;white-space:nowrap`,
+  )
+
+  function requestReset() {
+    if (isGuest) {
+      coop.net.sendCommand({ t: 'reset' })
+      return
+    }
+    resetGame(game)
+    snapCameras = true
+  }
+
+  function flushStroke() {
+    if (strokeBuf.length) coop.net.sendCommand({ t: 'sx', pts: strokeBuf.splice(0) })
+    lastStrokeFlush = performance.now()
+  }
+
+  // The inputs for this step. Co-op: mine from the keyboard/touch controls, the other character's from the network.
+  function stepInputs() {
+    const inputs = input.players()
+    if (!coop) return inputs
+    lastMask = maskOf(inputs[myIndex])
+    if (lastMask & 3) lastMoveAt = performance.now()
+    accMask |= lastMask
+    if (coop.isHost) {
+      hostInputMask = lastMask
+      const remote = coop.net.remote()
+      inputs[theirIndex] = performance.now() - remote.at < 600 ? inputOf(remote.mask) : IDLE_INPUT // (a stalled link must not leave a key stuck)
+    } else inputs[theirIndex] = inputOf(hostMask)
+    return inputs
+  }
+
+  // Guest: tell the host what I am pressing. Several steps' presses are merged so a quick tap is never lost.
+  function flushInput(now) {
+    if (!isGuest) return
+    if ((accMask !== lastSentMask || now - lastInputSent > 400) && now - lastInputSent >= 30) {
+      coop.net.sendInput(accMask)
+      lastSentMask = accMask
+      lastInputSent = now
+      accMask = lastMask
+    }
+  }
+
+  // Host: the one-off commands from the guest.
+  function handleCommand(c) {
+    const who = game.players[theirIndex]
+    switch (c.t) {
+      case 'reset':
+        resetGame(game)
+        snapCameras = true
+        break
+      case 'next':
+        nextRoom()
+        break
+      case 'dialog':
+        game.dialogs.shift()
+        break
+      case 'sb':
+        if (who.draw.mode === 'aiming') beginStroke(game, who, c.x, c.y)
+        else deferredStrokes.push({ x: c.x, y: c.y, until: performance.now() + 700, pts: [] })
+        break
+      case 'sx':
+        if (deferredStrokes.length) deferredStrokes[deferredStrokes.length - 1].pts.push(...c.pts)
+        else for (const [x, y] of c.pts || []) extendStroke(game, who, x, y)
+        break
+      case 'se':
+        if (deferredStrokes.length) deferredStrokes[deferredStrokes.length - 1].ended = true
+        else endStroke(game, who)
+        break
+      case 'aim':
+        setAim(who, c.x, c.y)
+        break
+      case 'rope':
+        fireRope(game, who, { x: c.x, y: c.y })
+        break
+      default:
+    }
+  }
+  // a stroke whose "start drawing" key press is still on its way
+  function retryDeferredStrokes(now) {
+    const who = game.players[theirIndex]
+    while (deferredStrokes.length) {
+      const d = deferredStrokes[0]
+      if (who.draw.mode === 'aiming') {
+        beginStroke(game, who, d.x, d.y)
+        for (const [x, y] of d.pts) extendStroke(game, who, x, y)
+        if (d.ended) endStroke(game, who)
+        deferredStrokes.shift()
+      } else if (now > d.until) deferredStrokes.shift()
+      else break
+    }
+  }
+
+  // Host: publish what changed since last time (everything, right after a room loads).
+  function publishState(now) {
+    if (now - lastPublish < 66 && !forceFull) return
+    lastPublish = now
+    const changed = {}
+    const put = (key, text) => {
+      if (forceFull || lastStr[key] !== text) {
+        lastStr[key] = text
+        changed[key] = text
+      }
+    }
+    for (const key of Object.keys(game)) {
+      if (key !== 'level') put(key, JSON.stringify(game[key], roundNumbers) ?? 'null')
+    }
+    put('hi', String(hostInputMask))
+    if (roomMeta) put('roomMeta', JSON.stringify(roomMeta))
+    if (now - lastHeartbeat > 1000) {
+      lastHeartbeat = now
+      changed.hb = String(Date.now())
+    }
+    forceFull = false
+    if (Object.keys(changed).length) coop.net.publish(changed)
+  }
+
+  // Guest: take in the host's latest state. The world comes straight from the host; my own character is kept as I
+  // simulated it (so it does not snap back to where the host last saw me) unless the two have really diverged.
+  function mergePlayers(fresh) {
+    const mine = game.players[myIndex]
+    const theirs = fresh[myIndex]
+    if (mine && theirs) {
+      const apart = Math.hypot(theirs.x - mine.x, theirs.y - mine.y)
+      const changed =
+        theirs.deaths !== mine.deaths ||
+        theirs.hearts !== mine.hearts ||
+        theirs.grav !== mine.grav ||
+        theirs.carriedBy !== mine.carriedBy ||
+        theirs.carrying !== mine.carrying ||
+        JSON.stringify(theirs.abilities) !== JSON.stringify(mine.abilities)
+      // While I am running the host's copy of me is always a little behind (the network delay), so that is not a
+      // difference to correct — only a big one (a respawn, a teleport) or a change of state is.
+      if (!changed && apart <= 2.5) {
+        // Once I have stopped, settle onto where the host has me, so both of us agree where I am standing.
+        if (performance.now() - lastMoveAt > 250 && apart > 0.03) {
+          mine.x += (theirs.x - mine.x) * 0.3
+          mine.y += (theirs.y - mine.y) * 0.3
+        }
+        fresh[myIndex] = mine
+      }
+    }
+    game.players = fresh
+  }
+
+  function applyRemoteState() {
+    if (!pendingState) return
+    const state = pendingState
+    pendingState = null
+    if (state.roomMeta && state.roomMeta.seq !== localRoomSeq) {
+      localRoomSeq = state.roomMeta.seq
+      loadCampaign(state.roomMeta.index, state.roomMeta.carry)
+    }
+    for (const [key, value] of Object.entries(state)) {
+      if (key === 'roomMeta') continue
+      if (key === 'hi') hostMask = Number(value) || 0
+      else if (key === 'players') mergePlayers(value)
+      else if (key === 'dialogs') hostDialogs = value
+      else game[key] = value
+    }
+  }
+
+  if (isGuest) {
+    coop.net.onState((all) => {
+      const now = performance.now()
+      for (const [key, text] of Object.entries(all)) {
+        if (lastStr[key] === text) continue
+        lastStr[key] = text
+        if (key === 'hb') {
+          lastHeard = now
+          continue
+        }
+        try {
+          pendingState = pendingState || {}
+          pendingState[key] = JSON.parse(text)
+        } catch {
+          // a half-written value: the next update replaces it
+        }
+      }
+    })
+  } else if (coop) {
+    coop.net.onCommand(handleCommand)
+    roomMeta = { seq: 0, index: Math.max(campaignIndex, 0), carry: null }
+    forceFull = true
+    if (coop.restore) {
+      // coming back to a game in progress: carry on from the last state the host published
+      try {
+        const saved = coop.restore.roomMeta ? JSON.parse(coop.restore.roomMeta) : null
+        if (saved) {
+          roomSeq = saved.seq
+          roomMeta = saved
+          if (saved.index !== campaignIndex) loadCampaign(saved.index, saved.carry)
+        }
+        for (const [key, text] of Object.entries(coop.restore)) {
+          if (key !== 'roomMeta' && key !== 'hi' && key !== 'hb') game[key] = JSON.parse(text)
+        }
+        forceFull = true
+      } catch {
+        // an unreadable save: start the room fresh
+      }
+    }
+  }
 
   let last = performance.now()
   let accumulator = 0
@@ -498,17 +768,16 @@ export function startDoors(container) {
       nextRoom()
     }
     // in the campaign the next room follows by itself a moment after the exit (N / a tap just skips the wait)
-    if (game.complete && campaignIndex >= 0 && campaignIndex + 1 < CAMPAIGN.length) {
+    if (!isGuest && game.complete && campaignIndex >= 0 && campaignIndex + 1 < CAMPAIGN.length) {
       autoNext += elapsed
       if (autoNext > 3.2) {
         autoNext = 0
         nextRoom()
       }
     } else autoNext = 0
-    if (input.consumeReset()) {
-      resetGame(game)
-      snapCameras = true
-    }
+    if (input.consumeReset()) requestReset()
+    if (isGuest) applyRemoteState()
+    else if (coop) retryDeferredStrokes(now)
 
     // out of hearts: a moment to read it, then the room restarts with every heart refilled
     if (game.outOfHearts && failTimer <= 0 && stage === 'play') {
@@ -532,7 +801,7 @@ export function startDoors(container) {
       accumulator += elapsed
       let steps = 0
       while (accumulator >= SIM.STEP && steps < SIM.MAX_STEPS_PER_FRAME) {
-        const inputs = input.players()
+        const inputs = stepInputs()
         watchFirstMove(inputs)
         stepGame(game, inputs, SIM.STEP)
         footsteps.update(game, SIM.STEP)
@@ -543,6 +812,16 @@ export function startDoors(container) {
       if (steps === SIM.MAX_STEPS_PER_FRAME) accumulator = 0 // fell far behind (tab was hidden) — don't spiral
     }
     updateAfterTalk(elapsed)
+    if (isGuest) {
+      game.dialogs = hostDialogs // (the host decides what the boxes say and when they are gone)
+      flushInput(now)
+      if (strokeBuf.length && now - lastStrokeFlush > 50) flushStroke()
+    } else if (coop) publishState(now)
+    if (coop) {
+      const gone = isGuest ? now - lastHeard > 4000 : now - coop.net.remote().at > 4000
+      awayEl.style.display = gone ? 'block' : 'none'
+      if (gone) awayEl.textContent = `WAITING FOR ${String(coop.partnerName || 'YOUR PARTNER').toUpperCase()}...`
+    }
     renderDialog()
 
     game.players.forEach((player, i) => {
@@ -573,6 +852,7 @@ export function startDoors(container) {
     dispose() {
       disposed = true
       sfx.stop()
+      coop?.net.dispose()
       cancelAnimationFrame(rafId)
       observer.disconnect()
       input.dispose()
@@ -583,7 +863,7 @@ export function startDoors(container) {
       container.removeEventListener('pointercancel', onPointerUp)
       window.removeEventListener('keydown', onDialogKey)
       window.removeEventListener('keydown', onTitleKey)
-      for (const node of [titleEl, flashEl, talkEl, cardEl, failEl, ...Object.values(bubbleEls)]) node.remove()
+      for (const node of [titleEl, flashEl, talkEl, cardEl, failEl, awayEl, ...Object.values(bubbleEls)]) node.remove()
       clearTimeout(cardTimer)
       touchUI.dispose()
       dialogEl.remove()

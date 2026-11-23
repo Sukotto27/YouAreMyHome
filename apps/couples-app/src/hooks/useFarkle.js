@@ -19,7 +19,11 @@ import {
 } from '../lib/farkle'
 
 export const DEMO_PARTNER_UID = 'demo-partner'
+// The computer opponent in Play Solo. A solo match lives only in this device's
+// storage (never Firestore), so it can't disturb — or notify — a partner match.
+export const COMPUTER_UID = 'computer'
 const DEMO_KEY = 'farkleGame'
+const SOLO_KEY = 'farkleSoloGame'
 
 // `db` is null in preview mode (no Firebase config) — this ref must only
 // ever be constructed once firebaseReady has already been checked, never at
@@ -61,28 +65,53 @@ function readDemoGame(uid) {
   return Array.isArray(raw) ? freshGame(uid) : raw
 }
 
+function readSoloGame() {
+  const raw = readDemoList(SOLO_KEY)
+  return Array.isArray(raw) ? null : raw
+}
+
+// True when a solo match is in progress, so reopening Farkle drops straight back into it.
+export function hasSoloGameInProgress() {
+  return readSoloGame()?.status === 'playing'
+}
+
 // A single, ever-live shared match (one Firestore doc, not per-round docs)
 // — both partners watch the same board update in real time, same "watch
 // over their shoulder" feel as Draw's live canvas, just turn-gated instead
 // of simultaneous. See lib/farkle.js for the scoring rules this enforces.
-export function useFarkle() {
+export function useFarkle(solo = false) {
   const { user } = useAuth()
   const partnerUid = usePartnerUid()
-  const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
-  const [game, setGame] = useState(firebaseReady ? null : readDemoGame(user?.uid))
+  // Solo and preview mode both play on this device, against a bot.
+  const local = solo || !firebaseReady
+  const storeKey = solo ? SOLO_KEY : DEMO_KEY
+  const botUid = solo ? COMPUTER_UID : DEMO_PARTNER_UID
+  const effectivePartnerUid = solo ? COMPUTER_UID : firebaseReady ? partnerUid : DEMO_PARTNER_UID
+  const [game, setGame] = useState(solo ? readSoloGame() : firebaseReady ? null : readDemoGame(user?.uid))
   const demoPlayingRef = useRef(false)
 
   useEffect(() => {
-    if (!firebaseReady) return
+    if (solo) {
+      setGame(readSoloGame())
+      return
+    }
+    if (!firebaseReady) {
+      setGame(readDemoGame(user?.uid))
+      return
+    }
+    setGame(null)
     return onSnapshot(gameDocRef(), (snap) => {
       setGame(snap.exists() ? snap.data() : null)
     })
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solo])
 
-  async function write(next) {
-    if (!firebaseReady) {
+  // `toSolo` lets a start/cancel target the solo store before the `solo` flag
+  // itself has flipped on the next render.
+  async function write(next, toSolo = solo) {
+    if (toSolo || !firebaseReady) {
       setGame(next)
-      writeDemoList(DEMO_KEY, next)
+      writeDemoList(toSolo ? SOLO_KEY : DEMO_KEY, next)
       return
     }
     await setDoc(gameDocRef(), { ...next, updatedAt: serverTimestamp() })
@@ -92,14 +121,14 @@ export function useFarkle() {
 
   // Files the current match in game history before it is replaced/deleted.
   function archiveCurrent() {
-    if (!game || !Object.values(game.scores || {}).some((s) => s > 0)) return
+    if (solo || !game || !Object.values(game.scores || {}).some((s) => s > 0)) return
     archiveGame('farkle', { scores: game.scores, winnerUid: game.winnerUid || null, status: game.status })
   }
 
-  async function startGame() {
+  async function startGame(asSolo = solo) {
     if (!user) return
     archiveCurrent()
-    await write(freshGame(user.uid))
+    await write(freshGame(user.uid), asSolo)
   }
 
   // Two different escapes from a stuck/unwanted match: startGame (above)
@@ -110,9 +139,9 @@ export function useFarkle() {
   // (e.g. genuinely stuck waiting on a turn that isn't coming).
   async function cancelGame() {
     archiveCurrent()
-    if (!firebaseReady) {
+    if (!firebaseReady || solo) {
       setGame(null)
-      writeDemoList(DEMO_KEY, [])
+      writeDemoList(storeKey, [])
       return
     }
     await deleteDoc(gameDocRef())
@@ -134,7 +163,7 @@ export function useFarkle() {
       turnScore,
       dicePool: nextPool,
       keptDice: [...(from.keptDice || []), ...selectedValues],
-      history: [...(from.history || []), keepHistoryEntry(user.uid, selectedValues, turnScore)],
+      history: [...(from.history || []), keepHistoryEntry(user.uid, selectedValues, turnScore, remaining === 0)],
       lastRoll: null,
       lastRollByUid: null,
       lastActorUid: user.uid,
@@ -192,8 +221,8 @@ export function useFarkle() {
   // real ones are gated on `myTurn` (the actual signed-in user, never the
   // demo stand-in).
   useEffect(() => {
-    if (firebaseReady || !user) return
-    if (!game || game.status !== 'playing' || game.currentTurnUid !== DEMO_PARTNER_UID) {
+    if (!local || !user) return
+    if (!game || game.status !== 'playing' || game.currentTurnUid !== botUid) {
       demoPlayingRef.current = false
       return
     }
@@ -209,22 +238,22 @@ export function useFarkle() {
       const keptSoFar = current.dicePool === 6 ? [] : current.keptDice || []
       const rolled = {
         lastRoll: values,
-        lastRollByUid: DEMO_PARTNER_UID,
+        lastRollByUid: botUid,
         rollId: (current.rollId || 0) + 1,
         layout: layoutDice(values.length),
       }
       if (!hasAnyScore(values)) {
-        const next = { ...applyFarkle({ ...current, keptDice: keptSoFar }, DEMO_PARTNER_UID, user.uid, values), ...rolled }
+        const next = { ...applyFarkle({ ...current, keptDice: keptSoFar }, botUid, user.uid, values), ...rolled }
         setGame(next)
-        writeDemoList(DEMO_KEY, next)
+        writeDemoList(storeKey, next)
         demoPlayingRef.current = false
         return
       }
 
       // Show the toss first, then set the scoring dice aside a moment later.
-      const tossed = { ...current, ...rolled, keptDice: keptSoFar, lastActorUid: DEMO_PARTNER_UID, awaitingKeep: true }
+      const tossed = { ...current, ...rolled, keptDice: keptSoFar, lastActorUid: botUid, awaitingKeep: true }
       setGame(tossed)
-      writeDemoList(DEMO_KEY, tossed)
+      writeDemoList(storeKey, tossed)
       await new Promise((resolve) => setTimeout(resolve, 1600))
       if (cancelled) return
 
@@ -242,27 +271,27 @@ export function useFarkle() {
         keptDice: [...keptSoFar, ...kept],
         history: [
           ...(current.history || []),
-          keepHistoryEntry(DEMO_PARTNER_UID, kept, current.turnScore + score),
+          keepHistoryEntry(botUid, kept, current.turnScore + score, remaining === 0),
         ],
         lastRoll: null,
         lastRollByUid: null,
-        lastActorUid: DEMO_PARTNER_UID,
+        lastActorUid: botUid,
         awaitingKeep: false,
       }
       setGame(afterKeep)
-      writeDemoList(DEMO_KEY, afterKeep)
+      writeDemoList(storeKey, afterKeep)
 
       await new Promise((resolve) => setTimeout(resolve, 900))
       if (cancelled) return
 
-      const onBoard = (current.scores[DEMO_PARTNER_UID] || 0) > 0
+      const onBoard = (current.scores[botUid] || 0) > 0
       const canBank = onBoard || afterKeep.turnScore >= ON_BOARD_MIN
       const shouldBank = canBank && (afterKeep.turnScore >= 300 || afterKeep.dicePool <= 2)
 
       if (shouldBank) {
-        const next = applyBank(afterKeep, DEMO_PARTNER_UID, user.uid)
+        const next = applyBank(afterKeep, botUid, user.uid)
         setGame(next)
-        writeDemoList(DEMO_KEY, next)
+        writeDemoList(storeKey, next)
         demoPlayingRef.current = false
         return
       }
@@ -283,11 +312,12 @@ export function useFarkle() {
     // actually need to restart this effect (a turn changing hands, or the
     // match starting/finishing).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game?.currentTurnUid, game?.status, user])
+  }, [game?.currentTurnUid, game?.status, user, solo])
 
   return {
     game,
     myTurn,
+    opponentUid: effectivePartnerUid,
     onBoardMin: ON_BOARD_MIN,
     targetScore: TARGET_SCORE,
     startGame,

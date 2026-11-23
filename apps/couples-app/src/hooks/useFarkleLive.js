@@ -33,7 +33,7 @@ function parseRemote(raw, rollId) {
 // it; the other player just mirrors it. `liveRef` is read every frame by the
 // 3D table (no React re-render per drag move); `sel` is the same selection as
 // React state, for the parts of the UI that show the selected score.
-export function useFarkleLive(rollId, isActive) {
+export function useFarkleLive(rollId, isActive, offline = false) {
   const liveRef = useRef(emptyLive(rollId))
   const remoteRef = useRef(null)
   const rollIdRef = useRef(rollId)
@@ -51,12 +51,12 @@ export function useFarkleLive(rollId, isActive) {
   }, [])
 
   useEffect(() => {
-    if (!firebaseReady) return
+    if (!firebaseReady || offline) return
     return onValue(ref(rtdb, LIVE_PATH), (snap) => {
       remoteRef.current = snap.val()
       applyRemote()
     })
-  }, [applyRemote])
+  }, [applyRemote, offline])
 
   // A new roll (or a change of whose roll it is) starts from a clean slate.
   useEffect(() => {
@@ -71,7 +71,7 @@ export function useFarkleLive(rollId, isActive) {
 
   const publish = useCallback(() => {
     timerRef.current = null
-    if (!firebaseReady || !activeRef.current) return
+    if (!firebaseReady || offline || !activeRef.current) return
     const live = liveRef.current
     set(ref(rtdb, LIVE_PATH), {
       rollId: live.rollId,
@@ -79,7 +79,7 @@ export function useFarkleLive(rollId, isActive) {
       pos: live.pos,
       drag: live.drag,
     }).catch(() => {})
-  }, [])
+  }, [offline])
 
   // Active player only. `change` mutates liveRef.current; `immediate` skips the
   // throttle (selection changes and drops, as opposed to a drag in progress).

@@ -32,11 +32,19 @@ function makeActor(name, root, model) {
   return actor;
 }
 
+// The shared mannequin + animation clips (a 7.6 MB download that is also expensive to parse) are fetched once and
+// reused by every call below — the game builds the echo figures from the same data as the two players.
+let baseModels = null;
+function loadBaseModels(loader) {
+  baseModels ||= Promise.all([
+    loader.loadAsync(BASE + "assets/chars/UAL1_Standard.glb"), loader.loadAsync(BASE + "assets/chars/UAL2_Clips.glb"),
+  ]).catch((error) => { baseModels = null; throw error; });
+  return baseModels;
+}
+
 export async function loadCharacters() {
 const loader = new GLTFLoader();
-const [ual, ual2] = await Promise.all([
-  loader.loadAsync(BASE + "assets/chars/UAL1_Standard.glb"), loader.loadAsync(BASE + "assets/chars/UAL2_Clips.glb"),
-]);
+const [ual, ual2] = await loadBaseModels(loader);
 const clips = new Map([...ual.animations, ...ual2.animations].map((c) => [c.name, c]));
 let mqSrc = null;
 ual.scene.traverse((o) => { if (o.isSkinnedMesh && !mqSrc) mqSrc = o; });

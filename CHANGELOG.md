@@ -5,6 +5,70 @@ Every shipped change gets an entry here and a version bump in
 features, major for breaking/large redesigns. The version shown at the
 bottom of Home always reflects the latest entry below.
 
+## v1.72.0
+
+- Doors: **online co-op**. Doors now opens with a lobby: *Play with Partner* (each of you on your own phone or
+  computer, Scott as Blue and Cristina as Pink, with the usual invite + Ready waiting room) or *Play on this device*
+  (the original two-on-one-keyboard game). Whoever starts the game is the host and runs the real simulation; the
+  other device mirrors it, while also simulating locally so your own character responds instantly. Doors, switches,
+  crates, hearts, ability pick-up boxes and room changes are all shared, and either of you can dismiss a box, reset
+  the room or move on. Drawn lines and ropes are sent to the host too. If your partner drops out, a "waiting for ..."
+  note shows; leave and come back and the game resumes (Resume / End game in the lobby). Co-op skips the opening scene.
+
+## v1.71.1
+
+- Doors: if the game fails to load or start, a "Doors couldn't start" message with a Reload button replaces the
+  silent black screen, and if the 3D view can't start (some phones refuse WebGL) a lasting explanation shows
+  instead of a message that vanished after 5 seconds. The 3D view also retries without antialiasing before giving up.
+- Doors: lighter on phones. The 7.6 MB character/animation file is downloaded and parsed once instead of twice, and
+  the Light Echo figures (which rig both characters a second time) are only built the first time an echo is cast.
+  If a phone drops the graphics because it ran low on memory, Doors now says so instead of staying black.
+
+## v1.71.0
+
+- New game: **Table Roll**. A long, narrow table with a ledge past each end (no pockets). Each of you sets up 6
+  balls anywhere in your end — your opponent can't see them — then you take turns rolling a ball at theirs:
+  tap the ball and drag the way you want it to go (further = harder), banking off the side rails if you like.
+  Any ball that rolls off either end drops onto the ledge and is out. Knock out all of theirs to win. Rolls show
+  live on your partner's screen. Includes Play Solo against the computer.
+  The table is long (about 3.4 times as long as it is wide) and there is no aiming line — you roll by feel.
+  Sounds: a roll when you let go, a (quieter) click when balls strike, and a drop when one goes off the edge.
+- Games: a cheer plays when a game you're in finishes and a winner is declared (Farkle, Uno, Rock Paper
+  Scissors, Pong, Obstacle Drop, Bananagrams, Table Roll). Opening a game that had already finished stays quiet.
+
+## v1.70.0
+
+- Obstacle Drop: **ink meter** replaces the 10-line limit. A line costs its own length, the meter (bottom of the
+  board) refills over time, and a line stops where your ink runs out — short, precise lines beat scribbling.
+- Obstacle Drop: **random static bumpers** — a few round posts scattered across the middle, a fresh set every
+  drop, the same on both screens. The ball bounces off them.
+- Obstacle Drop: a **ceiling**, so the ball can no longer fly out through the top. A ball that comes to rest
+  on a post or line now gets nudged instead of stalling the round.
+
+## v1.69.0
+
+- Games: **Play Solo** now works in every game that suits it, against the computer (Cards Against Couples, Mad Libs
+  and the Never-Ending Story/Song are partner-only, so they have no solo option). Like Farkle's, solo matches live on your
+  device only (no invite, no notification, not filed in Past Games) and a solo match in progress is waiting when
+  you reopen the game.
+  - Rock Paper Scissors, Uno: the computer picks a random move, or plays a legal Uno card (or draws) and picks
+    the Wild colour it holds most of.
+  - Pong: an AI paddle that tracks the ball and can be beaten.
+  - Obstacle Drop: the computer drops slanted lines in the ball's path to kick it toward its own hole.
+  - Bananagrams: the computer finishes its grid after 40–80 seconds each peel, which peels for everyone — beat
+    the clock to Peel first, and to call Bananas.
+
+## v1.68.0
+
+- Farkle: **Play Solo** now works — a full match against the computer, which keeps what scores and banks once
+  it's ahead enough. Solo matches live on your device only: no invite, no notifications, no chat, and they are
+  not filed in Past Games. A solo match in progress is waiting for you when you reopen Farkle.
+
+## v1.67.1
+
+- Farkle: when a player uses all six dice (hot dice), a celebration box pops up on both screens — "Scott has 650
+  with all the dice!" — before the fresh six are rolled.
+
 ## v1.67.0
 
 - Games: every live co-op game (Farkle, Uno, Pong, Bananagrams, Rock Paper Scissors, Cards Against Couples, Obstacle

@@ -24,12 +24,28 @@ function clipFor(p) {
 }
 
 export async function createView3D(container) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true })
+  // Some phones refuse an antialiased context (or any WebGL while memory is tight): retry plainly before giving up.
+  let renderer
+  try {
+    renderer = new THREE.WebGLRenderer({ antialias: true })
+  } catch {
+    renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'low-power' })
+  }
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
   renderer.setClearColor(0x0d0a12, 1)
   const canvas = renderer.domElement
   canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:0'
   container.insertBefore(canvas, container.firstChild)
+  // A phone can drop the WebGL context when it runs short of memory; say so instead of freezing on black.
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault()
+    const note = document.createElement('div')
+    note.style.cssText =
+      'position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;' +
+      'background:#000;color:#fff;font:14px sans-serif;line-height:1.5'
+    note.textContent = 'The graphics were interrupted (the phone ran low on memory). Close other apps, then leave Doors and open it again.'
+    container.appendChild(note)
+  })
 
   const scene = new THREE.Scene()
   const hemi = new THREE.HemisphereLight(0xd9ccff, 0x5a4a52, 1.5)
@@ -141,6 +157,13 @@ export async function createView3D(container) {
       players[id].capsule.visible = false
       players[id].actor = actor
     }
+  }
+
+  // The translucent Light Echo figures are only built the first time an echo is cast: building them rigs both
+  // characters a second time, which is a lot of work (and memory) for a phone to do up front for something optional.
+  let echoLoading = false
+  async function loadEchoFigures() {
+    echoLoading = true
     try {
       const { actors: ghosts } = await loadCharacters()
       for (const [id, key] of Object.entries(CHARACTER_FOR)) {
@@ -288,6 +311,7 @@ export async function createView3D(container) {
 
   // Light Echo copies: standing where they were cast, translucent, fading out over their last second
   function poseEchoes(game, dt) {
+    if (!echoLoading && game.echoes.length > 0) loadEchoFigures()
     for (const id of ['blue', 'pink']) {
       const ev = echoViews[id]
       if (!ev) continue

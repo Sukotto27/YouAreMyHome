@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { useBananagramsMatch } from '../../hooks/useBananagramsMatch'
+import { useWinCheer } from '../../hooks/useWinCheer'
+import { useBananagramsMatch, SOLO_KEY } from '../../hooks/useBananagramsMatch'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import PortugueseNotice from './PortugueseNotice'
@@ -18,6 +19,7 @@ import { translateWord } from '../../lib/translation'
 import { usePortugueseSubtext } from '../../hooks/usePortugueseSubtext'
 import { myNameFor } from '../../lib/names'
 import StartPanel from './GameLobby'
+import { COMPUTER_LABEL, soloInProgress } from '../../lib/solo'
 
 const CELL = 34
 const STORAGE_PREFIX = 'you-are-my-home:bananagrams-grid:'
@@ -65,7 +67,9 @@ function Tile({ letter, selected, invalid, flip, ghosted, onClick, onPointerDown
 // you win. Tap a tile to select it, tap an empty square to place it.
 export default function BananagramsGame({ onBack }) {
   const { user } = useAuth()
-  const { match, effectivePartnerUid, startMatch, act, endGame } = useBananagramsMatch()
+  const [solo, setSolo] = useState(() => soloInProgress(SOLO_KEY, (m) => m?.status === 'playing' || m?.status === 'setup'))
+  const { match, effectivePartnerUid, startMatch, act, endGame } = useBananagramsMatch(solo)
+  useWinCheer(match?.status === 'finished')
   const status = match?.status
   const [sizeChoice, setSizeChoice] = useState(DEFAULT_SIZE)
   const [placements, setPlacements] = useState({}) // tileId -> {x, y}, local to this device
@@ -83,7 +87,7 @@ export default function BananagramsGame({ onBack }) {
   const ptTimerRef = useRef(null)
 
   const mineLabel = myNameFor(user)
-  const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerLabel = solo ? COMPUTER_LABEL : mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const storageKey = match ? `${STORAGE_PREFIX}${match.hostUid}:${match.startedAt}` : null
 
   const hand = match?.hands?.[user.uid] || {}
@@ -219,7 +223,14 @@ export default function BananagramsGame({ onBack }) {
           label="Bananagrams"
           emoji="🍌"
           options={sizeChoice}
-          onStart={(size) => startMatch(size ?? sizeChoice)}
+          onStart={(size) => {
+            setSolo(false)
+            return startMatch(size ?? sizeChoice, false)
+          }}
+          onSolo={(size) => {
+            setSolo(true)
+            return startMatch(size ?? sizeChoice, true)
+          }}
         />
         <PortugueseNotice pt={pt} how="The tiles stay in English: tap & hold a word on the board to see it in Portuguese." />
       </div>

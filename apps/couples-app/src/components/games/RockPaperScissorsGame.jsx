@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { useRpsMatch } from '../../hooks/useRpsMatch'
+import { useWinCheer } from '../../hooks/useWinCheer'
+import { useRpsMatch, SOLO_KEY } from '../../hooks/useRpsMatch'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { playSound } from '../../lib/sounds'
 import { CHOICES, CHOICE_EMOJI, COUNTDOWN_FROM, WINS_NEEDED } from '../../lib/rps'
 import { myNameFor } from '../../lib/names'
 import StartPanel from './GameLobby'
+import { COMPUTER_LABEL, soloInProgress } from '../../lib/solo'
 
 const CHOICE_LABEL = { rock: 'Rock', paper: 'Paper', scissors: 'Scissors' }
 
@@ -15,11 +17,13 @@ const CHOICE_LABEL = { rock: 'Rock', paper: 'Paper', scissors: 'Scissors' }
 // revealed together. See useRpsMatch for the phase flow and who referees.
 export default function RockPaperScissorsGame({ onBack }) {
   const { user } = useAuth()
-  const { match, effectivePartnerUid, startMatch, pick, endGame } = useRpsMatch()
+  const [solo, setSolo] = useState(() => soloInProgress(SOLO_KEY))
+  const { match, effectivePartnerUid, startMatch, pick, endGame } = useRpsMatch(solo)
+  useWinCheer(match?.status === 'finished')
   const [count, setCount] = useState(COUNTDOWN_FROM)
 
   const mineLabel = myNameFor(user)
-  const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerLabel = solo ? COMPUTER_LABEL : mineLabel === 'Scott' ? 'Cristina' : 'Scott'
   const myScore = match?.scores?.[user.uid] || 0
   const partnerScore = match?.scores?.[effectivePartnerUid] || 0
   const myPick = match?.picks?.[user.uid]
@@ -80,7 +84,14 @@ export default function RockPaperScissorsGame({ onBack }) {
           gameKey="rps"
           label="Rock Paper Scissors"
           emoji="✊"
-          onStart={() => startMatch()}
+          onStart={() => {
+            setSolo(false)
+            return startMatch(false)
+          }}
+          onSolo={() => {
+            setSolo(true)
+            return startMatch(true)
+          }}
         />
       </div>
     )

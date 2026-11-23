@@ -3,16 +3,20 @@ import Matter from 'matter-js'
 import { onValue, ref, set } from 'firebase/database'
 import { rtdb, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
-import { useObstacleDropMatch } from '../../hooks/useObstacleDropMatch'
+import { useWinCheer } from '../../hooks/useWinCheer'
+import { useObstacleDropMatch, SOLO_KEY } from '../../hooks/useObstacleDropMatch'
 import { useObstacleDropObstacles } from '../../hooks/useObstacleDropObstacles'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { playSound } from '../../lib/sounds'
-import { createWorld, resetBall, buildObstacleBodies, toNormalized } from '../../lib/obstaclePhysics'
+import { createWorld, resetBall, buildObstacleBodies, buildBumperBodies, toNormalized } from '../../lib/obstaclePhysics'
 import {
   BALL_RADIUS,
   BALL_START,
   HOLE_RADIUS,
+  INK_MAX,
+  INK_MIN_TO_DRAW,
+  INK_REGEN_PER_S,
   LEFT_HOLE,
   MISS_Y,
   OBSTACLE_THICKNESS,
@@ -21,9 +25,11 @@ import {
   DEFAULT_TARGET_SCORE,
   isInsideProtectedZone,
   isObstacleExpired,
+  strokeLength,
 } from '../../lib/obstacleDrop'
 import { myNameFor } from '../../lib/names'
 import StartPanel from './GameLobby'
+import { COMPUTER_LABEL, COMPUTER_UID, soloInProgress } from '../../lib/solo'
 
 const BALL_SEND_INTERVAL_MS = 50 // ~20Hz, well within "several times a second"
 const LERP_FACTOR = 0.3
@@ -40,8 +46,10 @@ const BURST_COLORS = ['#ff5e7e', '#ffb347', '#ffe156', '#6ee7b7', '#5ec8ff', '#b
 // separately-run physics engines would.
 export default function ObstacleDropGame({ onBack }) {
   const { user } = useAuth()
-  const { match, effectivePartnerUid, startMatch, recordGoal, endGame } = useObstacleDropMatch()
-  const { obstacles, activeObstacles, canDraw, addObstacle, removeObstacle } = useObstacleDropObstacles()
+  const [solo, setSolo] = useState(() => soloInProgress(SOLO_KEY))
+  const { match, effectivePartnerUid, startMatch, recordGoal, endGame } = useObstacleDropMatch(solo)
+  const { obstacles, activeObstacles, canDraw, addObstacle, removeObstacle } = useObstacleDropObstacles(solo)
+  useWinCheer(match?.status === 'finished')
   const [targetChoice, setTargetChoice] = useState(DEFAULT_TARGET_SCORE)
   const [message, setMessage] = useState('')
 
@@ -61,6 +69,8 @@ export default function ObstacleDropGame({ onBack }) {
 
   const removeObstacleRef = useRef(removeObstacle)
   removeObstacleRef.current = removeObstacle
+  const addObstacleRef = useRef(addObstacle)
+  addObstacleRef.current = addObstacle
   const [countdown, setCountdown] = useState(0)
   const countdownRef = useRef(0)
   // Visual feedback state, all in normalized coordinates: sparks + expanding
@@ -70,13 +80,25 @@ export default function ObstacleDropGame({ onBack }) {
   const popupsRef = useRef([])
   const prevScoresRef = useRef(null)
   const activeStrokeRef = useRef(null)
+  const strokeInkRef = useRef(0) // ink the stroke in progress has used so far
+  // Your ink: refills over time, spent by the length of each line you draw.
+  const inkRef = useRef({ value: INK_MAX, at: Date.now() })
+  function currentInk() {
+    const { value, at } = inkRef.current
+    return Math.min(INK_MAX, value + ((Date.now() - at) / 1000) * INK_REGEN_PER_S)
+  }
+  function spendInk(amount) {
+    inkRef.current = { value: Math.max(0, currentInk() - amount), at: Date.now() }
+  }
   const renderedBallRef = useRef(BALL_START)
   const targetBallRef = useRef(BALL_START)
 
   const isHost = !!match && match.hostUid === user.uid
   const mySide = match?.leftUid === user.uid ? 'left' : 'right'
   const mineLabel = myNameFor(user)
-  const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerLabel = solo ? COMPUTER_LABEL : mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  // Solo matches never touch the network: the computer draws the other side's lines.
+  const online = firebaseReady && !match?.solo
   const myScore = match?.scores?.[user.uid] || 0
   const partnerScore = match?.scores?.[effectivePartnerUid] || 0
   const leftName = mySide === 'left' ? mineLabel : partnerLabel
@@ -122,6 +144,7 @@ export default function ObstacleDropGame({ onBack }) {
       setCountdown(0)
       return
     }
+    inkRef.current = { value: INK_MAX, at: Date.now() }
     let n = COUNTDOWN_FROM
     countdownRef.current = n
     setCountdown(n)
@@ -198,6 +221,22 @@ export default function ObstacleDropGame({ onBack }) {
     drawHole(ctx, LEFT_HOLE, currentMatch?.leftUid === user.uid ? mineLabel : partnerLabel, '#2f9e94')
     drawHole(ctx, RIGHT_HOLE, currentMatch?.rightUid === user.uid ? mineLabel : partnerLabel, '#e27d7a')
 
+    for (const bumper of currentMatch?.bumpers || []) {
+      const pixel = pointToPixel(bumper)
+      const radius = bumper.r * width
+      ctx.beginPath()
+      ctx.arc(pixel.x, pixel.y, radius, 0, Math.PI * 2)
+      ctx.fillStyle = '#8a6b52'
+      ctx.fill()
+      ctx.lineWidth = 2
+      ctx.strokeStyle = '#5c4636'
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.arc(pixel.x - radius * 0.25, pixel.y - radius * 0.25, radius * 0.35, 0, Math.PI * 2)
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'
+      ctx.fill()
+    }
+
     for (const obstacle of activeObstaclesRef.current) {
       const color = obstacle.uid === currentMatch?.leftUid ? '#2f9e94' : '#e27d7a'
       strokeRuns(ctx, obstacle.runs, color, 1)
@@ -206,6 +245,21 @@ export default function ObstacleDropGame({ onBack }) {
       const color = currentMatch?.leftUid === user.uid ? '#2f9e94' : '#e27d7a'
       strokeRuns(ctx, [activeStrokeRef.current], color, 0.5)
     }
+
+    // ink meter, bottom centre between the two holes
+    const inkFraction = currentInk() / INK_MAX
+    const meterW = width * 0.3
+    const meterX = (width - meterW) / 2
+    const meterY = height - 14
+    const myColor = currentMatch?.leftUid === user.uid ? '#2f9e94' : '#e27d7a'
+    ctx.fillStyle = 'rgba(54,37,33,0.15)'
+    ctx.fillRect(meterX, meterY, meterW, 7)
+    ctx.fillStyle = myColor
+    ctx.fillRect(meterX, meterY, meterW * inkFraction, 7)
+    ctx.fillStyle = '#7a6a64'
+    ctx.font = '10px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('ink', width / 2, meterY - 3)
 
     const pixelBall = pointToPixel(ballPos)
     ctx.beginPath()
@@ -321,6 +375,10 @@ export default function ObstacleDropGame({ onBack }) {
     let prevObstacleIds = new Set(obstaclesRef.current.map((o) => o.id))
     let lastPhysicsTime = performance.now()
     let lastSentAt = 0
+    let aiNextAt = Date.now() + 4000
+    let bumperSig = ''
+    let bumperBodies = []
+    let stillSince = 0
 
     if (isHost) {
       const world = createWorld()
@@ -332,6 +390,10 @@ export default function ObstacleDropGame({ onBack }) {
           const labels = [pair.bodyA.label, pair.bodyB.label]
           if (!labels.includes('ball')) continue
           const currentMatch = matchRef.current
+          if (labels.includes('bumper')) {
+            bounceEffect(toNormalized(ball.position))
+            continue
+          }
           if (labels.includes('obstacle')) {
             const body = pair.bodyA.label === 'obstacle' ? pair.bodyA : pair.bodyB
             const id = body.plugin?.obstacleId
@@ -367,11 +429,22 @@ export default function ObstacleDropGame({ onBack }) {
         }
       }
       Matter.Events.on(engine, 'collisionStart', collisionHandler)
-    } else if (firebaseReady) {
+    } else if (online) {
       unsubscribeBall = onValue(ref(rtdb, 'obstacleDrop/ball'), (snap) => {
         const value = snap.val()
         if (value) targetBallRef.current = { x: value.x, y: value.y }
       })
+    }
+
+    // The match's current bumpers (new set every drop) as static bodies.
+    function syncBumpers() {
+      const list = matchRef.current?.bumpers || []
+      const sig = list.map((b) => `${b.x},${b.y},${b.r}`).join('|')
+      if (sig === bumperSig) return
+      bumperSig = sig
+      Matter.Composite.remove(engine.world, bumperBodies)
+      bumperBodies = buildBumperBodies(list)
+      Matter.Composite.add(engine.world, bumperBodies)
     }
 
     function syncObstacleBodies(now) {
@@ -395,6 +468,7 @@ export default function ObstacleDropGame({ onBack }) {
       if (isHost) {
         const delta = Math.min(33, time - lastPhysicsTime)
         lastPhysicsTime = time
+        syncBumpers()
         if (countdownRef.current > 0) {
           resetBall(ball)
           renderedBallRef.current = BALL_START
@@ -419,6 +493,17 @@ export default function ObstacleDropGame({ onBack }) {
         }
         syncObstacleBodies(Date.now())
 
+        // A ball balanced on a post or a line would stall the round: give it a nudge.
+        if (Math.hypot(ball.velocity.x, ball.velocity.y) < 0.05) {
+          if (!stillSince) stillSince = time
+          else if (time - stillSince > 1500) {
+            Matter.Body.setVelocity(ball, { x: (Math.random() < 0.5 ? -1 : 1) * 2, y: -1 })
+            stillSince = 0
+          }
+        } else {
+          stillSince = 0
+        }
+
         const normalized = toNormalized(ball.position)
         if (normalized.y > MISS_Y) {
           recordGoalRef.current(null)
@@ -426,7 +511,26 @@ export default function ObstacleDropGame({ onBack }) {
         }
         renderedBallRef.current = toNormalized(ball.position)
 
-        if (firebaseReady && time - lastSentAt > BALL_SEND_INTERVAL_MS) {
+        // The computer opponent: every couple of seconds, while the ball is
+        // falling through the upper field, it drops a short slanted line in
+        // the ball's path, tilted to kick the ball toward its own (right) hole.
+        if (matchRef.current?.solo && Date.now() >= aiNextAt) {
+          const at = renderedBallRef.current
+          if (at.y > 0.08 && at.y < 0.6 && toNormalized(ball.velocity).y > 0) {
+            const lean = at.x < RIGHT_HOLE.x ? 1 : -1
+            const jitter = (Math.random() - 0.5) * 0.06
+            const cx = Math.min(0.92, Math.max(0.08, at.x + jitter))
+            const cy = at.y + 0.14
+            addObstacleRef.current(COMPUTER_UID, [
+              { x: cx - 0.08, y: cy - 0.03 * lean },
+              { x: cx, y: cy },
+              { x: cx + 0.08, y: cy + 0.03 * lean },
+            ])
+            aiNextAt = Date.now() + 1600 + Math.random() * 1400
+          }
+        }
+
+        if (online && time - lastSentAt > BALL_SEND_INTERVAL_MS) {
           lastSentAt = time
           const velocity = toNormalized(ball.velocity)
           set(ref(rtdb, 'obstacleDrop/ball'), {
@@ -480,10 +584,11 @@ export default function ObstacleDropGame({ onBack }) {
     if (!match || match.status !== 'playing' || countdownRef.current > 0) return
     event.preventDefault()
     canvasRef.current.setPointerCapture(event.pointerId)
-    if (!canDraw(user.uid)) {
-      showMessage('You already have 10 obstacles out — wait for one to expire.')
+    if (currentInk() < INK_MIN_TO_DRAW || !canDraw(user.uid)) {
+      showMessage('Out of ink — it refills as you wait.')
       return
     }
+    strokeInkRef.current = 0
     activeStrokeRef.current = [toNormalizedPoint(event)]
   }
 
@@ -491,7 +596,12 @@ export default function ObstacleDropGame({ onBack }) {
     if (!activeStrokeRef.current) return
     const point = toNormalizedPoint(event)
     if (isInsideProtectedZone(point)) return
-    activeStrokeRef.current.push(point)
+    const stroke = activeStrokeRef.current
+    // The line stops where your ink runs out.
+    const segment = Math.hypot(point.x - stroke[stroke.length - 1].x, point.y - stroke[stroke.length - 1].y)
+    if (strokeInkRef.current + segment > currentInk()) return
+    strokeInkRef.current += segment
+    stroke.push(point)
   }
 
   async function handlePointerUp(event) {
@@ -500,6 +610,7 @@ export default function ObstacleDropGame({ onBack }) {
     activeStrokeRef.current = null
     if (!points || points.length < 2) return
     const ok = await addObstacle(user.uid, points)
+    if (ok) spendInk(strokeLength(points))
     if (!ok) showMessage("That line was too close to a hole and couldn't be placed.")
   }
 
@@ -534,7 +645,7 @@ export default function ObstacleDropGame({ onBack }) {
             Work in progress
           </span>
         </div>
-        <GameIntro gameKey="obstacleDrop" title="Obstacle Drop" defaultText={"A ball drops from the top — draw lines anywhere (except right over a hole) to steer it into your own hole and away from theirs. Each line disappears as soon as the ball bounces off it (or after 10 seconds if it never does), and you can have up to 10 out at once. First to the target score wins."} />
+        <GameIntro gameKey="obstacleDrop" title="Obstacle Drop" defaultText={"A ball drops from the top — draw lines anywhere (except right over a hole) to steer it into your own hole and away from theirs. Each line disappears as soon as the ball bounces off it (or after 10 seconds if it never does), and drawing costs ink — your meter at the bottom refills as you wait, so short, well-placed lines win. Round posts are scattered across the field and change every drop. First to the target score wins."} />
         <div className="flex gap-2">
           {TARGET_SCORE_OPTIONS.map((option) => (
             <button
@@ -554,7 +665,14 @@ export default function ObstacleDropGame({ onBack }) {
           label="Obstacle Drop"
           emoji="⚽"
           options={targetChoice}
-          onStart={(target) => startMatch(target ?? targetChoice)}
+          onStart={(target) => {
+            setSolo(false)
+            return startMatch(target ?? targetChoice, false)
+          }}
+          onSolo={(target) => {
+            setSolo(true)
+            return startMatch(target ?? targetChoice, true)
+          }}
         />
       </div>
     )

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
+import { useWinCheer } from '../../hooks/useWinCheer'
 import PastGames from './PastGames'
-import { usePartnerUid } from '../../hooks/usePartnerUid'
-import { useUno, DEMO_PARTNER_UID } from '../../hooks/useUno'
+import { useUno, SOLO_KEY } from '../../hooks/useUno'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
-import { firebaseReady } from '../../firebase'
 import { COLORS, canPlayCard } from '../../lib/uno'
+import { COMPUTER_LABEL, soloInProgress } from '../../lib/solo'
 import { myNameFor } from '../../lib/names'
 import StartPanel from './GameLobby'
 
@@ -25,13 +25,14 @@ const VALUE_LABEL = { skip: '⊘', reverse: '⇄', draw2: '+2', wild: '★', wil
 // deck/rules and useUno for the realtime wiring + preview-mode bot.
 export default function UnoGame({ onBack }) {
   const { user } = useAuth()
-  const partnerUid = usePartnerUid()
-  const { game, myTurn, startGame, cancelGame, play, chooseColor, draw, pass } = useUno()
+  const [solo, setSolo] = useState(() => soloInProgress(SOLO_KEY))
+  const { game, myTurn, opponentUid, startGame, cancelGame, play, chooseColor, draw, pass } = useUno(solo)
+  useWinCheer(game?.status === 'finished')
   const [confirmAction, setConfirmAction] = useState(null) // null | 'restart' | 'cancel'
 
-  const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
+  const effectivePartnerUid = opponentUid
   const mineLabel = myNameFor(user)
-  const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerLabel = solo ? COMPUTER_LABEL : mineLabel === 'Scott' ? 'Cristina' : 'Scott'
 
   // Arming "Start over"/"Cancel game" requires a second tap within a few
   // seconds — cheap insurance against a stray tap discarding a match that
@@ -46,10 +47,25 @@ export default function UnoGame({ onBack }) {
     if (confirmAction === action) {
       setConfirmAction(null)
       if (action === 'restart') startGame()
-      else cancelGame()
+      else handleCancel()
       return
     }
     setConfirmAction(action)
+  }
+
+  async function handleStartPartner() {
+    setSolo(false)
+    await startGame(false)
+  }
+
+  async function handleStartSolo() {
+    setSolo(true)
+    await startGame(true)
+  }
+
+  async function handleCancel() {
+    await cancelGame()
+    setSolo(false)
   }
 
   if (!game || game.status === 'finished') {
@@ -71,7 +87,8 @@ export default function UnoGame({ onBack }) {
           gameKey="uno"
           label="Uno"
           emoji="🎲"
-          onStart={() => startGame()}
+          onStart={handleStartPartner}
+          onSolo={handleStartSolo}
         />
         <PastGames game="uno" myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} />
       </div>
@@ -102,7 +119,7 @@ export default function UnoGame({ onBack }) {
           >
             {confirmAction === 'restart' ? 'Tap again to start over' : 'Start over'}
           </button>
-          <EndGameButton onEnd={cancelGame} />
+          <EndGameButton onEnd={handleCancel} />
         </div>
       </div>
 

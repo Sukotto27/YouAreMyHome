@@ -20,8 +20,10 @@ const TICK_MS = 250
 // sync traffic. The `now` tick below exists only to force a re-filter on a
 // timer, since nothing else would otherwise cause a re-render at the exact
 // moment an obstacle ages out.
-export function useObstacleDropObstacles() {
-  const [obstacles, setObstacles] = useState(firebaseReady ? [] : readDemoList(DEMO_KEY))
+// `solo` keeps every line on this device (a match against the computer).
+export function useObstacleDropObstacles(solo = false) {
+  const local = solo || !firebaseReady
+  const [obstacles, setObstacles] = useState(solo || firebaseReady ? [] : readDemoList(DEMO_KEY))
   const [now, setNow] = useState(() => Date.now())
   const obstaclesRef = useRef(obstacles)
   obstaclesRef.current = obstacles
@@ -32,12 +34,19 @@ export function useObstacleDropObstacles() {
   }, [])
 
   useEffect(() => {
-    if (!firebaseReady) return
+    if (solo) {
+      setObstacles([])
+      return
+    }
+    if (!firebaseReady) {
+      setObstacles(readDemoList(DEMO_KEY))
+      return
+    }
     return onValue(ref(rtdb, 'obstacleDrop/obstacles'), (snap) => {
       const value = snap.val() || {}
       setObstacles(Object.entries(value).map(([id, data]) => ({ id, ...data })))
     })
-  }, [])
+  }, [solo])
 
   const activeObstacles = obstacles.filter((o) => !isObstacleExpired(o, now))
 
@@ -53,9 +62,10 @@ export function useObstacleDropObstacles() {
     const runs = clipStrokeAroundHoles(points)
     if (runs.length === 0) return false
 
-    if (!firebaseReady) {
+    if (local) {
       const next = [...obstaclesRef.current, { id: crypto.randomUUID(), uid, runs, createdAt: Date.now() }]
-      writeDemoList(DEMO_KEY, next)
+      if (!solo) writeDemoList(DEMO_KEY, next)
+      obstaclesRef.current = next
       setObstacles(next)
       return true
     }
@@ -68,9 +78,10 @@ export function useObstacleDropObstacles() {
   // Called by the host when the ball bounces off an obstacle — the line is
   // spent, so it's deleted for everyone (instead of waiting out its timer).
   async function removeObstacle(id) {
-    if (!firebaseReady) {
+    if (local) {
       const next = obstaclesRef.current.filter((o) => o.id !== id)
-      writeDemoList(DEMO_KEY, next)
+      if (!solo) writeDemoList(DEMO_KEY, next)
+      obstaclesRef.current = next
       setObstacles(next)
       return
     }

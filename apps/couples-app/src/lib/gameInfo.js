@@ -14,6 +14,7 @@ export const GAME_EMOJI = {
   bananagrams: '🍌',
   cac: '🃏',
   doors: '🚪',
+  tableRoll: '🎱',
 }
 
 export const GAME_LABEL = {
@@ -29,4 +30,5 @@ export const GAME_LABEL = {
   bananagrams: 'Bananagrams',
   cac: 'Cards Against Couples',
   doors: 'Doors',
+  tableRoll: 'Table Roll',
 }

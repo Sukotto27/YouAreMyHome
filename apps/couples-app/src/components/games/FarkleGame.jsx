@@ -1,11 +1,10 @@
 import { Component, Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { usePartnerUid } from '../../hooks/usePartnerUid'
-import { useFarkle, DEMO_PARTNER_UID } from '../../hooks/useFarkle'
+import { useWinCheer } from '../../hooks/useWinCheer'
+import { useFarkle, hasSoloGameInProgress } from '../../hooks/useFarkle'
 import { useFarkleChat, useFarkleLive } from '../../hooks/useFarkleLive'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
-import { firebaseReady } from '../../firebase'
 import { scoreBreakdown, scoreSelection } from '../../lib/farkle'
 import { myNameFor, partnerNameFor } from '../../lib/names'
 import { playSound } from '../../lib/sounds'
@@ -17,7 +16,7 @@ import { DEFAULT_DICE_COLOR, DICE_COLORS } from './farkle/diceColors'
 // only once a match is actually open.
 const FarkleTable = lazy(() => import('./farkle/FarkleTable'))
 
-const OVERLAY_MS = { keep: 1900, bank: 3600, farkle: 3600 }
+const OVERLAY_MS = { keep: 1900, hot: 3200, bank: 3600, farkle: 3600 }
 
 // Standard 6-dice Farkle (see lib/farkle.js for the exact scoring table) —
 // a single ever-live shared match, not a library of separate rounds: both
@@ -26,10 +25,12 @@ const OVERLAY_MS = { keep: 1900, bank: 3600, farkle: 3600 }
 // aside or keep is mirrored live to the other screen (see useFarkleLive).
 export default function FarkleGame({ onBack }) {
   const { user } = useAuth()
-  const partnerUid = usePartnerUid()
-  const { game, myTurn, onBoardMin, targetScore, startGame, cancelGame, roll, bank } = useFarkle()
-  const live = useFarkleLive(game?.rollId ?? 0, myTurn)
+  // Solo = a match against the computer, kept on this device only.
+  const [solo, setSolo] = useState(hasSoloGameInProgress)
+  const { game, myTurn, opponentUid, onBoardMin, targetScore, startGame, cancelGame, roll, bank } = useFarkle(solo)
+  const live = useFarkleLive(game?.rollId ?? 0, myTurn, solo)
   const chat = useFarkleChat()
+  useWinCheer(game?.status === 'finished')
   const [confirmAction, setConfirmAction] = useState(null) // null | 'restart' | 'cancel'
   const [overlay, setOverlay] = useState(null)
   // Dice colour is a personal, per-device preference (the pack ships one texture per colour).
@@ -51,9 +52,9 @@ export default function FarkleGame({ onBack }) {
   }
   const seenHistoryRef = useRef(null)
 
-  const effectivePartnerUid = firebaseReady ? partnerUid : DEMO_PARTNER_UID
+  const effectivePartnerUid = opponentUid
   const mineLabel = myNameFor(user)
-  const partnerLabel = partnerNameFor(user)
+  const partnerLabel = solo ? 'Computer' : partnerNameFor(user)
   // Who someone is is always decided by uid, never by guessing from a name.
   const whoLabel = (uid) => (uid === user.uid ? 'You' : partnerLabel)
 
@@ -79,9 +80,16 @@ export default function FarkleGame({ onBack }) {
     const seen = seenHistoryRef.current
     seenHistoryRef.current = historyLength
     if (seen === null || historyLength <= seen || !latestEntry) return
-    const who = latestEntry.uid === user.uid ? 'You' : partnerNameFor(user)
+    const who = latestEntry.uid === user.uid ? 'You' : partnerLabel
     let next
-    if (latestEntry.kind === 'keep') {
+    if (latestEntry.kind === 'keep' && latestEntry.hot) {
+      const name = latestEntry.uid === user.uid ? myNameFor(user) : partnerLabel
+      next = {
+        kind: 'hot',
+        title: `${name} has ${latestEntry.turnScore.toLocaleString()} with all the dice!`,
+        sub: 'Six fresh dice — roll them all again 🎲',
+      }
+    } else if (latestEntry.kind === 'keep') {
       next = {
         kind: 'keep',
         title: `${who} scored +${latestEntry.points.toLocaleString()}`,
@@ -114,7 +122,7 @@ export default function FarkleGame({ onBack }) {
   function handleResetClick(action) {
     if (confirmAction === action) {
       setConfirmAction(null)
-      if (action === 'restart') handleStart()
+      if (action === 'restart') (solo ? handleStartSolo() : handleStart())
       else handleCancel()
       return
     }
@@ -123,12 +131,19 @@ export default function FarkleGame({ onBack }) {
 
   async function handleStart() {
     chat.clear()
-    await startGame()
+    setSolo(false)
+    await startGame(false)
+  }
+
+  async function handleStartSolo() {
+    setSolo(true)
+    await startGame(true)
   }
 
   async function handleCancel() {
-    chat.clear()
+    if (!solo) chat.clear()
     await cancelGame()
+    setSolo(false)
   }
 
   // Dice pulled into the keep area (the live selection), as their values.
@@ -181,7 +196,7 @@ Straight: 1500 points.
 3 pairs: 1500 points.
 
 First to ${targetScore.toLocaleString()} wins.`} />
-        <StartPanel gameKey="farkle" label="Farkle" emoji="🎲" onStart={handleStart} />
+        <StartPanel gameKey="farkle" label="Farkle" emoji="🎲" onStart={handleStart} onSolo={handleStartSolo} />
         {game?.history?.length > 0 && (
           <ScoreHistory game={game} myUid={user.uid} partnerUid={effectivePartnerUid} partnerLabel={partnerLabel} mineLabel={mineLabel} />
         )}
@@ -392,7 +407,7 @@ First to ${targetScore.toLocaleString()} wins.`} />
         )}
       </div>
 
-      <FarkleChat chat={chat} myUid={user.uid} partnerLabel={partnerLabel} />
+      {!solo && <FarkleChat chat={chat} myUid={user.uid} partnerLabel={partnerLabel} />}
     </div>
   )
 }
@@ -588,7 +603,9 @@ function EventOverlay({ overlay }) {
   const tone =
     overlay.kind === 'farkle'
       ? 'border-rose bg-ink/85 text-paper'
-      : overlay.kind === 'bank'
+      : overlay.kind === 'hot'
+        ? 'border-gold bg-rose/90 text-paper'
+        : overlay.kind === 'bank'
         ? 'border-gold bg-ink/85 text-paper'
         : 'border-white/40 bg-ink/70 text-paper'
   return (
@@ -597,7 +614,7 @@ function EventOverlay({ overlay }) {
         className={`rounded-2xl border px-6 py-4 text-center shadow-2xl backdrop-blur-sm ${tone}`}
         style={{ animation: 'farklePop 0.35s ease-out both' }}
       >
-        <p className={`font-display italic ${overlay.kind === 'keep' ? 'text-xl' : 'text-3xl'}`}>{overlay.title}</p>
+        <p className={`font-display italic ${overlay.kind === 'keep' ? 'text-xl' : overlay.kind === 'hot' ? 'text-2xl' : 'text-3xl'}`}>{overlay.title}</p>
         {overlay.sub && <p className="mt-1 font-body text-xs opacity-80">{overlay.sub}</p>}
       </div>
       <style>{`@keyframes farklePop { from { transform: scale(0.7); opacity: 0 } to { transform: scale(1); opacity: 1 } }`}</style>

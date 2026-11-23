@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { onValue, ref, set } from 'firebase/database'
 import { rtdb, firebaseReady } from '../../firebase'
 import { useAuth } from '../../context/AuthContext'
-import { usePongMatch } from '../../hooks/usePongMatch'
+import { useWinCheer } from '../../hooks/useWinCheer'
+import { usePongMatch, SOLO_KEY } from '../../hooks/usePongMatch'
 import EndGameButton from './EndGameButton'
 import GameIntro from './GameIntro'
 import { playSound } from '../../lib/sounds'
@@ -24,6 +25,7 @@ import {
 } from '../../lib/pong'
 import { myNameFor } from '../../lib/names'
 import StartPanel from './GameLobby'
+import { COMPUTER_LABEL, soloInProgress } from '../../lib/solo'
 
 const COUNTDOWN_FROM = 3
 const POINT_PAUSE_MS = 1000
@@ -52,7 +54,9 @@ const RIGHT_COLOR = '#e27d7a'
 // Firebase (demo mode) the partner is a slightly beatable AI.
 export default function PongGame({ onBack }) {
   const { user } = useAuth()
-  const { match, effectivePartnerUid, startMatch, recordGoal, endGame } = usePongMatch()
+  const [solo, setSolo] = useState(() => soloInProgress(SOLO_KEY))
+  const { match, effectivePartnerUid, startMatch, recordGoal, endGame } = usePongMatch(solo)
+  useWinCheer(match?.status === 'finished')
   const [targetChoice, setTargetChoice] = useState(DEFAULT_TARGET_SCORE)
   const [countdown, setCountdown] = useState(0)
 
@@ -83,7 +87,9 @@ export default function PongGame({ onBack }) {
   const isHost = !!match && match.hostUid === user.uid
   const flip = !!match && !isHost
   const mineLabel = myNameFor(user)
-  const partnerLabel = mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  const partnerLabel = solo ? COMPUTER_LABEL : mineLabel === 'Scott' ? 'Cristina' : 'Scott'
+  // Solo matches never touch the network: the other paddle is the AI.
+  const online = firebaseReady && !match?.solo
   const myScore = match?.scores?.[user.uid] || 0
   const partnerScore = match?.scores?.[effectivePartnerUid] || 0
   const myColor = isHost || !match ? LEFT_COLOR : RIGHT_COLOR
@@ -305,7 +311,7 @@ export default function PongGame({ onBack }) {
     let serveToward = Math.random() < 0.5
     const unsubscribers = []
 
-    if (firebaseReady) {
+    if (online) {
       unsubscribers.push(
         onValue(ref(rtdb, `pong/paddles/${effectivePartnerUid}`), (snap) => {
           const value = snap.val()
@@ -339,7 +345,7 @@ export default function PongGame({ onBack }) {
       const now = Date.now()
 
       const myHostX = flip ? FIELD_W - myScreenXRef.current : myScreenXRef.current
-      if (firebaseReady && time - lastPaddleSent > PADDLE_SEND_INTERVAL_MS) {
+      if (online && time - lastPaddleSent > PADDLE_SEND_INTERVAL_MS) {
         lastPaddleSent = time
         set(ref(rtdb, `pong/paddles/${user.uid}`), myHostX)
       }
@@ -348,13 +354,13 @@ export default function PongGame({ onBack }) {
         if (serveAt === Infinity && countdownRef.current <= 0) serveAt = now + 200
 
         // partner paddle: real (streamed) or AI in demo mode
-        if (!firebaseReady) {
+        if (!online) {
           const target = ball.vy < 0 ? ball.x : FIELD_W / 2
           const diff = target - partnerHostXRef.current
           const step = AI_MAX_SPEED * dt
           partnerHostXRef.current = clampPaddleX(partnerHostXRef.current + Math.max(-step, Math.min(step, diff)))
         }
-        if (firebaseReady) {
+        if (online) {
           const sample = partnerSampleRef.current
           const lead = Math.min(REMOTE_PADDLE_LEAD_MAX_S, (performance.now() - sample.at) / 1000)
           const predicted = clampPaddleX(sample.x + sample.vx * lead)
@@ -366,7 +372,7 @@ export default function PongGame({ onBack }) {
         if (ball.vx === 0 && ball.vy === 0) {
           if (now >= serveAt) ball = serveBall(serveToward)
         } else {
-          const { ball: next, event } = stepBall(ball, clampPaddleX(myHostX), renderedPartnerXRef.current, dt, firebaseReady ? REMOTE_PADDLE_SLACK : 0)
+          const { ball: next, event } = stepBall(ball, clampPaddleX(myHostX), renderedPartnerXRef.current, dt, online ? REMOTE_PADDLE_SLACK : 0)
           ball = next
           if (event === 'paddle') {
             hits += 1
@@ -384,7 +390,7 @@ export default function PongGame({ onBack }) {
         }
         renderedBallRef.current = { x: ball.x, y: ball.y }
 
-        if (firebaseReady && time - lastBallSent > SEND_INTERVAL_MS) {
+        if (online && time - lastBallSent > SEND_INTERVAL_MS) {
           lastBallSent = time
           set(ref(rtdb, 'pong/state'), { x: ball.x, y: ball.y, vx: ball.vx, vy: ball.vy, hits })
         }
@@ -469,7 +475,14 @@ export default function PongGame({ onBack }) {
           label="Pong"
           emoji="🏓"
           options={targetChoice}
-          onStart={(target) => startMatch(target ?? targetChoice)}
+          onStart={(target) => {
+            setSolo(false)
+            return startMatch(target ?? targetChoice, false)
+          }}
+          onSolo={(target) => {
+            setSolo(true)
+            return startMatch(target ?? targetChoice, true)
+          }}
         />
       </div>
     )

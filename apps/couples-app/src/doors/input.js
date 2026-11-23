@@ -32,6 +32,7 @@ export function createInput() {
   let debugPressed = false
   let roomPressed = null
   let mode = 'both'
+  let locked = false // online co-op: this device plays one fixed character
   let hintPressed = false
   let nextPressed = false
   let touchTogglePressed = false
@@ -48,8 +49,8 @@ export function createInput() {
     if (event.code === KEYS.hint) hintPressed = true
     if (event.code === KEYS.nextRoom) nextPressed = true
     if (event.code === KEYS.touchUi) touchTogglePressed = true
-    if (event.code === KEYS.switchCharacter) mode = mode === 'blue' ? 'pink' : 'blue'
-    if (event.code === KEYS.twoPlayers) mode = 'both'
+    if (event.code === KEYS.switchCharacter && !locked) mode = mode === 'blue' ? 'pink' : 'blue'
+    if (event.code === KEYS.twoPlayers && !locked) mode = 'both'
     const roomIndex = ROOM_KEYS.indexOf(event.code)
     if (roomIndex !== -1) roomPressed = roomIndex
   }
@@ -104,6 +105,9 @@ export function createInput() {
     touch,
     setMode(next) {
       mode = next
+    },
+    lock() {
+      locked = true
     },
     // [blue, pink]
     players: () => {

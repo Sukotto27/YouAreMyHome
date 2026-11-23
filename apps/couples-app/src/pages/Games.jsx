@@ -14,12 +14,13 @@ import RockPaperScissorsGame from '../components/games/RockPaperScissorsGame'
 import PongGame from '../components/games/PongGame'
 import BananagramsGame from '../components/games/BananagramsGame'
 import CardsAgainstCouplesGame from '../components/games/CardsAgainstCouplesGame'
+import TableRollGame from '../components/games/TableRollGame'
 import DoorsGame from '../components/games/DoorsGame'
 import { PartnerHereBadge } from '../components/games/GameLobby'
 
 export default function Games() {
   const location = useLocation()
-  const [view, setView] = useState(location.state?.view || 'menu') // 'menu' | 'draw' | 'madlibs' | 'story' | 'song' | 'farkle' | 'uno' | 'obstacleDrop' | 'rps' | 'pong' | 'bananagrams' | 'cac' | 'doors'
+  const [view, setView] = useState(location.state?.view || 'menu') // 'menu' | 'draw' | 'madlibs' | 'story' | 'song' | 'farkle' | 'uno' | 'obstacleDrop' | 'rps' | 'pong' | 'bananagrams' | 'cac' | 'tableRoll' | 'doors'
 
   usePublishGamePresence(view === 'menu' ? null : view)
   const { markGameOpened, invite } = useGameAttention()
@@ -50,6 +51,7 @@ export default function Games() {
   if (view === 'pong') return inGame(<PongGame onBack={() => setView('menu')} />)
   if (view === 'bananagrams') return inGame(<BananagramsGame onBack={() => setView('menu')} />)
   if (view === 'cac') return inGame(<CardsAgainstCouplesGame onBack={() => setView('menu')} />)
+  if (view === 'tableRoll') return inGame(<TableRollGame onBack={() => setView('menu')} />)
   if (view === 'doors') return <DoorsGame onBack={() => setView('menu')} />
 
   return (
@@ -65,6 +67,7 @@ export default function Games() {
       onSelectPong={() => setView('pong')}
       onSelectBananagrams={() => setView('bananagrams')}
       onSelectCac={() => setView('cac')}
+      onSelectTableRoll={() => setView('tableRoll')}
       onSelectDoors={() => setView('doors')}
     />
   )
